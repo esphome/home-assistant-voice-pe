@@ -8,38 +8,27 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#include <esp_http_client.h>
+
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/ring_buffer.h"
 
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t BUFFER_SIZE = 1024;
-
-// Volume table is borrowed from https://github.com/schreibfaul1/ESP32-audioI2S
-static const uint8_t VOLUME_TABLE[22] = {0,  1,  2,  3,  4,  6,  8,  10, 12, 14, 17,
-                                         20, 23, 27, 30, 34, 38, 43, 48, 52, 58, 64};
-
-enum class TaskEventType : uint8_t {
-  STARTING = 0,
-  STARTED,
-  PLAYING,
-  STOPPING,
-  STOPPED,
-  WARNING = 255,
+enum FeedType : uint8_t {
+  FILE,
+  URL,
 };
 
-struct TaskEvent {
-  TaskEventType type;
-  esp_err_t err;
-};
-
-struct DataEvent {
-  bool stop;
-  size_t len;
-  uint8_t data[BUFFER_SIZE];
+struct FeedCommandEvent {
+  const uint8_t *data;
+  size_t length;
+  bool stop = false;
+  FeedType feed_type;
 };
 
 class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAudioOut {
@@ -60,18 +49,38 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
   void stop() override;
 
   size_t play(const uint8_t *data, size_t length) override;
+  size_t play_file(const uint8_t *data, size_t length);
+  size_t play_url(const std::string &uri);
+  
+  // Directly writes to the input ring buffer
+  size_t write(const uint8_t *data, size_t length);
+  size_t free_bytes() { return this->input_ring_buffer_->free();}
 
   bool has_buffered_data() const override;
 
  protected:
   void start_();
   void watch_();
+  void stop_();
 
+  bool read_wav_header_();
+  bool initiate_client_(const std::string &new_uri);
+  
   static void player_task(void *params);
+  static void feed_task(void *params);
+
+  esp_http_client_handle_t client_ = nullptr;
 
   TaskHandle_t player_task_handle_{nullptr};
-  QueueHandle_t buffer_queue_;
-  QueueHandle_t event_queue_;
+  TaskHandle_t feed_task_handle_{nullptr};
+
+  QueueHandle_t play_event_queue_;
+  QueueHandle_t play_command_queue_;
+
+  QueueHandle_t feed_event_queue_;
+  QueueHandle_t feed_command_queue_;
+
+  std::unique_ptr<RingBuffer> input_ring_buffer_;
 
   i2s_bits_per_sample_t bits_per_sample_;
 

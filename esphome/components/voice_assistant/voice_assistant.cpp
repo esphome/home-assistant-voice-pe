@@ -684,7 +684,7 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       this->defer([this, text]() {
         this->tts_start_trigger_->trigger(text);
 #ifdef USE_SPEAKER
-        this->speaker_->start();
+        // this->speaker_->start();
 #endif
       });
       break;
@@ -709,6 +709,7 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 #endif
         this->tts_end_trigger_->trigger(url);
       });
+      this->speaker_->play_url(url);
       State new_state = this->local_output_ ? State::STREAMING_RESPONSE : State::IDLE;
       this->set_state_(new_state, new_state);
       break;
@@ -764,16 +765,16 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
     }
     case api::enums::VOICE_ASSISTANT_TTS_STREAM_START: {
 #ifdef USE_SPEAKER
-      this->wait_for_stream_end_ = true;
-      ESP_LOGD(TAG, "TTS stream start");
-      this->defer([this] { this->tts_stream_start_trigger_->trigger(); });
+      // this->wait_for_stream_end_ = true;
+      // ESP_LOGD(TAG, "TTS stream start");
+      // this->defer([this] { this->tts_stream_start_trigger_->trigger(); });
 #endif
       break;
     }
     case api::enums::VOICE_ASSISTANT_TTS_STREAM_END: {
 #ifdef USE_SPEAKER
-      this->stream_ended_ = true;
-      ESP_LOGD(TAG, "TTS stream end");
+      // this->stream_ended_ = true;
+      // ESP_LOGD(TAG, "TTS stream end");
 #endif
       break;
     }
