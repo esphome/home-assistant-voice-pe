@@ -4,11 +4,18 @@
 
 #include "../i2s_audio.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
+#include "esphome/core/ring_buffer.h"
 
 namespace esphome {
 namespace i2s_audio {
+
+
+
 
 class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, public Component {
  public:
@@ -36,6 +43,14 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
 
  protected:
+  static void read_task_(void *params);
+  void watch_();
+
+  TaskHandle_t read_task_handle_{nullptr};
+  QueueHandle_t event_queue_;
+  QueueHandle_t command_queue_;
+  std::unique_ptr<RingBuffer> output_ring_buffer_;
+
   void start_();
   void stop_();
   void read_();
@@ -50,8 +65,6 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   uint32_t sample_rate_;
   i2s_bits_per_sample_t bits_per_sample_;
   bool use_apll_;
-
-  HighFrequencyLoopRequester high_freq_;
 };
 
 }  // namespace i2s_audio

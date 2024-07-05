@@ -9,6 +9,26 @@
 namespace esphome {
 namespace i2s_audio {
 
+
+enum class TaskEventType : uint8_t {
+  STARTING = 0,
+  STARTED,
+  RUNNING,
+  STOPPING,
+  STOPPED,
+  WARNING = 255,
+};
+
+
+struct CommandEvent {
+  bool stop;
+};
+
+struct TaskEvent {
+  TaskEventType type;
+  esp_err_t err;
+};
+
 class I2SAudioComponent;
 
 class I2SAudioIn : public Parented<I2SAudioComponent> {};
