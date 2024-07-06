@@ -87,8 +87,8 @@ void I2SAudioMicrophone::read_task_(void *params) {
       .channel_format = this_microphone->channel_,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 4,
-      .dma_buf_len = 256,
+      .dma_buf_count = 8,
+      .dma_buf_len = 128,
       .use_apll = this_microphone->use_apll_,
       .tx_desc_auto_clear = false,
       .fixed_mclk = 0,
@@ -159,6 +159,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
   event.type = TaskEventType::STARTED;
   xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
+  std::vector<int16_t> samples;
 
   while (true) {
     if (xQueueReceive(this_microphone->command_queue_, &command_event, 0) == pdTRUE) {
@@ -182,11 +183,11 @@ void I2SAudioMicrophone::read_task_(void *params) {
       // if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
       //   this_microphone->output_ring_buffer_->write(buffer, bytes_read);
       // } else if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_32BIT) {
-        std::vector<int16_t> samples;
+
         size_t samples_read = bytes_read / sizeof(int32_t);
         samples.resize(samples_read);
         for (size_t i = 0; i < samples_read; i++) {
-          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 14;
+          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 14;    // We are amplifying by a factor of 4 by only shifting 16 bits...
           samples[i] = clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
         }
         size_t bytes_free = this_microphone->output_ring_buffer_->free();
@@ -230,7 +231,7 @@ void I2SAudioMicrophone::start_() {
     return;
   }
 
-  xTaskCreate(I2SAudioMicrophone::read_task_, "microphone_task", 8192, (void *) this, 0, &this->read_task_handle_);
+  xTaskCreate(I2SAudioMicrophone::read_task_, "microphone_task", 8192, (void *) this, 23, &this->read_task_handle_);
 }
 
 void I2SAudioMicrophone::stop() {
@@ -315,6 +316,8 @@ void I2SAudioMicrophone::watch_() {
       case TaskEventType::WARNING:
         ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(event.err));
         this->status_set_warning();
+        break;
+      case TaskEventType::IDLE:
         break;
     }
   }
