@@ -66,7 +66,6 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
 
   size_t play(const uint8_t *data, size_t length) override;
   size_t play_file(const uint8_t *data, size_t length);
-  size_t play_url(const std::string &uri);
   
   // Directly writes to the input ring buffer
   size_t write(const uint8_t *data, size_t length);
