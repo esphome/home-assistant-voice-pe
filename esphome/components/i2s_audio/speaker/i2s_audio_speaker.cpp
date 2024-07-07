@@ -13,7 +13,7 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t SAMPLE_RATE_HZ = 16000;     // 16 kHz
+static const size_t SAMPLE_RATE_HZ = 16000;   // 16 kHz
 static const size_t RING_BUFFER_LENGTH = 64;  // 0.064 seconds
 static const size_t RING_BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * RING_BUFFER_LENGTH;
 static const size_t BUFFER_COUNT = 10;
@@ -158,7 +158,7 @@ void I2SAudioSpeaker::player_task(void *params) {
     size_t bytes_to_read = std::min(BUFFER_SIZE * sizeof(int16_t), this_speaker->input_ring_buffer_->available());
     size_t bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer, bytes_to_read, 0);
 
-    if (bytes_read > 0) {
+    if ((bytes_to_read > 0) && (bytes_read > 0)) {
       size_t bytes_written;
 
       // Assumes the output bits per sample is configured it 32 bits
@@ -166,11 +166,13 @@ void I2SAudioSpeaker::player_task(void *params) {
                        this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       if (bytes_written != bytes_read) {
         event.type = TaskEventType::WARNING;
-        event.err = ESP_ERR_TIMEOUT;
+        event.err = ESP_ERR_TIMEOUT;    // TODO: probably not the correct error...
         xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
       }
-
       event.type = TaskEventType::RUNNING;
+      xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
+    } else {
+      event.type = TaskEventType::IDLE;
       xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
     }
   }
@@ -255,7 +257,11 @@ void I2SAudioSpeaker::watch_() {
       case TaskEventType::STARTED:
         ESP_LOGD(TAG, "Started I2S Audio Speaker");
         break;
+      case TaskEventType::IDLE:
+        this->is_playing_ = false;
+        break;
       case TaskEventType::RUNNING:
+        this->is_playing_ = true;
         this->status_clear_warning();
         break;
       case TaskEventType::STOPPING:
@@ -298,7 +304,7 @@ void I2SAudioSpeaker::watch_() {
       case TaskEventType::STOPPED:
         vTaskDelete(this->feed_task_handle_);
         this->feed_task_handle_ = nullptr;
- 
+
         xQueueReset(this->feed_event_queue_);
         xQueueReset(this->feed_command_queue_);
 
@@ -308,11 +314,13 @@ void I2SAudioSpeaker::watch_() {
         ESP_LOGW(TAG, "Error feeding: %s", esp_err_to_name(event.err));
         this->status_set_warning();
         break;
+      case TaskEventType::IDLE:
+        break;
     }
   }
-
 }
 
+// Probably broken...
 size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length) {
   size_t remaining = length;
   size_t index = 0;
@@ -321,7 +329,6 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length) {
     size_t written = this->write(data + index, remaining);
     remaining -= written;
     index += written;
-    // ESP_LOGD(TAG, "remaining bytes: %d", remaining);
     delay(10);
   }
   return index;
@@ -334,23 +341,11 @@ size_t I2SAudioSpeaker::play_file(const uint8_t *data, size_t length) {
   }
 
   FeedCommandEvent feed_command_event;
-  feed_command_event.feed_type = FeedType::FILE,
-  feed_command_event.data = data;
+  feed_command_event.feed_type = FeedType::FILE, feed_command_event.data = data;
   feed_command_event.length = length;
   xQueueSend(this->feed_command_queue_, &feed_command_event, portMAX_DELAY);
 
   return length;
-  // size_t remaining = length;
-  // size_t index = 0;
-  // while (remaining > 0) {
-  //   size_t to_send_length = std::min(remaining, BUFFER_SIZE);
-  //   size_t written = this->write(data + index, remaining);
-  //   remaining -= written;
-  //   index += written;
-  //   // ESP_LOGD(TAG, "remaining bytes: %d", remaining);
-  //   delay(10);
-  // }
-  // return index;
 }
 
 void I2SAudioSpeaker::feed_task(void *params) {
@@ -361,7 +356,6 @@ void I2SAudioSpeaker::feed_task(void *params) {
 
   event.type = TaskEventType::STARTING;
   xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
 
   FeedType feed_type;
   const uint8_t *data;
@@ -402,83 +396,21 @@ void I2SAudioSpeaker::feed_task(void *params) {
       current = 0;
     }
 
-    while (remaining > 0) {
+    if (remaining > 0) {
       if (feed_type == FeedType::FILE) {
         size_t bytes_written = this_speaker->write(data + current, remaining);
         remaining -= bytes_written;
         current += bytes_written;
       }
-      else {
-        size_t read_bytes = this_speaker->free_bytes();
-        size_t received_len = esp_http_client_read(this_speaker->client_, (char *) receive_buffer, read_bytes);
-
-        this_speaker->input_ring_buffer_->write((void *) receive_buffer, received_len);
-      }
-      
-      delay(10);
     }
   }
-  
+
   event.type = TaskEventType::STOPPED;
   xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-  
+
   while (true) {
     delay(10);
   }
-}
-
-bool I2SAudioSpeaker::initiate_client_(const std::string &new_uri) {
-  esp_http_client_config_t config = {
-      // .url = "http://192.168.1.35:8123/media/local/"
-      //        "call_me_16000.wav?authSig=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-      //        "eyJpc3MiOiI2NjIzMTVmZDJkY2Q0YTEwOWI4MDYwOTM0YWZjMzgyMiIsInBhdGgiOiIvbWVkaWEvbG9jYWwvY2FsbF9tZV8xNjAwMC53Y"
-      //        "XYiLCJwYXJhbXMiOltdLCJpYXQiOjE3MjAyMDUwNDUsImV4cCI6MTcyMDI5MTQ0NX0."
-      //        "Ln6RD54NiRz60bb8MxIrtP9rzRnAtExYCBtPct_C5BQ",  // 
-      .url = new_uri.c_str(),
-      .cert_pem = nullptr,
-      .disable_auto_redirect = false,
-      .max_redirection_count = 10,
-  };
-  this->client_ = esp_http_client_init(&config);
-  esp_err_t err;
-  if ((err = esp_http_client_open(this->client_ , 0)) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(this->client_ );
-    return false;
-  }
-
-  int content_length = esp_http_client_fetch_headers(this->client_ );
-  ESP_LOGD(TAG, "content_length = %d", content_length);
-  if (content_length <= 0) {
-    ESP_LOGE(TAG, "Failed to get content length: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(this->client_ );
-    return false;
-  }
-
-  if (!this->read_wav_header_()) {
-    ESP_LOGE(TAG, "Failed to read wave file header");
-    esp_http_client_cleanup(this->client_ );
-    return false;
-  }
-  return true;
-}
-
-size_t I2SAudioSpeaker::play_url(const std::string &uri) {
-  ESP_LOGD(TAG, "playing url");
-  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
-    this->start_();
-  }
-
-  this->initiate_client_(uri);
-
-
-  FeedCommandEvent feed_command_event;
-  feed_command_event.feed_type = FeedType::URL,
-  feed_command_event.data = nullptr;
-  feed_command_event.length = 1;
-  xQueueSend(this->feed_command_queue_, &feed_command_event, portMAX_DELAY);
-
-  return 1;
 }
 
 size_t I2SAudioSpeaker::write(const uint8_t *data, size_t length) {
@@ -496,111 +428,6 @@ size_t I2SAudioSpeaker::write(const uint8_t *data, size_t length) {
 }
 
 bool I2SAudioSpeaker::has_buffered_data() const { return (this->input_ring_buffer_->available() > 0); }
-
-bool I2SAudioSpeaker::read_wav_header_() {
-  uint8_t header_control_counter = 0;
-  char data[4];
-  uint8_t subchunk_extra_data = 0;
-
-  while (header_control_counter <= 10) {
-    size_t bytes_read = esp_http_client_read(this->client_, data, 4);
-    if (bytes_read != 4) {
-      ESP_LOGE(TAG, "Failed to read from header file");
-    }
-
-    if (header_control_counter == 0) {
-      ++header_control_counter;
-      if ((data[0] != 'R') || (data[1] != 'I') || (data[2] != 'F') || (data[3] != 'F')) {
-        ESP_LOGW(TAG, "file has no RIFF tag");
-        return false;
-      }
-    } else if (header_control_counter == 1) {
-      ++header_control_counter;
-      uint32_t chunk_size = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-    } else if (header_control_counter == 2) {
-      ++header_control_counter;
-      if ((data[0] != 'W') || (data[1] != 'A') || (data[2] != 'V') || (data[3] != 'E')) {
-        ESP_LOGW(TAG, "format tag is not WAVE");
-        return false;
-      }
-    } else if (header_control_counter == 3) {
-      ++header_control_counter;
-      if ((data[0] != 'f') || (data[1] != 'm') || (data[2] != 't')) {
-        ESP_LOGW(TAG, "Improper wave file header");
-        return false;
-      }
-    } else if (header_control_counter == 4) {
-      ++header_control_counter;
-
-      uint32_t chunk_size = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-
-      if (chunk_size != 16) {
-        ESP_LOGW(TAG, "Audio is not PCM data, can't play");
-        return false;
-      }
-    } else if (header_control_counter == 5) {
-      ++header_control_counter;
-
-      uint32_t chunk_size = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-
-      // if (chunk_size != 16) {
-      //   ESP_LOGW(TAG, "Audio is not PCM data, can't play");
-      //   return false;
-      // }
-    } else if (header_control_counter == 6) {
-      ++header_control_counter;
-
-      uint16_t fc = (uint16_t) (data[0] + (data[1] << 8));         // Format code
-      uint16_t nic = (uint16_t) ((data[2] + 2) + (data[3] << 8));  // Number of interleaved channels
-
-      // if (fc != 1) {
-      //   ESP_LOGW(TAG, "Audio is not PCM data, can't play");
-      //   return false;
-      // }
-
-      if (nic > 2) {
-        ESP_LOGW(TAG, "Can only play mono or stereo channel audio");
-        return false;
-      }
-      // this->stream_info_.channels = (speaker::AudioChannels) nic;
-    } else if (header_control_counter == 7) {
-      ++header_control_counter;
-
-      uint32_t sample_rate = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-
-      // this->stream_info_.sample_rate = sample_rate;
-    } else if (header_control_counter == 8) {
-      ++header_control_counter;
-
-      uint32_t byte_rate = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-    } else if (header_control_counter == 8) {
-      ++header_control_counter;
-
-      uint16_t block_align = (uint16_t) (data[0] + (data[1] << 8));
-      uint16_t bits_per_sample = (uint16_t) ((data[2] + 2) + (data[3] << 8));
-
-      if ((bits_per_sample != 16)) {
-        ESP_LOGW(TAG, "Can only play wave flies with 16 bits per sample");
-        return false;
-      }
-      // this->stream_info_.bits_per_sample = (speaker::AudioSamplesPerBit) bits_per_sample;
-    } else if (header_control_counter == 9) {
-      ++header_control_counter;
-      if ((data[0] != 'd') || (data[1] != 'a') || (data[2] != 't') || (data[3] != 'a')) {
-        ESP_LOGW(TAG, "Improper Wave Header");
-        return false;
-      }
-    } else if (header_control_counter == 10) {
-      ++header_control_counter;
-      uint32_t chunk_size = (uint32_t) (data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24));
-    } else {
-      ESP_LOGW(TAG, "Unknown state when reading wave file header");
-      return false;
-    }
-  }
-
-  return true;
-}
 
 }  // namespace i2s_audio
 }  // namespace esphome

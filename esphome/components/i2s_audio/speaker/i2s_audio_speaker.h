@@ -31,6 +31,20 @@ struct FeedCommandEvent {
   FeedType feed_type;
 };
 
+enum StreamChannels :uint8_t {
+  STREAM_CHANNELS_MONO = 1,
+  STREAM_CHANNELS_STEREO = 2,
+};
+enum StreamBitsPerSample :uint8_t {
+  STREAM_BITS_PER_SAMPLE_16 = I2S_BITS_PER_SAMPLE_16BIT,
+  STREAM_BITS_PER_SAMPLE_32 = I2S_BITS_PER_SAMPLE_32BIT,
+};
+struct StreamInfo {
+  StreamChannels channels = STREAM_CHANNELS_MONO;
+  StreamBitsPerSample bits_per_sample = STREAM_BITS_PER_SAMPLE_16;
+  uint32_t sample_rate = 16000;
+};
+
 class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAudioOut {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
@@ -44,6 +58,8 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
 #endif
   void set_external_dac_channels(uint8_t channels) { this->external_dac_channels_ = channels; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+
+  bool is_playing() { return this->is_playing_; }
 
   void start() override;
   void stop() override;
@@ -68,6 +84,8 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
   
   static void player_task(void *params);
   static void feed_task(void *params);
+
+  bool is_playing_{false};
 
   esp_http_client_handle_t client_ = nullptr;
 
