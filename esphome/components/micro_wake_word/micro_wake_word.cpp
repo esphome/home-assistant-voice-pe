@@ -127,21 +127,21 @@ void MicroWakeWord::loop() {
       break;
     case State::STOP_MICROPHONE:
       ESP_LOGD(TAG, "Stopping Microphone");
-      this->microphone_->stop();
+      // this->microphone_->stop();
       this->set_state_(State::STOPPING_MICROPHONE);
       this->high_freq_.stop();
       this->unload_models_();
       this->deallocate_buffers_();
       break;
     case State::STOPPING_MICROPHONE:
-      if (this->microphone_->is_stopped()) {
+      // if (this->microphone_->is_stopped()) {
         this->set_state_(State::IDLE);
         if (this->detected_) {
           this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
           this->detected_ = false;
           this->detected_wake_word_ = "";
         }
-      }
+      // }
       break;
   }
 }
