@@ -9,7 +9,7 @@ from esphome.components import media_player, speaker
 
 # from .. import nabu_ns, NabuComponent
 
-CODEOWNERS = ["@synesthesiam"]
+CODEOWNERS = ["@synesthesiam", "@kahrendt"]
 DEPENDENCIES = ["media_player"]
 
 nabu_ns = cg.esphome_ns.namespace("nabu")
