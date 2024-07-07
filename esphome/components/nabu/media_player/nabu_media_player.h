@@ -43,9 +43,11 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   bool play_intent_{false};
 
   std::unique_ptr<HTTPStreamer> media_streamer_;
+  std::unique_ptr<HTTPStreamer> announcement_streamer_;
 
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
   bool is_playing_{false};
+  bool is_announcing_{false};
   uint8_t *transfer_buffer_{nullptr};
 
   int header_control_counter_{0};
