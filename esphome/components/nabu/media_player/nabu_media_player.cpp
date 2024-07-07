@@ -9,18 +9,13 @@ namespace esphome {
 namespace nabu {
 
 static const char *const TAG = "nabu_media_player";
-static const size_t BUFFER_MS = 500;
-// static const size_t BUFFER_SIZE = BUFFER_MS * (16000 / 1000) * sizeof(int16_t);
-static const size_t RECEIVE_SIZE = 1024;
-static const size_t SPEAKER_BUFFER_SIZE = 16 * RECEIVE_SIZE;
-
-static const size_t QUEUE_COUNT = 10;
+static const size_t TRANSFER_BUFFER_SIZE = 8192;
 
 void NabuMediaPlayer::setup() {
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  this->transfer_buffer_ = allocator.allocate(SPEAKER_BUFFER_SIZE * sizeof(int16_t));
+  this->transfer_buffer_ = allocator.allocate(TRANSFER_BUFFER_SIZE * sizeof(int16_t));
   if (this->transfer_buffer_ == nullptr) {
     ESP_LOGW(TAG, "Could not allocate transfer buffer");
     this->mark_failed();
@@ -31,10 +26,6 @@ void NabuMediaPlayer::setup() {
 }
 
 void NabuMediaPlayer::watch_() {
-  // if (this->media_streamer_ == nullptr) {
-  //   return;
-  // }
-
   TaskEvent event;
 
   if (this->announcement_streamer_ != nullptr) {
@@ -47,32 +38,27 @@ void NabuMediaPlayer::watch_() {
           ESP_LOGD(TAG, "Started Announcement Playback");
           break;
         case EventType::IDLE:
-          this->is_announcing_ = false;
-
-          // if (this->announcement_streamer_->get_current_uri().empty()) {
-          //   this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
-          // } else {
-          //   this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
-          // }
-
           break;
         case EventType::RUNNING:
-          this->is_announcing_ = true;
-          this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-
           this->status_clear_warning();
           break;
         case EventType::STOPPING:
           ESP_LOGD(TAG, "Stopping Announcement Playback");
           break;
         case EventType::STOPPED:
-          this->announcement_streamer_->stop();
-          if (!this->is_playing_) {
-            this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
-          }
-
           this->is_announcing_ = false;
+          this->announcement_streamer_->stop();
 
+          if (this->is_paused_) {
+            this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
+            this->publish_state();
+          } else if (this->has_http_media_data_()) {
+            this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+            this->publish_state();
+          } else {
+            this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+            this->publish_state();
+          }
           ESP_LOGD(TAG, "Stopped Announcement Playback");
           break;
         case EventType::WARNING:
@@ -83,7 +69,7 @@ void NabuMediaPlayer::watch_() {
     }
   }
 
-  if (!this->is_announcing_ && this->media_streamer_ != nullptr) {
+  if (this->media_streamer_ != nullptr) {
     while (this->media_streamer_->read_event(&event)) {
       switch (event.type) {
         case EventType::STARTING:
@@ -93,19 +79,10 @@ void NabuMediaPlayer::watch_() {
           ESP_LOGD(TAG, "Started HTTP Media Playback");
           break;
         case EventType::IDLE:
-          this->is_playing_ = false;
-
-          if (this->media_streamer_->get_current_uri().empty()) {
-            this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
-          } else {
-            this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
-          }
-
+          this->is_connected_ = false;
           break;
         case EventType::RUNNING:
-          this->is_playing_ = true;
-          this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
-
+          this->is_connected_ = true;
           this->status_clear_warning();
           break;
         case EventType::STOPPING:
@@ -113,7 +90,14 @@ void NabuMediaPlayer::watch_() {
           break;
         case EventType::STOPPED:
           this->media_streamer_->stop();
-          this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+
+          this->is_connected_ = false;
+          this->is_paused_ = false;
+
+          if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+            this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+            this->publish_state();
+          }
 
           ESP_LOGD(TAG, "Stopped HTTP Media Playback");
           break;
@@ -124,13 +108,12 @@ void NabuMediaPlayer::watch_() {
       }
     }
   }
-  this->publish_state();
 }
 
 void NabuMediaPlayer::loop() {
   this->watch_();
 
-  if (this->is_announcing_) {
+  if ((this->announcement_streamer_ != nullptr) && (this->announcement_streamer_->available() > 0)) {
     size_t speaker_free_bytes = this->speaker_->free_bytes();
     size_t bytes_read = this->announcement_streamer_->read(this->transfer_buffer_, speaker_free_bytes);
 
@@ -138,12 +121,13 @@ void NabuMediaPlayer::loop() {
       this->speaker_->write(this->transfer_buffer_, bytes_read);
     }
 
+    this->is_announcing_ = true;
     return;
   }
 
-  if (this->is_playing_) {
-    size_t speaker_free_bytes = this->speaker_->free_bytes();
-    size_t bytes_read = this->media_streamer_->read(this->transfer_buffer_, speaker_free_bytes);
+  if (this->has_http_media_data_() && !this->is_announcing_ && !this->is_paused_) {
+    size_t bytes_to_read = std::min(this->speaker_->free_bytes(), TRANSFER_BUFFER_SIZE);
+    size_t bytes_read = this->media_streamer_->read(this->transfer_buffer_, bytes_to_read);
 
     if (bytes_read > 0) {
       this->speaker_->write(this->transfer_buffer_, bytes_read);
@@ -152,7 +136,7 @@ void NabuMediaPlayer::loop() {
 }
 
 void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
-  MediaCommandEvent media_command_event;
+  CommandEvent command_event;
   if (call.get_media_url().has_value()) {
     std::string new_uri = call.get_media_url().value();
 
@@ -164,8 +148,12 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       this->announcement_streamer_->start();
       this->announcement_streamer_->set_current_uri(new_uri);
 
-      media_command_event.command = media_player::MEDIA_PLAYER_COMMAND_PLAY;
-      this->announcement_streamer_->send_command(&media_command_event);
+      command_event.command = CommandEventType::START;
+      this->announcement_streamer_->send_command(&command_event);
+
+      this->is_announcing_ = true;
+      this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+      this->publish_state();
     } else {
       if (this->media_streamer_ == nullptr) {
         this->media_streamer_ = make_unique<HTTPStreamer>();
@@ -174,8 +162,14 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       this->media_streamer_->start();
       this->media_streamer_->set_current_uri(new_uri);
 
-      media_command_event.command = media_player::MEDIA_PLAYER_COMMAND_PLAY;
-      this->media_streamer_->send_command(&media_command_event);
+      command_event.command = CommandEventType::START;
+      this->media_streamer_->send_command(&command_event);
+
+      this->is_paused_ = false;
+      if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+        this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+        this->publish_state();
+      }
     }
     return;
   }
@@ -188,32 +182,53 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   if (call.get_command().has_value()) {
     switch (call.get_command().value()) {
       case media_player::MEDIA_PLAYER_COMMAND_PLAY:
-        if (state == media_player::MEDIA_PLAYER_STATE_PAUSED) {
-          media_command_event.command = call.get_command().value();
-          this->media_streamer_->send_command(&media_command_event);
+        if (this->is_paused_) {
+          this->is_paused_ = false;
+
+          if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+            this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+            this->publish_state();
+          }
         }
         break;
       case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-        media_command_event.command = call.get_command().value();
-        this->media_streamer_->send_command(&media_command_event);
+        this->is_paused_ = true;
+
+        if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+          this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
+          this->publish_state();
+        }
         break;
       case media_player::MEDIA_PLAYER_COMMAND_STOP:
-        media_command_event.command = call.get_command().value();
-        this->media_streamer_->send_command(&media_command_event);
+        command_event.command = CommandEventType::STOP;
+        this->media_streamer_->send_command(&command_event);
+
+        this->is_paused_ = false;
+
+        if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+          this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+          this->publish_state();
+        }
         break;
       case media_player::MEDIA_PLAYER_COMMAND_MUTE:
-        this->is_playing_ = false;
         break;
       case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
-        this->is_playing_ = true;
         break;
       case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
-        if (state == media_player::MEDIA_PLAYER_STATE_PAUSED) {
-          media_command_event.command = media_player::MEDIA_PLAYER_COMMAND_PLAY;
-          this->media_streamer_->send_command(&media_command_event);
+        if (this->is_paused_) {
+          this->is_paused_ = false;
+
+          if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+            this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+            this->publish_state();
+          }
         } else {
-          media_command_event.command = media_player::MEDIA_PLAYER_COMMAND_PAUSE;
-          this->media_streamer_->send_command(&media_command_event);
+          this->is_paused_ = true;
+
+          if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
+            this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
+            this->publish_state();
+          }
         }
         break;
         //   case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP: {
@@ -236,6 +251,16 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
         break;
     }
   }
+}
+
+bool NabuMediaPlayer::has_http_media_data_() {
+  if (this->media_streamer_ == nullptr)
+    return false;
+  
+  if ((this->media_streamer_->available() > 0) || this->is_connected_)
+    return true;
+  
+  return false;
 }
 
 // pausing is only supported if destroy_pipeline_on_stop is disabled

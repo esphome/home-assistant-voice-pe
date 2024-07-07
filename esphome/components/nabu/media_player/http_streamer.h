@@ -3,7 +3,6 @@
 #ifdef USE_ESP_IDF
 
 #include "esphome/core/ring_buffer.h"
-#include "esphome/components/media_player/media_player.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -21,15 +20,16 @@ enum class EventType : uint8_t {
   STOPPED,
   WARNING = 255,
 };
-
-struct MediaCommandEvent {
-  media_player::MediaPlayerCommand command;
-  // bool stop;
-};
-
 struct TaskEvent {
   EventType type;
   esp_err_t err;
+};
+enum CommandEventType : uint8_t {
+    START,
+    STOP,
+};
+struct CommandEvent {
+    CommandEventType command;
 };
 
 class HTTPStreamer {
@@ -64,7 +64,7 @@ class HTTPStreamer {
   /// @brief Returns the number of bytes available to read from the ring buffer
   size_t available() { return this->output_ring_buffer_->available(); }
 
-  BaseType_t send_command(MediaCommandEvent *command, TickType_t ticks_to_wait = portMAX_DELAY) {
+  BaseType_t send_command(CommandEvent *command, TickType_t ticks_to_wait = portMAX_DELAY) {
     return xQueueSend(this->command_queue_, command, ticks_to_wait);
   }
 
@@ -80,6 +80,8 @@ class HTTPStreamer {
 
   void set_stream_uri_(esp_http_client_handle_t *client, const std::string &new_uri);
   void cleanup_(esp_http_client_handle_t *client);
+
+  esp_http_client_handle_t client_ = nullptr;
 
   std::string current_uri_{};
 

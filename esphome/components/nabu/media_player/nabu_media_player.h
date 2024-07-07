@@ -44,14 +44,18 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
 
   std::unique_ptr<HTTPStreamer> media_streamer_;
   std::unique_ptr<HTTPStreamer> announcement_streamer_;
+  EventType media_streamer_state_{EventType::STOPPED};
+  EventType announcement_streamer_state_{EventType::STOPPED};
 
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
-  bool is_playing_{false};
-  bool is_announcing_{false};
+  bool is_connected_{false};  // whether the media streamer has an http connection for new media
+  bool is_announcing_{false}; // whether an announcement is playing
+  bool is_paused_{false};     // whether the media player has been requested to be in a paused state
   uint8_t *transfer_buffer_{nullptr};
 
   int header_control_counter_{0};
 
+  bool has_http_media_data_();
   bool read_wav_header_(esp_http_client_handle_t *client);
   // speaker::StreamInfo stream_info_{
   //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
