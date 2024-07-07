@@ -353,31 +353,31 @@ void VoiceAssistant::loop() {
 #ifdef USE_SPEAKER
       if (this->speaker_ != nullptr) {
         ssize_t received_len = 0;
-        if (this->audio_mode_ == AUDIO_MODE_UDP) {
-          if (this->speaker_buffer_index_ + RECEIVE_SIZE < SPEAKER_BUFFER_SIZE) {
-            received_len = this->socket_->read(this->speaker_buffer_ + this->speaker_buffer_index_, RECEIVE_SIZE);
-            if (received_len > 0) {
-              this->speaker_buffer_index_ += received_len;
-              this->speaker_buffer_size_ += received_len;
-              this->speaker_bytes_received_ += received_len;
-            }
-          } else {
-            ESP_LOGD(TAG, "Receive buffer full");
-          }
-        }
+        // if (this->audio_mode_ == AUDIO_MODE_UDP) {
+        //   if (this->speaker_buffer_index_ + RECEIVE_SIZE < SPEAKER_BUFFER_SIZE) {
+        //     received_len = this->socket_->read(this->speaker_buffer_ + this->speaker_buffer_index_, RECEIVE_SIZE);
+        //     if (received_len > 0) {
+        //       this->speaker_buffer_index_ += received_len;
+        //       this->speaker_buffer_size_ += received_len;
+        //       this->speaker_bytes_received_ += received_len;
+        //     }
+        //   } else {
+        //     ESP_LOGD(TAG, "Receive buffer full");
+        //   }
+        // }
         // Build a small buffer of audio before sending to the speaker
-        bool end_of_stream = this->stream_ended_ && (this->audio_mode_ == AUDIO_MODE_API || received_len < 0);
-        if (this->speaker_bytes_received_ > RECEIVE_SIZE * 4 || end_of_stream)
-          this->write_speaker_();
-        if (this->wait_for_stream_end_) {
-          this->cancel_timeout("playing");
-          if (end_of_stream) {
-            ESP_LOGD(TAG, "End of audio stream received");
-            this->cancel_timeout("speaker-timeout");
-            this->set_state_(State::RESPONSE_FINISHED, State::RESPONSE_FINISHED);
-          }
-          break;  // We dont want to timeout here as the STREAM_END event will take care of that.
-        }
+        // bool end_of_stream = this->stream_ended_ && (this->audio_mode_ == AUDIO_MODE_API || received_len < 0);
+        // if (this->speaker_bytes_received_ > RECEIVE_SIZE * 4 || end_of_stream)
+        //   this->write_speaker_();
+        // if (this->wait_for_stream_end_) {
+        //   this->cancel_timeout("playing");
+        //   if (end_of_stream) {
+        //     ESP_LOGD(TAG, "End of audio stream received");
+        //     this->cancel_timeout("speaker-timeout");
+        //     this->set_state_(State::RESPONSE_FINISHED, State::RESPONSE_FINISHED);
+        //   }
+        //   break;  // We dont want to timeout here as the STREAM_END event will take care of that.
+        // }
         playing = this->speaker_->is_running();
       }
 #endif
@@ -397,10 +397,10 @@ void VoiceAssistant::loop() {
     case State::RESPONSE_FINISHED: {
 #ifdef USE_SPEAKER
       if (this->speaker_ != nullptr) {
-        if (this->speaker_buffer_size_ > 0) {
-          this->write_speaker_();
-          break;
-        }
+        // if (this->speaker_buffer_size_ > 0) {
+        //   this->write_speaker_();
+        //   break;
+        // }
         if (this->speaker_->has_buffered_data() || this->speaker_->is_running()) {
           break;
         }
@@ -427,18 +427,18 @@ void VoiceAssistant::loop() {
 
 #ifdef USE_SPEAKER
 void VoiceAssistant::write_speaker_() {
-  if (this->speaker_buffer_size_ > 0) {
-    size_t write_chunk = std::min<size_t>(this->speaker_buffer_size_, 4 * 1024);
-    size_t written = this->speaker_->play(this->speaker_buffer_, write_chunk);
-    if (written > 0) {
-      memmove(this->speaker_buffer_, this->speaker_buffer_ + written, this->speaker_buffer_size_ - written);
-      this->speaker_buffer_size_ -= written;
-      this->speaker_buffer_index_ -= written;
-      this->set_timeout("speaker-timeout", 5000, [this]() { this->speaker_->stop(); });
-    } else {
-      ESP_LOGV(TAG, "Speaker buffer full, trying again next loop");
-    }
-  }
+  // if (this->speaker_buffer_size_ > 0) {
+  //   size_t write_chunk = std::min<size_t>(this->speaker_buffer_size_, 4 * 1024);
+  //   size_t written = this->speaker_->play(this->speaker_buffer_, write_chunk);
+  //   if (written > 0) {
+  //     memmove(this->speaker_buffer_, this->speaker_buffer_ + written, this->speaker_buffer_size_ - written);
+  //     this->speaker_buffer_size_ -= written;
+  //     this->speaker_buffer_index_ -= written;
+  //     this->set_timeout("speaker-timeout", 5000, [this]() { this->speaker_->stop(); });
+  //   } else {
+  //     ESP_LOGV(TAG, "Speaker buffer full, trying again next loop");
+  //   }
+  // }
 }
 #endif
 
@@ -709,7 +709,6 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 #endif
         this->tts_end_trigger_->trigger(url);
       });
-      this->speaker_->play_url(url);
       State new_state = this->local_output_ ? State::STREAMING_RESPONSE : State::IDLE;
       this->set_state_(new_state, new_state);
       break;
@@ -794,17 +793,17 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 }
 
 void VoiceAssistant::on_audio(const api::VoiceAssistantAudio &msg) {
-#ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
-  if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
-    memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
-    this->speaker_buffer_index_ += msg.data.length();
-    this->speaker_buffer_size_ += msg.data.length();
-    this->speaker_bytes_received_ += msg.data.length();
-    ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
-  } else {
-    ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
-  }
-#endif
+// #ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
+//   if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
+//     memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
+//     this->speaker_buffer_index_ += msg.data.length();
+//     this->speaker_buffer_size_ += msg.data.length();
+//     this->speaker_bytes_received_ += msg.data.length();
+//     ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
+//   } else {
+//     ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
+//   }
+// #endif
 }
 
 void VoiceAssistant::on_timer_event(const api::VoiceAssistantTimerEventResponse &msg) {

@@ -113,11 +113,11 @@ class VoiceAssistant : public Component {
     uint32_t flags = 0;
     flags |= VoiceAssistantFeature::FEATURE_VOICE_ASSISTANT;
     flags |= VoiceAssistantFeature::FEATURE_API_AUDIO;
-#ifdef USE_SPEAKER
-    if (this->speaker_ != nullptr) {
+// #ifdef USE_SPEAKER
+    // if (this->speaker_ != nullptr) {
       flags |= VoiceAssistantFeature::FEATURE_SPEAKER;
-    }
-#endif
+    // }
+// #endif
 
     if (this->has_timers_) {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
