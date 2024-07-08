@@ -11,7 +11,6 @@
 
 #include <esp_http_client.h>
 
-
 namespace esphome {
 namespace nabu {
 
@@ -143,7 +142,7 @@ class CombineStreamer {
     return this->media_ring_buffer_->write((void *) buffer, bytes_to_write);
   }
 
-  size_t write_announcement(uint8_t *buffer, size_t length); 
+  size_t write_announcement(uint8_t *buffer, size_t length);
   // {
   //   size_t free_bytes = this->announcement_free();
   //   size_t bytes_to_write = std::min(length, free_bytes);

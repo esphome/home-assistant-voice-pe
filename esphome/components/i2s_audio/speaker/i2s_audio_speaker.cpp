@@ -10,6 +10,11 @@
 #include "esphome/core/log.h"
 #include "esphome/core/ring_buffer.h"
 
+// Major TODOs:
+//  - optimize buffer sizes/memory used for each task
+//  - handle stereo audio samples
+//  - handle 16 bits per sample for I2S output
+
 namespace esphome {
 namespace i2s_audio {
 
@@ -141,6 +146,8 @@ void I2SAudioSpeaker::player_task(void *params) {
   }
 
   // Assumes incoming audio stream is mono channel 16000 Hz
+  // TODO: Move everything to stereo streams. Mono to stereo conversion should happen before being written to the
+  // speaker
   uint32_t bits_cfg = (this_speaker->bits_per_sample_ << 16) | this_speaker->bits_per_sample_;
   err = i2s_set_clk(this_speaker->parent_->get_port(), 16000, bits_cfg, I2S_CHANNEL_MONO);
 
@@ -161,7 +168,7 @@ void I2SAudioSpeaker::player_task(void *params) {
     if (bytes_read > 0) {
       size_t bytes_written;
 
-      // Assumes the output bits per sample is configured it 32 bits
+      // Assumes the output bits per sample is configured it 32 bits; TODO handle 16 bits per sample
       i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
                        this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       if (bytes_written != bytes_read) {
@@ -322,6 +329,8 @@ void I2SAudioSpeaker::watch_() {
 
 // Probably broken...
 size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length) {
+  // TODO: Remove... not safe if called by multiple components; use write instead (drops backwards compatibility
+  // though...)
   size_t remaining = length;
   size_t index = 0;
   while (remaining > 0) {
@@ -335,6 +344,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length) {
 }
 
 size_t I2SAudioSpeaker::play_file(const uint8_t *data, size_t length) {
+  // TODO: Remove... the media_player component should handle this
   ESP_LOGD(TAG, "playing");
   if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
     this->start_();
@@ -349,6 +359,7 @@ size_t I2SAudioSpeaker::play_file(const uint8_t *data, size_t length) {
 }
 
 void I2SAudioSpeaker::feed_task(void *params) {
+  // TODO: Remove... the media_player component should handle this
   I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
 
   TaskEvent event;
@@ -414,6 +425,7 @@ void I2SAudioSpeaker::feed_task(void *params) {
 }
 
 size_t I2SAudioSpeaker::write(const uint8_t *data, size_t length) {
+  // TODO: Protect against multiple components attempting from calling this at the same
   if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
     this->start();
   }

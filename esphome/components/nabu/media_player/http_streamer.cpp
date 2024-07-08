@@ -9,6 +9,13 @@
 namespace esphome {
 namespace nabu {
 
+// Major TODOs:
+//  - Rename file or split up file, it contains more than one class
+//  - Lots of code duplication, make a parent class
+//  - Things are not really thread safe! Especially with the command queues.
+//     - reading and writing ring buffers are potentially dangerous as well, but the media player component only does
+//       these operations in the loop, so we shouldn't have an issue as currently used
+
 static const size_t HTTP_BUFFER_SIZE = 8192;
 static const size_t BUFFER_SIZE = 2048;
 
@@ -253,6 +260,8 @@ void CombineStreamer::combine_task_(void *params) {
 
       size_t bytes_written = 0;
       if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
+        // This adds the two signals together and then shifts it by 1 bit to avoid clipping
+        // TODO: Don't shift by 1 as the announcement stream will be quieter than desired (need to clamp?)
         dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
         bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
       } else if (media_bytes_read > 0) {

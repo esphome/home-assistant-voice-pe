@@ -31,11 +31,12 @@ struct FeedCommandEvent {
   FeedType feed_type;
 };
 
-enum StreamChannels :uint8_t {
+// TODO: Implement stream information
+enum StreamChannels : uint8_t {
   STREAM_CHANNELS_MONO = 1,
   STREAM_CHANNELS_STEREO = 2,
 };
-enum StreamBitsPerSample :uint8_t {
+enum StreamBitsPerSample : uint8_t {
   STREAM_BITS_PER_SAMPLE_16 = I2S_BITS_PER_SAMPLE_16BIT,
   STREAM_BITS_PER_SAMPLE_32 = I2S_BITS_PER_SAMPLE_32BIT,
 };
@@ -66,10 +67,10 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
 
   size_t play(const uint8_t *data, size_t length) override;
   size_t play_file(const uint8_t *data, size_t length);
-  
+
   // Directly writes to the input ring buffer
   size_t write(const uint8_t *data, size_t length);
-  size_t free_bytes() { return this->input_ring_buffer_->free();}
+  size_t free_bytes() { return this->input_ring_buffer_->free(); }
 
   bool has_buffered_data() const override;
 
@@ -80,7 +81,7 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
 
   bool read_wav_header_();
   bool initiate_client_(const std::string &new_uri);
-  
+
   static void player_task(void *params);
   static void feed_task(void *params);
 

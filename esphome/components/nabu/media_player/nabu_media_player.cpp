@@ -8,6 +8,22 @@
 namespace esphome {
 namespace nabu {
 
+// Major TODOs:
+//  - Handle reading wav headers... the function exists (but needs to be more robust) -> avoids pops at start of
+//  playback
+//    - Implement a decoder class to sit between the HTTP streamers and the combiner streamer to handle different file
+//      types
+//  - Handle stereo streams
+//    - Careful if media stream and announcement stream have different number of channels
+//    - Eventually I want the speaker component to accept stereo audio by default
+//    - PCM streams should send the essential details to each step in this process to automatically handle different
+//      streaming characteristics
+//  - Implement a resampler... we probably wont' be able to change on-the-fly the sample rate before feeding into the
+//    XMOS chip
+//    - only 16 bit mono channel 16 kHz audio is supported at the momemnt!
+//  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
+//  - The pause logic isn't great... it just stops copying into the combiner streamer
+
 static const char *const TAG = "nabu_media_player";
 static const size_t TRANSFER_BUFFER_SIZE = 8192;
 
@@ -25,6 +41,7 @@ void NabuMediaPlayer::setup() {
   ESP_LOGI(TAG, "Set up nabu media player");
 }
 
+// TODO: Reduce code redundancy
 void NabuMediaPlayer::watch_() {
   TaskEvent event;
 
@@ -150,6 +167,7 @@ void NabuMediaPlayer::loop() {
   this->watch_();
 }
 
+// TODO: Dangerous! We don't want to have multiple concurrent writers to the command queue
 void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio) {
   if (this->combine_streamer_ != nullptr) {
     CommandEvent command_event;

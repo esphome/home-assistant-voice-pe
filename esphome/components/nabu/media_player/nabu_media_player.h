@@ -32,7 +32,10 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   void start() {}
   void stop() {}
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
+
+  // TODO: Dangerous!
   void set_ducking_ratio(float ducking_ratio) override;
+
  protected:
   // MediaPlayer implementation
   void control(const media_player::MediaPlayerCall &call) override;
@@ -49,9 +52,9 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   EventType announcement_streamer_state_{EventType::STOPPED};
 
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
-  bool is_connected_{false};  // whether the media streamer has an http connection for new media
-  bool is_announcing_{false}; // whether an announcement is playing
-  bool is_paused_{false};     // whether the media player has been requested to be in a paused state
+  bool is_connected_{false};   // whether the media streamer has an http connection for new media
+  bool is_announcing_{false};  // whether an announcement is playing
+  bool is_paused_{false};      // whether the media player has been requested to be in a paused state
   uint8_t *transfer_buffer_{nullptr};
 
   int header_control_counter_{0};

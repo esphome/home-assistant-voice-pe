@@ -16,6 +16,12 @@
 
 #include <cmath>
 
+// Major TODOs:
+//  - move everything into tasks
+//  - mWW will sit between the microphone and the voice_assistant
+//    - mWW will feed audio samples with VAD and wake word info to the voice assistant
+//  - Allow users, after, compilation, to set which wake words are loaded
+
 namespace esphome {
 namespace micro_wake_word {
 
@@ -135,12 +141,12 @@ void MicroWakeWord::loop() {
       break;
     case State::STOPPING_MICROPHONE:
       // if (this->microphone_->is_stopped()) {
-        this->set_state_(State::IDLE);
-        if (this->detected_) {
-          this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
-          this->detected_ = false;
-          this->detected_wake_word_ = "";
-        }
+      this->set_state_(State::IDLE);
+      if (this->detected_) {
+        this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
+        this->detected_ = false;
+        this->detected_wake_word_ = "";
+      }
       // }
       break;
   }
@@ -201,7 +207,6 @@ size_t MicroWakeWord::read_microphone_() {
   if (bytes_read == 0) {
     return 0;
   }
-
 
   size_t bytes_free = this->ring_buffer_->free();
 
@@ -301,7 +306,7 @@ void MicroWakeWord::update_model_probabilities_() {
   // Increase the counter since the last positive detection
   this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
 
-  static size_t total_inference_time =0;
+  static size_t total_inference_time = 0;
   static size_t inference_count = 0;
 
   size_t start_time = millis();
@@ -312,10 +317,10 @@ void MicroWakeWord::update_model_probabilities_() {
 #ifdef USE_MICRO_WAKE_WORD_VAD
   this->vad_model_->perform_streaming_inference(audio_features);
 #endif
-  total_inference_time += (millis()-start_time);
+  total_inference_time += (millis() - start_time);
   ++inference_count;
   if (inference_count > 500) {
-    ESP_LOGD(TAG, "average inference time=%.3f ms",static_cast<float>(total_inference_time)/inference_count);
+    ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
     total_inference_time = 0;
     inference_count = 0;
   }

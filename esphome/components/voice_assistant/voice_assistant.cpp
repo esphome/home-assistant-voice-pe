@@ -16,6 +16,8 @@ static const char *const TAG = "voice_assistant";
 #undef SAMPLE_RATE_HZ
 #endif
 
+// TODO: Make stopping the microphone a configurable option, it's hardcoded removed currently
+
 static const size_t SAMPLE_RATE_HZ = 16000;
 static const size_t INPUT_BUFFER_SIZE = 32 * SAMPLE_RATE_HZ / 1000;  // 32ms * 16kHz / 1000ms
 static const size_t BUFFER_SIZE = 512 * SAMPLE_RATE_HZ / 1000;
@@ -794,6 +796,9 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 }
 
 void VoiceAssistant::on_audio(const api::VoiceAssistantAudio &msg) {
+  // TODO: Fix this hack! HomeAssistant thinks we have a speaker, so it sends the TTS response as a wav (good)
+  // It will also send the audio over the protobuf and call this function to try to output directly to the speaker (bad)
+
 // #ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
 //   if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
 //     memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
