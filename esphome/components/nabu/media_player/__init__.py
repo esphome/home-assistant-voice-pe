@@ -5,7 +5,7 @@ import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
-from esphome.components import media_player, speaker
+from esphome.components import esp32, media_player, speaker
 
 # from .. import nabu_ns, NabuComponent
 
@@ -30,6 +30,13 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
 
 # @coroutine_with_priority(100.0)
 async def to_code(config):
+    esp32.add_idf_component(
+        name="esp-dsp",
+        repo="https://github.com/kahrendt/esp-dsp",
+        ref="filename-fix",
+        # repo="https://github.com/espressif/esp-dsp",
+        # ref="v1.3.0",
+    )
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await media_player.register_media_player(var, config)

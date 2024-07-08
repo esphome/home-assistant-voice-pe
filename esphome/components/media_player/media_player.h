@@ -85,6 +85,8 @@ class MediaPlayer : public EntityBase {
 
   virtual MediaPlayerTraits get_traits() = 0;
 
+  virtual void set_ducking(uint8_t duck_bits) { return;}
+
  protected:
   friend MediaPlayerCall;
 

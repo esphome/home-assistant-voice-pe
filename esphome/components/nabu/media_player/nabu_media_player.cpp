@@ -162,6 +162,15 @@ void NabuMediaPlayer::loop() {
   // }
 }
 
+void NabuMediaPlayer::set_ducking(uint8_t duck_bits) {
+  if (this->combine_streamer_ != nullptr) {
+    CommandEvent command_event;
+    command_event.command = CommandEventType::DUCK;
+    command_event.duck_bits = duck_bits;
+    this->combine_streamer_->send_command(&command_event);
+  }
+}
+
 void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   CommandEvent command_event;
   if (call.get_media_url().has_value()) {
@@ -178,14 +187,14 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       this->announcement_streamer_->start();
       this->combine_streamer_->start();
 
-      command_event.command = CommandEventType::DUCK;
-      command_event.duck_bits = 3;
-      this->combine_streamer_->send_command(&command_event);
+      // command_event.command = CommandEventType::DUCK;
+      // command_event.duck_bits = 3;
+      // this->combine_streamer_->send_command(&command_event);
       this->announcement_streamer_->set_current_uri(new_uri);
 
-      command_event.command = CommandEventType::START;
-      command_event.duck_bits = 0;
-      this->announcement_streamer_->send_command(&command_event);
+      // command_event.command = CommandEventType::START;
+      // command_event.duck_bits = 0;
+      // this->announcement_streamer_->send_command(&command_event);
 
       this->is_announcing_ = true;
       this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;

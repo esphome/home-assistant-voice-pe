@@ -4,6 +4,8 @@
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+
+#include "esp_dsp.h"
 namespace esphome {
 namespace nabu {
 
@@ -245,6 +247,7 @@ void CombineStreamer::combine_task_(void *params) {
           int32_t combined_sample = (static_cast<int32_t>(media_buffer[i]) )+ (static_cast<int32_t>(announcement_buffer[i]));
           combination_buffer[i] = clamp<int16_t>(combined_sample, INT16_MIN, INT16_MAX);
         }
+        // dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
         bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
       } else if (media_bytes_read > 0) {
         bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, bytes_to_read);
