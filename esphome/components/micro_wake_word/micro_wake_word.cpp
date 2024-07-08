@@ -202,6 +202,7 @@ size_t MicroWakeWord::read_microphone_() {
     return 0;
   }
 
+
   size_t bytes_free = this->ring_buffer_->free();
 
   if (bytes_free < bytes_read) {

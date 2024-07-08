@@ -158,7 +158,7 @@ void I2SAudioSpeaker::player_task(void *params) {
     size_t bytes_to_read = std::min(BUFFER_SIZE * sizeof(int16_t), this_speaker->input_ring_buffer_->available());
     size_t bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer, bytes_to_read, 0);
 
-    if ((bytes_to_read > 0) && (bytes_read > 0)) {
+    if (bytes_read > 0) {
       size_t bytes_written;
 
       // Assumes the output bits per sample is configured it 32 bits
@@ -166,7 +166,7 @@ void I2SAudioSpeaker::player_task(void *params) {
                        this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       if (bytes_written != bytes_read) {
         event.type = TaskEventType::WARNING;
-        event.err = ESP_ERR_TIMEOUT;    // TODO: probably not the correct error...
+        event.err = ESP_ERR_TIMEOUT;  // TODO: probably not the correct error...
         xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
       }
       event.type = TaskEventType::RUNNING;
@@ -207,7 +207,7 @@ void I2SAudioSpeaker::start_() {
   }
 
   xTaskCreate(I2SAudioSpeaker::player_task, "speaker_task", 8192, (void *) this, 1, &this->player_task_handle_);
-  xTaskCreate(I2SAudioSpeaker::feed_task, "feed_task", 8096, (void *) this, 1, &this->feed_task_handle_);
+  // xTaskCreate(I2SAudioSpeaker::feed_task, "feed_task", 8096, (void *) this, 1, &this->feed_task_handle_);
 }
 
 void I2SAudioSpeaker::stop() {
@@ -287,37 +287,37 @@ void I2SAudioSpeaker::watch_() {
     }
   }
 
-  while (xQueueReceive(this->feed_event_queue_, &event, 0)) {
-    switch (event.type) {
-      case TaskEventType::STARTING:
-        ESP_LOGD(TAG, "Starting Speaker Feed");
-        break;
-      case TaskEventType::STARTED:
-        ESP_LOGD(TAG, "Starting Speaker Feed");
-        break;
-      case TaskEventType::RUNNING:
-        this->status_clear_warning();
-        break;
-      case TaskEventType::STOPPING:
-        ESP_LOGD(TAG, "Stopping Speaker Feed");
-        break;
-      case TaskEventType::STOPPED:
-        vTaskDelete(this->feed_task_handle_);
-        this->feed_task_handle_ = nullptr;
+  // while (xQueueReceive(this->feed_event_queue_, &event, 0)) {
+  //   switch (event.type) {
+  //     case TaskEventType::STARTING:
+  //       ESP_LOGD(TAG, "Starting Speaker Feed");
+  //       break;
+  //     case TaskEventType::STARTED:
+  //       ESP_LOGD(TAG, "Started Speaker Feed");
+  //       break;
+  //     case TaskEventType::RUNNING:
+  //       this->status_clear_warning();
+  //       break;
+  //     case TaskEventType::STOPPING:
+  //       ESP_LOGD(TAG, "Stopping Speaker Feed");
+  //       break;
+  //     case TaskEventType::STOPPED:
+  //       vTaskDelete(this->feed_task_handle_);
+  //       this->feed_task_handle_ = nullptr;
 
-        xQueueReset(this->feed_event_queue_);
-        xQueueReset(this->feed_command_queue_);
+  //       xQueueReset(this->feed_event_queue_);
+  //       xQueueReset(this->feed_command_queue_);
 
-        ESP_LOGD(TAG, "Stopped Speaker Feed");
-        break;
-      case TaskEventType::WARNING:
-        ESP_LOGW(TAG, "Error feeding: %s", esp_err_to_name(event.err));
-        this->status_set_warning();
-        break;
-      case TaskEventType::IDLE:
-        break;
-    }
-  }
+  //       ESP_LOGD(TAG, "Stopped Speaker Feed");
+  //       break;
+  //     case TaskEventType::WARNING:
+  //       ESP_LOGW(TAG, "Error feeding: %s", esp_err_to_name(event.err));
+  //       this->status_set_warning();
+  //       break;
+  //     case TaskEventType::IDLE:
+  //       break;
+  //   }
+  // }
 }
 
 // Probably broken...

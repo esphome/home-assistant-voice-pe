@@ -50,7 +50,7 @@ void HTTPStreamer::set_stream_uri_(esp_http_client_handle_t *client, const std::
   }
 
   int content_length = esp_http_client_fetch_headers(*client);
-  //   ESP_LOGD(TAG, "content_length = %d", content_length);
+
   if (content_length <= 0) {
     // ESP_LOGE(TAG, "Failed to get content length: %s", esp_err_to_name(err));
     this->cleanup_(client);
@@ -111,7 +111,7 @@ void HTTPStreamer::read_task_(void *params) {
       }
     }
 
-    if ((client != nullptr)) {
+    if (client != nullptr) {
       size_t read_bytes = this_streamer->output_ring_buffer_->free();
       int received_len = esp_http_client_read(client, (char *) buffer, read_bytes);
 
@@ -165,6 +165,15 @@ CombineStreamer::CombineStreamer() {
   this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
 }
 
+size_t CombineStreamer::write_announcement(uint8_t *buffer, size_t length) {
+  size_t free_bytes = this->announcement_free();
+  size_t bytes_to_write = std::min(length, free_bytes);
+  size_t bytes_written = this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+
+  // return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+  return bytes_written;
+}
+
 void CombineStreamer::combine_task_(void *params) {
   CombineStreamer *this_combiner = (CombineStreamer *) params;
 
@@ -199,13 +208,14 @@ void CombineStreamer::combine_task_(void *params) {
 
   event.type = EventType::STARTED;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
-  uint8_t duck_bits = 0;
+  int16_t q15_ducking_ratio = (int16_t) (1 * std::pow(2, 15)); // esp-dsp using q15 fixed point numbers
   while (true) {
     if (xQueueReceive(this_combiner->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
         break;
       } else if (command_event.command == CommandEventType::DUCK) {
-        duck_bits = command_event.duck_bits;
+        float ducking_ratio = command_event.ducking_ratio;
+        q15_ducking_ratio = (int16_t) (ducking_ratio * std::pow(2, 15)); // convert float to q15 fixed point
       }
     }
 
@@ -213,7 +223,7 @@ void CombineStreamer::combine_task_(void *params) {
     size_t announcement_available = this_combiner->announcement_ring_buffer_->available();
     size_t output_free = this_combiner->output_ring_buffer_->free();
 
-    if (output_free > 0) {
+    if ((output_free > 0) && (media_available + announcement_available > 0)) {
       size_t bytes_to_read = output_free;
 
       if (media_available > 0) {
@@ -228,10 +238,9 @@ void CombineStreamer::combine_task_(void *params) {
       if (media_available > 0) {
         media_bytes_read = this_combiner->media_ring_buffer_->read((void *) media_buffer, bytes_to_read, 0);
         if (media_bytes_read > 0) {
-          if (duck_bits > 0) {
-            for (int i = 0; i < media_bytes_read / sizeof(int16_t); ++i) {
-              media_buffer[i] = media_buffer[i] >> duck_bits;
-            }
+          if (q15_ducking_ratio < (1 * std::pow(2, 15))) {
+            dsps_mulc_s16_ae32(media_buffer, combination_buffer, media_bytes_read, q15_ducking_ratio, 1, 1);
+            std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
           }
         }
       }
@@ -241,27 +250,23 @@ void CombineStreamer::combine_task_(void *params) {
         announcement_bytes_read =
             this_combiner->announcement_ring_buffer_->read((void *) announcement_buffer, bytes_to_read, 0);
       }
+
       size_t bytes_written = 0;
       if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
-        for (int i = 0; i < bytes_to_read / sizeof(int16_t); ++i) {
-          int32_t combined_sample = (static_cast<int32_t>(media_buffer[i]) )+ (static_cast<int32_t>(announcement_buffer[i]));
-          combination_buffer[i] = clamp<int16_t>(combined_sample, INT16_MIN, INT16_MAX);
-        }
-        // dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
+        dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
         bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
       } else if (media_bytes_read > 0) {
-        bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, bytes_to_read);
-      } else {
-        bytes_written = this_combiner->output_ring_buffer_->write((void *) announcement_buffer, bytes_to_read);
+        bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
+      } else if (announcement_bytes_read > 0) {
+        bytes_written =
+            this_combiner->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
       }
-    }
-
-    if (this_combiner->output_ring_buffer_->available() == 0) {
-      // the connection is closed but there is still data in the ring buffer
-      event.type = EventType::IDLE;
-      xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+      // } else if (this_combiner->output_ring_buffer_->available() == 0) {
+      //   event.type = EventType::IDLE;
+      //   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
     }
   }
+
   event.type = EventType::STOPPING;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
 
@@ -276,7 +281,6 @@ void CombineStreamer::combine_task_(void *params) {
     delay(10);
   }
 }
-
 
 }  // namespace nabu
 }  // namespace esphome

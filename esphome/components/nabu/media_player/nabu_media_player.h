@@ -32,7 +32,7 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   void start() {}
   void stop() {}
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
-  void set_ducking(uint8_t duck_bits) override;
+  void set_ducking_ratio(float ducking_ratio) override;
  protected:
   // MediaPlayer implementation
   void control(const media_player::MediaPlayerCall &call) override;

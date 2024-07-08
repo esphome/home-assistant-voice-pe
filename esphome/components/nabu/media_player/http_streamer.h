@@ -6,7 +6,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
+
 #include <esp_http_client.h>
+
 
 namespace esphome {
 namespace nabu {
@@ -31,7 +35,7 @@ enum CommandEventType : uint8_t {
 };
 struct CommandEvent {
   CommandEventType command;
-  uint8_t duck_bits=0;
+  float ducking_ratio = 0.0;
 };
 
 class HTTPStreamer {
@@ -60,7 +64,10 @@ class HTTPStreamer {
   size_t read(uint8_t *buffer, size_t length) {
     size_t available_bytes = this->available();
     size_t bytes_to_read = std::min(length, available_bytes);
-    return this->output_ring_buffer_->read((void *) buffer, bytes_to_read);
+    if (bytes_to_read > 0) {
+      return this->output_ring_buffer_->read((void *) buffer, bytes_to_read);
+    }
+    return 0;
   }
 
   /// @brief Returns the number of bytes available to read from the ring buffer
@@ -121,7 +128,10 @@ class CombineStreamer {
   size_t read(uint8_t *buffer, size_t length) {
     size_t available_bytes = this->available();
     size_t bytes_to_read = std::min(length, available_bytes);
-    return this->output_ring_buffer_->read((void *) buffer, bytes_to_read);
+    if (bytes_to_read > 0) {
+      return this->output_ring_buffer_->read((void *) buffer, bytes_to_read);
+    }
+    return 0;
   }
 
   size_t media_free() { return this->media_ring_buffer_->free(); }
@@ -133,11 +143,15 @@ class CombineStreamer {
     return this->media_ring_buffer_->write((void *) buffer, bytes_to_write);
   }
 
-  size_t write_announcement(uint8_t *buffer, size_t length) {
-    size_t free_bytes = this->announcement_free();
-    size_t bytes_to_write = std::min(length, free_bytes);
-    return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
-  }
+  size_t write_announcement(uint8_t *buffer, size_t length); 
+  // {
+  //   size_t free_bytes = this->announcement_free();
+  //   size_t bytes_to_write = std::min(length, free_bytes);
+  //   size_t bytes_written = this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+  //   ESP_LOGD("combiner", "wrote %d bytes to announcemnet ring buffer", bytes_written);
+  //   // return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+  //   return bytes_written;
+  // }
 
   /// @brief Returns the number of bytes available to read from the ring buffer
   size_t available() { return this->output_ring_buffer_->available(); }
