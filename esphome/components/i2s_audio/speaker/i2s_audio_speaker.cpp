@@ -13,7 +13,6 @@
 // Major TODOs:
 //  - optimize buffer sizes/memory used for each task
 //  - handle stereo audio samples
-//  - handle 16 bits per sample for I2S output
 
 namespace esphome {
 namespace i2s_audio {
@@ -167,10 +166,13 @@ void I2SAudioSpeaker::player_task(void *params) {
 
     if (bytes_read > 0) {
       size_t bytes_written;
+      if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
+      } else {
+        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+                         this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
+      }
 
-      // Assumes the output bits per sample is configured it 32 bits; TODO handle 16 bits per sample
-      i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
-                       this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       if (bytes_written != bytes_read) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_TIMEOUT;  // TODO: probably not the correct error...

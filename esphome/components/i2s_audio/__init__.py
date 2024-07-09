@@ -44,7 +44,7 @@ I2S_MODE_OPTIONS = {
 }
 i2s_bits_per_sample_t = cg.global_ns.enum("i2s_bits_per_sample_t")
 BITS_PER_SAMPLE = {
-    # 16: i2s_bits_per_sample_t.I2S_BITS_PER_SAMPLE_16BIT,
+    16: i2s_bits_per_sample_t.I2S_BITS_PER_SAMPLE_16BIT,
     32: i2s_bits_per_sample_t.I2S_BITS_PER_SAMPLE_32BIT,
 }
 
