@@ -229,7 +229,7 @@ void I2SAudioMicrophone::start_() {
     return;
   }
 
-  xTaskCreate(I2SAudioMicrophone::read_task_, "microphone_task", 8192, (void *) this, 23, &this->read_task_handle_);
+  xTaskCreate(I2SAudioMicrophone::read_task_, "microphone_task", 3584, (void *) this, 23, &this->read_task_handle_);
 }
 
 void I2SAudioMicrophone::stop() {
