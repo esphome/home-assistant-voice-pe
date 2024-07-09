@@ -47,7 +47,12 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
 
   std::unique_ptr<HTTPStreamer> media_streamer_;
   std::unique_ptr<HTTPStreamer> announcement_streamer_;
+
+  std::unique_ptr<DecodeStreamer> media_decode_streamer_;
+  std::unique_ptr<DecodeStreamer> announcement_decode_streamer_;
+
   std::unique_ptr<CombineStreamer> combine_streamer_;
+  
   EventType media_streamer_state_{EventType::STOPPED};
   EventType announcement_streamer_state_{EventType::STOPPED};
 

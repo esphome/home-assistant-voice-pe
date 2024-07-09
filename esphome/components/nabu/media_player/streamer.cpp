@@ -20,6 +20,104 @@ static const size_t BUFFER_SIZE = 2048;
 
 static const size_t QUEUE_COUNT = 10;
 
+DecodeStreamer::DecodeStreamer() {
+  this->input_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
+  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
+
+  this->event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
+  this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
+
+  // TODO: Handle if this fails to allocate
+  if ((this->input_ring_buffer_) || (this->output_ring_buffer_ == nullptr)) {
+    return;
+  }
+}
+
+void DecodeStreamer::start(UBaseType_t priority) {
+  if (this->task_handle_ == nullptr) {
+    xTaskCreate(DecodeStreamer::decode_task_, "decode_task", 8096, (void *) this, priority, &this->task_handle_);
+  }
+}
+
+void DecodeStreamer::stop() {
+  vTaskDelete(this->task_handle_);
+  this->task_handle_ = nullptr;
+
+  this->input_ring_buffer_->reset();
+  this->output_ring_buffer_->reset();
+  xQueueReset(this->event_queue_);
+  xQueueReset(this->command_queue_);
+}
+
+size_t DecodeStreamer::write(uint8_t *buffer, size_t length) {
+  size_t free_bytes = this->input_ring_buffer_->free();
+  size_t bytes_to_write = std::min(length, free_bytes);
+  return this->input_ring_buffer_->write((void *) buffer, bytes_to_write);
+}
+
+void DecodeStreamer::decode_task_(void *params) {
+  DecodeStreamer *this_streamer = (DecodeStreamer *) params;
+
+  TaskEvent event;
+  CommandEvent command_event;
+
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+  uint8_t *buffer = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
+
+  if (buffer == nullptr) {
+    event.type = EventType::WARNING;
+    event.err = ESP_ERR_NO_MEM;
+    xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+    event.type = EventType::STOPPED;
+    event.err = ESP_OK;
+    xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+    while (true) {
+      delay(10);
+    }
+
+    return;
+  }
+
+  event.type = EventType::STARTED;
+  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+  while (true) {
+    if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
+      if (command_event.command == CommandEventType::START) {
+      } else if (command_event.command == CommandEventType::STOP) {
+        break;
+      }
+    }
+
+    size_t bytes_available = this_streamer->input_ring_buffer_->available();
+    // we will need to know how much we can fit in the output buffer as well depending the file type
+    size_t bytes_free = this_streamer->output_ring_buffer_->free();
+
+    size_t bytes_to_read = std::min(bytes_free, bytes_available);
+    size_t bytes_read = 0;
+    if (bytes_to_read > 0) {
+      bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
+    }
+
+    if (bytes_read > 0) {
+      size_t bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
+    }
+  }
+  event.type = EventType::STOPPING;
+  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+  allocator.deallocate(buffer, HTTP_BUFFER_SIZE);
+
+  event.type = EventType::STOPPED;
+  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+  while (true) {
+    delay(10);
+  }
+}
+
 HTTPStreamer::HTTPStreamer() {
   this->output_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE * sizeof(int16_t));
   // TODO: Handle if this fails to allocate
@@ -174,7 +272,7 @@ CombineStreamer::CombineStreamer() {
   this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
   this->media_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
   this->announcement_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
-  
+
   // TODO: Handle not being able to allocate these...
   if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
       ((this->output_ring_buffer_ == nullptr))) {
@@ -250,6 +348,7 @@ void CombineStreamer::combine_task_(void *params) {
   event.type = EventType::STARTED;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
   int16_t q15_ducking_ratio = (int16_t) (1 * std::pow(2, 15));  // esp-dsp using q15 fixed point numbers
+  bool transfer_media = true;
   while (true) {
     if (xQueueReceive(this_combiner->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
@@ -257,6 +356,10 @@ void CombineStreamer::combine_task_(void *params) {
       } else if (command_event.command == CommandEventType::DUCK) {
         float ducking_ratio = command_event.ducking_ratio;
         q15_ducking_ratio = (int16_t) (ducking_ratio * std::pow(2, 15));  // convert float to q15 fixed point
+      } else if (command_event.command == CommandEventType::PAUSE_MEDIA) {
+        transfer_media = false;
+      } else if (command_event.command == CommandEventType::RESUME_MEDIA) {
+        transfer_media = true;
       }
     }
 
@@ -276,7 +379,7 @@ void CombineStreamer::combine_task_(void *params) {
       }
 
       size_t media_bytes_read = 0;
-      if (media_available > 0) {
+      if (transfer_media && (media_available > 0)) {
         media_bytes_read = this_combiner->media_ring_buffer_->read((void *) media_buffer, bytes_to_read, 0);
         if (media_bytes_read > 0) {
           if (q15_ducking_ratio < (1 * std::pow(2, 15))) {

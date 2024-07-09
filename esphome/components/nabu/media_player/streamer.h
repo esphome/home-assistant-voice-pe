@@ -31,6 +31,8 @@ enum CommandEventType : uint8_t {
   START,
   STOP,
   DUCK,
+  PAUSE_MEDIA,
+  RESUME_MEDIA,
 };
 struct CommandEvent {
   CommandEventType command;
@@ -92,6 +94,21 @@ class HTTPStreamer : public OutputStreamer {
   // esp_http_client_handle_t client_ = nullptr;
 
   std::string current_uri_{};
+};
+
+class DecodeStreamer : public OutputStreamer {
+ public:
+  DecodeStreamer();
+  void start(UBaseType_t priority = 1) override;
+  void stop() override;
+
+  size_t input_free() { return this->input_ring_buffer_->free(); }
+
+  size_t write(uint8_t *buffer, size_t length);
+
+ protected:
+  static void decode_task_(void *params);
+  std::unique_ptr<RingBuffer> input_ring_buffer_;
 };
 
 class CombineStreamer : public OutputStreamer {

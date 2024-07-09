@@ -133,35 +133,73 @@ void NabuMediaPlayer::watch_() {
     while (this->combine_streamer_->read_event(&event))
       ;
   }
+  if (this->announcement_decode_streamer_ != nullptr) {
+    while (this->announcement_decode_streamer_->read_event(&event))
+      ;
+  }
+  if (this->media_decode_streamer_ != nullptr) {
+    while (this->media_decode_streamer_->read_event(&event))
+      ;
+  }
+}
+
+// size_t transfer_data_(OutputStreamer *source_streamer, std::function<size_t(uint8_t *, size_t)> write_function,
+//                       std::function<size_t()> free_function, uint8_t *buffer) {
+//   if ((source_streamer == nullptr) || (source_streamer->available() == 0)) {
+//     return 0;
+//   }
+//   size_t bytes_to_read = free_function();
+//   size_t bytes_read = source_streamer->read(buffer, bytes_to_read);
+//   if (bytes_read > 0) {
+//     return write_function(buffer, bytes_read);
+//   }
+// }
+
+size_t transfer_data_(OutputStreamer *source_streamer, size_t free, uint8_t *buffer) {
+  if ((source_streamer == nullptr) || (source_streamer->available() == 0)) {
+    return 0;
+  }
+  return source_streamer->read(buffer, free);
 }
 
 void NabuMediaPlayer::loop() {
-  if ((this->announcement_streamer_ != nullptr) && (this->announcement_streamer_->available() > 0)) {
-    this->is_announcing_ = true;
+  size_t bytes_read = 0;
 
-    size_t bytes_to_read = this->combine_streamer_->announcement_free();
-    size_t bytes_read = this->announcement_streamer_->read(this->transfer_buffer_, bytes_to_read);
-
+  if (this->announcement_decode_streamer_) {
+    bytes_read = transfer_data_(this->announcement_streamer_.get(), this->announcement_decode_streamer_->input_free(),
+                                this->transfer_buffer_);
     if (bytes_read > 0) {
-      size_t bytes_written = this->combine_streamer_->write_announcement(this->transfer_buffer_, bytes_read);
+      this->announcement_decode_streamer_->write(this->transfer_buffer_, bytes_read);
     }
   }
 
-  if (this->has_http_media_data_() && !this->is_paused_) {
-    size_t bytes_to_read = this->combine_streamer_->media_free();
-    size_t bytes_read = this->media_streamer_->read(this->transfer_buffer_, bytes_to_read);
+  if (this->combine_streamer_) {
+    bytes_read = transfer_data_(this->announcement_decode_streamer_.get(), this->combine_streamer_->announcement_free(),
+                                this->transfer_buffer_);
+    if (bytes_read > 0) {
+      this->is_announcing_ = true;
+      this->combine_streamer_->write_announcement(this->transfer_buffer_, bytes_read);
+    }
+  }
 
+  if (this->media_decode_streamer_) {
+    bytes_read =
+        transfer_data_(this->media_streamer_.get(), this->media_decode_streamer_->input_free(), this->transfer_buffer_);
+    if (bytes_read > 0) {
+      this->media_decode_streamer_->write(this->transfer_buffer_, bytes_read);
+    }
+  }
+  if (this->combine_streamer_) {
+    bytes_read = transfer_data_(this->media_decode_streamer_.get(), this->combine_streamer_->media_free(),
+                                this->transfer_buffer_);
     if (bytes_read > 0) {
       this->combine_streamer_->write_media(this->transfer_buffer_, bytes_read);
     }
   }
 
-  if ((this->combine_streamer_ != nullptr) && (this->combine_streamer_->available() > 0)) {
-    size_t speaker_free_bytes = this->speaker_->free_bytes();
-    size_t bytes_read = this->combine_streamer_->read(this->transfer_buffer_, speaker_free_bytes);
-    if (bytes_read > 0) {
-      this->speaker_->write(this->transfer_buffer_, bytes_read);
-    }
+  bytes_read = transfer_data_(this->combine_streamer_.get(), this->speaker_->free_bytes(), this->transfer_buffer_);
+  if (bytes_read > 0) {
+    this->speaker_->write(this->transfer_buffer_, bytes_read);
   }
 
   this->watch_();
@@ -191,8 +229,12 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       if (this->announcement_streamer_ == nullptr) {
         this->announcement_streamer_ = make_unique<HTTPStreamer>();
       }
-
       this->announcement_streamer_->start();
+
+      if (this->announcement_decode_streamer_ == nullptr) {
+        this->announcement_decode_streamer_ = make_unique<DecodeStreamer>();
+      }
+      this->announcement_decode_streamer_->start();
 
       this->announcement_streamer_->set_current_uri(new_uri);
 
@@ -210,14 +252,21 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       if (this->media_streamer_ == nullptr) {
         this->media_streamer_ = make_unique<HTTPStreamer>();
       }
-
       this->media_streamer_->start();
+
+      if (this->media_decode_streamer_ == nullptr) {
+        this->media_decode_streamer_ = make_unique<DecodeStreamer>();
+      }
+      this->media_decode_streamer_->start();
+
       this->media_streamer_->set_current_uri(new_uri);
 
       command_event.command = CommandEventType::START;
       this->media_streamer_->send_command(&command_event);
 
       this->is_paused_ = false;
+      command_event.command = CommandEventType::RESUME_MEDIA;
+      this->combine_streamer_->send_command(&command_event);
       if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
         this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
         this->publish_state();
@@ -236,6 +285,8 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       case media_player::MEDIA_PLAYER_COMMAND_PLAY:
         if (this->is_paused_) {
           this->is_paused_ = false;
+          command_event.command = CommandEventType::RESUME_MEDIA;
+          this->combine_streamer_->send_command(&command_event);
 
           if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
             this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
@@ -245,6 +296,8 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
         break;
       case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
         this->is_paused_ = true;
+        command_event.command = CommandEventType::PAUSE_MEDIA;
+        this->combine_streamer_->send_command(&command_event);
 
         if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
           this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
@@ -256,6 +309,8 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
         this->media_streamer_->send_command(&command_event);
 
         this->is_paused_ = false;
+        command_event.command = CommandEventType::RESUME_MEDIA;
+        this->combine_streamer_->send_command(&command_event);
 
         if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
           this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
@@ -269,6 +324,8 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
       case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
         if (this->is_paused_) {
           this->is_paused_ = false;
+          command_event.command = CommandEventType::RESUME_MEDIA;
+          this->combine_streamer_->send_command(&command_event);
 
           if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
             this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
@@ -276,6 +333,8 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
           }
         } else {
           this->is_paused_ = true;
+          command_event.command = CommandEventType::PAUSE_MEDIA;
+          this->combine_streamer_->send_command(&command_event);
 
           if (this->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
             this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
