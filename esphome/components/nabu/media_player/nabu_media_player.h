@@ -9,7 +9,7 @@
 #include "esphome/core/ring_buffer.h"
 
 // #include "mp3_decoder.h"
-#include "http_streamer.h"
+#include "streamer.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>

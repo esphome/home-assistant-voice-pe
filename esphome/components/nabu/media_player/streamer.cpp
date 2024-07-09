@@ -1,6 +1,6 @@
 #ifdef USE_ESP_IDF
 
-#include "http_streamer.h"
+#include "streamer.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -11,7 +11,6 @@ namespace nabu {
 
 // Major TODOs:
 //  - Rename file or split up file, it contains more than one class
-//  - Lots of code duplication, make a parent class
 //  - Things are not really thread safe! Especially with the command queues.
 //     - reading and writing ring buffers are potentially dangerous as well, but the media player component only does
 //       these operations in the loop, so we shouldn't have an issue as currently used
@@ -23,9 +22,8 @@ static const size_t QUEUE_COUNT = 10;
 
 HTTPStreamer::HTTPStreamer() {
   this->output_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE * sizeof(int16_t));
+  // TODO: Handle if this fails to allocate
   if (this->output_ring_buffer_ == nullptr) {
-    // ESP_LOGW(TAG, "Could not allocate ring buffer");
-    // this->mark_failed();
     return;
   }
 
@@ -65,6 +63,21 @@ void HTTPStreamer::set_stream_uri_(esp_http_client_handle_t *client, const std::
   }
 
   return;
+}
+
+void HTTPStreamer::start(UBaseType_t priority) {
+  if (this->task_handle_ == nullptr) {
+    xTaskCreate(HTTPStreamer::read_task_, "read_task", 8096, (void *) this, priority, &this->task_handle_);
+  }
+}
+
+void HTTPStreamer::stop() {
+  vTaskDelete(this->task_handle_);
+  this->task_handle_ = nullptr;
+
+  this->output_ring_buffer_->reset();
+  xQueueReset(this->event_queue_);
+  xQueueReset(this->command_queue_);
 }
 
 void HTTPStreamer::cleanup_(esp_http_client_handle_t *client) {
@@ -161,10 +174,10 @@ CombineStreamer::CombineStreamer() {
   this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
   this->media_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
   this->announcement_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
+  
+  // TODO: Handle not being able to allocate these...
   if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
       ((this->output_ring_buffer_ == nullptr))) {
-    // ESP_LOGW(TAG, "Could not allocate ring buffer");
-    // this->mark_failed();
     return;
   }
 
@@ -172,13 +185,34 @@ CombineStreamer::CombineStreamer() {
   this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
 }
 
+size_t CombineStreamer::write_media(uint8_t *buffer, size_t length) {
+  size_t free_bytes = this->media_free();
+  size_t bytes_to_write = std::min(length, free_bytes);
+  return this->media_ring_buffer_->write((void *) buffer, bytes_to_write);
+}
+
 size_t CombineStreamer::write_announcement(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->announcement_free();
   size_t bytes_to_write = std::min(length, free_bytes);
-  size_t bytes_written = this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
 
-  // return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
-  return bytes_written;
+  return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+}
+
+void CombineStreamer::start(UBaseType_t priority) {
+  if (this->task_handle_ == nullptr) {
+    xTaskCreate(CombineStreamer::combine_task_, "combine_task", 8096, (void *) this, priority, &this->task_handle_);
+  }
+}
+
+void CombineStreamer::stop() {
+  vTaskDelete(this->task_handle_);
+  this->task_handle_ = nullptr;
+
+  this->output_ring_buffer_->reset();
+  this->media_ring_buffer_->reset();
+  this->announcement_ring_buffer_->reset();
+  xQueueReset(this->event_queue_);
+  xQueueReset(this->command_queue_);
 }
 
 void CombineStreamer::combine_task_(void *params) {
@@ -215,14 +249,14 @@ void CombineStreamer::combine_task_(void *params) {
 
   event.type = EventType::STARTED;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
-  int16_t q15_ducking_ratio = (int16_t) (1 * std::pow(2, 15)); // esp-dsp using q15 fixed point numbers
+  int16_t q15_ducking_ratio = (int16_t) (1 * std::pow(2, 15));  // esp-dsp using q15 fixed point numbers
   while (true) {
     if (xQueueReceive(this_combiner->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
         break;
       } else if (command_event.command == CommandEventType::DUCK) {
         float ducking_ratio = command_event.ducking_ratio;
-        q15_ducking_ratio = (int16_t) (ducking_ratio * std::pow(2, 15)); // convert float to q15 fixed point
+        q15_ducking_ratio = (int16_t) (ducking_ratio * std::pow(2, 15));  // convert float to q15 fixed point
       }
     }
 
