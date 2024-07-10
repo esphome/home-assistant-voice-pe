@@ -19,6 +19,22 @@
 namespace esphome {
 namespace nabu {
 
+enum class PipelineState : uint8_t {
+  STARTING,
+  STARTED,
+  PLAYING,
+  PAUSED,
+  STOPPING,
+  STOPPED,
+};
+
+struct MediaCallCommand {
+  optional<media_player::MediaPlayerCommand> command;
+  optional<float> volume;
+  optional<bool> announce;
+  optional<bool> new_url;
+};
+
 class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
@@ -26,46 +42,42 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   void loop() override;
 
   // MediaPlayer implementations
-  bool is_muted() const override { return this->muted_; }
+  bool is_muted() const override { return this->is_muted_; }
   media_player::MediaPlayerTraits get_traits() override;
 
   void start() {}
   void stop() {}
   void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
 
-  // TODO: Dangerous!
   void set_ducking_ratio(float ducking_ratio) override;
 
  protected:
-  // MediaPlayer implementation
+  // Receives commands from HA or from the voice assistant component
+  // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
+  optional<std::string> media_url_{};         // only modified by control function
+  optional<std::string> announcement_url_{};  // only modified by control function
+  QueueHandle_t media_control_command_queue_;
 
-  void watch_();
-
-  bool muted_{false};
-  bool play_intent_{false};
-
-  std::unique_ptr<HTTPStreamer> media_streamer_;
-  std::unique_ptr<HTTPStreamer> announcement_streamer_;
-
-  std::unique_ptr<DecodeStreamer> media_decode_streamer_;
-  std::unique_ptr<DecodeStreamer> announcement_decode_streamer_;
-
+  // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline command queues
+  void watch_media_commands_();
+  std::unique_ptr<Pipeline> media_pipeline_;
+  std::unique_ptr<Pipeline> announcement_pipeline_;
   std::unique_ptr<CombineStreamer> combine_streamer_;
-  
-  EventType media_streamer_state_{EventType::STOPPED};
-  EventType announcement_streamer_state_{EventType::STOPPED};
 
+  // Monitors the pipelines' and mixer's event queues. Only function that modifies pipeline_state_ variables
+  void watch_();
+  PipelineState media_pipeline_state_{PipelineState::STOPPED};
+  PipelineState announcement_pipeline_state_{PipelineState::STOPPED};
+  
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
-  bool is_connected_{false};   // whether the media streamer has an http connection for new media
-  bool is_announcing_{false};  // whether an announcement is playing
-  bool is_paused_{false};      // whether the media player has been requested to be in a paused state
+
+  // Transfer buffer for storing audio samples read from the mixer and then written to the speaker
   uint8_t *transfer_buffer_{nullptr};
 
-  int header_control_counter_{0};
+  bool is_paused_{false};
+  bool is_muted_{false};
 
-  bool has_http_media_data_();
-  bool read_wav_header_(esp_http_client_handle_t *client);
   // speaker::StreamInfo stream_info_{
   //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
 };

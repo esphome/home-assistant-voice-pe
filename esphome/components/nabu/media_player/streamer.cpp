@@ -10,15 +10,13 @@ namespace esphome {
 namespace nabu {
 
 // Major TODOs:
-//  - Rename file or split up file, it contains more than one class
-//  - Things are not really thread safe! Especially with the command queues.
-//     - reading and writing ring buffers are potentially dangerous as well, but the media player component only does
-//       these operations in the loop, so we shouldn't have an issue as currently used
+//  - Rename/split up file, it contains more than one class
+//  - Ring buffers are potentially unsafe when used outside of a component
 
 static const size_t HTTP_BUFFER_SIZE = 8192;
 static const size_t BUFFER_SIZE = 2048;
 
-static const size_t QUEUE_COUNT = 10;
+// static const size_t QUEUE_COUNT = 10;
 
 DecodeStreamer::DecodeStreamer() {
   this->input_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
@@ -52,7 +50,10 @@ void DecodeStreamer::stop() {
 size_t DecodeStreamer::write(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->input_ring_buffer_->free();
   size_t bytes_to_write = std::min(length, free_bytes);
-  return this->input_ring_buffer_->write((void *) buffer, bytes_to_write);
+  if (bytes_to_write > 0) {
+    return this->input_ring_buffer_->write((void *) buffer, bytes_to_write);
+  }
+  return 0;
 }
 
 void DecodeStreamer::decode_task_(void *params) {
@@ -83,11 +84,14 @@ void DecodeStreamer::decode_task_(void *params) {
   event.type = EventType::STARTED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
+  bool stopping = false;
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
       } else if (command_event.command == CommandEventType::STOP) {
         break;
+      } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
+        stopping = true;
       }
     }
 
@@ -101,14 +105,28 @@ void DecodeStreamer::decode_task_(void *params) {
       bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
     }
 
+    size_t bytes_written = 0;
     if (bytes_read > 0) {
-      size_t bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
+      bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
+    }
+
+    if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
+      event.type = EventType::RUNNING;
+      xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+    } else {
+      event.type = EventType::IDLE;
+      xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+    }
+
+    if (stopping && (this_streamer->input_ring_buffer_->available() == 0) &&
+        (this_streamer->output_ring_buffer_->available() == 0)) {
+      break;
     }
   }
   event.type = EventType::STOPPING;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
-  allocator.deallocate(buffer, HTTP_BUFFER_SIZE);
+  allocator.deallocate(buffer, BUFFER_SIZE);
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -192,7 +210,20 @@ void HTTPStreamer::read_task_(void *params) {
   TaskEvent event;
   CommandEvent command_event;
 
+  if (this_streamer->current_uri_.empty()) {
+    event.type = EventType::STOPPED;
+    event.err = ESP_OK;
+    xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+
+    while (true) {
+      delay(10);
+    }
+
+    return;
+  }
+
   esp_http_client_handle_t client = nullptr;
+  this_streamer->set_stream_uri_(&client, this_streamer->current_uri_);
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
   uint8_t *buffer = allocator.allocate(HTTP_BUFFER_SIZE * sizeof(int16_t));
@@ -218,14 +249,14 @@ void HTTPStreamer::read_task_(void *params) {
 
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::START) {
-        if (client == nullptr) {
-          this_streamer->set_stream_uri_(&client, this_streamer->current_uri_);
-        }
-      } else if (command_event.command == CommandEventType::STOP) {
-        this_streamer->current_uri_ = std::string();
+      if (command_event.command == CommandEventType::STOP) {
+        // this_streamer->current_uri_ = std::string();
         this_streamer->cleanup_(&client);
         break;
+      } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
+        // Waits until output ring buffer is empty before stopping the loop
+        // this_streamer->current_uri_ = std::string();
+        this_streamer->cleanup_(&client);
       }
     }
 
@@ -240,7 +271,7 @@ void HTTPStreamer::read_task_(void *params) {
       }
 
       if (esp_http_client_is_complete_data_received(client)) {
-        this_streamer->current_uri_ = std::string();
+        // this_streamer->current_uri_ = std::string();
         this_streamer->cleanup_(&client);
       }
 
@@ -286,14 +317,20 @@ CombineStreamer::CombineStreamer() {
 size_t CombineStreamer::write_media(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->media_free();
   size_t bytes_to_write = std::min(length, free_bytes);
-  return this->media_ring_buffer_->write((void *) buffer, bytes_to_write);
+  if (bytes_to_write > 0) {
+    return this->media_ring_buffer_->write((void *) buffer, bytes_to_write);
+  }
+  return 0;
 }
 
 size_t CombineStreamer::write_announcement(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->announcement_free();
   size_t bytes_to_write = std::min(length, free_bytes);
 
-  return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+  if (bytes_to_write > 0) {
+    return this->announcement_ring_buffer_->write((void *) buffer, bytes_to_write);
+  }
+  return 0;
 }
 
 void CombineStreamer::start(UBaseType_t priority) {
@@ -333,10 +370,14 @@ void CombineStreamer::combine_task_(void *params) {
     event.type = EventType::WARNING;
     event.err = ESP_ERR_NO_MEM;
     xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+    // xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+    // xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
 
     event.type = EventType::STOPPED;
     event.err = ESP_OK;
     xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+    // xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+    // xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
 
     while (true) {
       delay(10);
@@ -347,8 +388,12 @@ void CombineStreamer::combine_task_(void *params) {
 
   event.type = EventType::STARTED;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+  // xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+  // xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
+
   int16_t q15_ducking_ratio = (int16_t) (1 * std::pow(2, 15));  // esp-dsp using q15 fixed point numbers
   bool transfer_media = true;
+
   while (true) {
     if (xQueueReceive(this_combiner->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
@@ -407,9 +452,40 @@ void CombineStreamer::combine_task_(void *params) {
         bytes_written =
             this_combiner->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
       }
-      // } else if (this_combiner->output_ring_buffer_->available() == 0) {
-      //   event.type = EventType::IDLE;
-      //   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+
+      if (bytes_written) {
+        event.type = EventType::RUNNING;
+        xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+
+        // if (media_bytes_read > 0) {
+        //   event.type = EventType::RUNNING;
+        //   xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+        // } else {
+        //   event.type = EventType::IDLE;
+        //   xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+        // }
+
+        // if (announcement_bytes_read > 0) {
+        //   event.type = EventType::RUNNING;
+        //   xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
+        // } else {
+        //   event.type = EventType::IDLE;
+        //   xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
+        // }
+
+        // } else if (this_combiner->output_ring_buffer_->available() > 0) {
+        //   // Should the IDLE state only care about the output ring buffer or should it take into account the input
+        //   ring
+        //   // buffers?
+        //   event.type = EventType::IDLE;
+        //   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+        //   // xQueueSend(this_combiner->media_event_queue_, &event, portMAX_DELAY);
+        //   // xQueueSend(this_combiner->announcement_event_queue_, &event, portMAX_DELAY);
+        // }
+      } else if (this_combiner->output_ring_buffer_->available() == 0) {
+        event.type = EventType::IDLE;
+        xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+      }
     }
   }
 
@@ -422,6 +498,93 @@ void CombineStreamer::combine_task_(void *params) {
 
   event.type = EventType::STOPPED;
   xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+
+  while (true) {
+    delay(10);
+  }
+}
+
+void Pipeline::transfer_task_(void *params) {
+  Pipeline *this_pipeline = (Pipeline *) params;
+
+  TaskEvent event;
+  CommandEvent command_event;
+
+  event.type = EventType::STARTING;
+  event.err = ESP_OK;
+  xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
+
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+  uint8_t *transfer_buffer = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
+  if (transfer_buffer == nullptr) {
+    event.type = EventType::WARNING;
+    event.err = ESP_ERR_NO_MEM;
+    xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
+
+    event.type = EventType::STOPPED;
+    event.err = ESP_OK;
+    xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
+
+    while (true) {
+      delay(10);
+    }
+
+    return;
+  }
+
+  event.type = EventType::STARTED;
+  xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
+
+  bool stopping = false;
+
+  this_pipeline->reading_ = true;
+  this_pipeline->decoding_ = true;
+
+  while (true) {
+    if (xQueueReceive(this_pipeline->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
+      if (command_event.command == CommandEventType::STOP) {
+        this_pipeline->reader_->send_command(&command_event);
+        this_pipeline->decoder_->send_command(&command_event);
+        break;
+      }
+      if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
+        this_pipeline->reader_->send_command(&command_event);
+        // this_pipeline->decoder_->send_command(command_event);
+        stopping = true;
+      }
+    }
+
+    // Move data from http reader to decoder
+    size_t bytes_to_read = this_pipeline->decoder_->input_free();
+    size_t bytes_read = this_pipeline->reader_->read(transfer_buffer, bytes_to_read);
+    size_t bytes_written = this_pipeline->decoder_->write(transfer_buffer, bytes_read);
+
+    // Move data from decoder tot he mixer
+    if (this_pipeline->pipeline_type_ == PipelineType::MEDIA) {
+      bytes_to_read = this_pipeline->mixer_->media_free();
+      bytes_read = this_pipeline->decoder_->read(transfer_buffer, bytes_to_read);
+      bytes_written += this_pipeline->mixer_->write_media(transfer_buffer, bytes_read);
+    } else if (this_pipeline->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
+      bytes_to_read = this_pipeline->mixer_->announcement_free();
+      bytes_read = this_pipeline->decoder_->read(transfer_buffer, bytes_to_read);
+      bytes_written += this_pipeline->mixer_->write_announcement(transfer_buffer, bytes_read);
+    }
+
+    this_pipeline->watch_();
+
+    // This isn't being called once teh reader and decoder have finished... so the pipeline never closes!
+    if (!this_pipeline->reading_ && !this_pipeline->decoding_) {
+      break;
+    }
+  }
+
+  event.type = EventType::STOPPING;
+  xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
+
+  allocator.deallocate(transfer_buffer, BUFFER_SIZE);
+
+  event.type = EventType::STOPPED;
+  xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
 
   while (true) {
     delay(10);
