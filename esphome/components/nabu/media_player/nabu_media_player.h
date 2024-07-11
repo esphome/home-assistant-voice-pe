@@ -10,6 +10,7 @@
 
 // #include "mp3_decoder.h"
 #include "streamer.h"
+#include "pipeline.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -59,7 +60,8 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   optional<std::string> announcement_url_{};  // only modified by control function
   QueueHandle_t media_control_command_queue_;
 
-  // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline command queues
+  // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline
+  // command queues
   void watch_media_commands_();
   std::unique_ptr<Pipeline> media_pipeline_;
   std::unique_ptr<Pipeline> announcement_pipeline_;
@@ -69,7 +71,7 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   void watch_();
   PipelineState media_pipeline_state_{PipelineState::STOPPED};
   PipelineState announcement_pipeline_state_{PipelineState::STOPPED};
-  
+
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
 
   // // Transfer buffer for storing audio samples read from the mixer and then written to the speaker
