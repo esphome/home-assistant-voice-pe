@@ -20,18 +20,6 @@
 namespace esphome {
 namespace i2s_audio {
 
-enum FeedType : uint8_t {
-  FILE,
-  URL,
-};
-
-struct FeedCommandEvent {
-  const uint8_t *data;
-  size_t length;
-  bool stop = false;
-  FeedType feed_type;
-};
-
 // TODO: Implement stream information
 enum StreamChannels : uint8_t {
   STREAM_CHANNELS_MONO = 1,
@@ -86,20 +74,16 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
   bool initiate_client_(const std::string &new_uri);
 
   static void player_task(void *params);
-  static void feed_task(void *params);
 
   bool is_playing_{false};
 
   esp_http_client_handle_t client_ = nullptr;
 
   TaskHandle_t player_task_handle_{nullptr};
-  TaskHandle_t feed_task_handle_{nullptr};
 
   QueueHandle_t play_event_queue_;
   QueueHandle_t play_command_queue_;
 
-  QueueHandle_t feed_event_queue_;
-  QueueHandle_t feed_command_queue_;
 
   std::unique_ptr<RingBuffer> input_ring_buffer_;
 

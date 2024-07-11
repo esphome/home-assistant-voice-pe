@@ -33,9 +33,7 @@ void I2SAudioSpeaker::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Speaker...");
 
   this->play_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
-  this->feed_command_queue_ = xQueueCreate(2, sizeof(FeedCommandEvent));
   this->play_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
-  this->feed_event_queue_ = xQueueCreate(2, sizeof(TaskEvent));
 
   this->input_ring_buffer_ = RingBuffer::create(RING_BUFFER_SIZE * sizeof(int16_t));
   if (this->input_ring_buffer_ == nullptr) {
@@ -246,7 +244,6 @@ void I2SAudioSpeaker::start_() {
   }
 
   xTaskCreate(I2SAudioSpeaker::player_task, "speaker_task", 4096, (void *) this, 23, &this->player_task_handle_);
-  // xTaskCreate(I2SAudioSpeaker::feed_task, "feed_task", 8096, (void *) this, 1, &this->feed_task_handle_);
 }
 
 void I2SAudioSpeaker::stop() {
@@ -263,10 +260,6 @@ void I2SAudioSpeaker::stop_() {
   CommandEvent event;
   event.stop = true;
   xQueueSendToFront(this->play_command_queue_, &event, portMAX_DELAY);
-
-  FeedCommandEvent feed_command_event;
-  feed_command_event.stop = true;
-  xQueueSendToFront(this->feed_command_queue_, &feed_command_event, portMAX_DELAY);
 }
 
 void I2SAudioSpeaker::loop() {
@@ -325,38 +318,6 @@ void I2SAudioSpeaker::watch_() {
         break;
     }
   }
-
-  // while (xQueueReceive(this->feed_event_queue_, &event, 0)) {
-  //   switch (event.type) {
-  //     case TaskEventType::STARTING:
-  //       ESP_LOGD(TAG, "Starting Speaker Feed");
-  //       break;
-  //     case TaskEventType::STARTED:
-  //       ESP_LOGD(TAG, "Started Speaker Feed");
-  //       break;
-  //     case TaskEventType::RUNNING:
-  //       this->status_clear_warning();
-  //       break;
-  //     case TaskEventType::STOPPING:
-  //       ESP_LOGD(TAG, "Stopping Speaker Feed");
-  //       break;
-  //     case TaskEventType::STOPPED:
-  //       vTaskDelete(this->feed_task_handle_);
-  //       this->feed_task_handle_ = nullptr;
-
-  //       xQueueReset(this->feed_event_queue_);
-  //       xQueueReset(this->feed_command_queue_);
-
-  //       ESP_LOGD(TAG, "Stopped Speaker Feed");
-  //       break;
-  //     case TaskEventType::WARNING:
-  //       ESP_LOGW(TAG, "Error feeding: %s", esp_err_to_name(event.err));
-  //       this->status_set_warning();
-  //       break;
-  //     case TaskEventType::IDLE:
-  //       break;
-  //   }
-  // }
 }
 
 // Probably broken...
@@ -373,87 +334,6 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length) {
     delay(10);
   }
   return index;
-}
-
-size_t I2SAudioSpeaker::play_file(const uint8_t *data, size_t length) {
-  // TODO: Remove... the media_player component should handle this
-  ESP_LOGD(TAG, "playing");
-  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
-    this->start_();
-  }
-
-  FeedCommandEvent feed_command_event;
-  feed_command_event.feed_type = FeedType::FILE, feed_command_event.data = data;
-  feed_command_event.length = length;
-  xQueueSend(this->feed_command_queue_, &feed_command_event, portMAX_DELAY);
-
-  return length;
-}
-
-void I2SAudioSpeaker::feed_task(void *params) {
-  // TODO: Remove... the media_player component should handle this
-  I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
-
-  TaskEvent event;
-  FeedCommandEvent feed_command_event;
-
-  event.type = TaskEventType::STARTING;
-  xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
-  FeedType feed_type;
-  const uint8_t *data;
-  size_t remaining = 0;
-  size_t current = 0;
-
-  ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *receive_buffer = allocator.allocate(RING_BUFFER_SIZE);
-
-  event.type = TaskEventType::STARTED;
-  xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
-  if (receive_buffer == nullptr) {
-    event.type = TaskEventType::WARNING;
-    event.err = ESP_ERR_NO_MEM;
-    xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
-    event.type = TaskEventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
-  }
-
-  while (true) {
-    if (xQueueReceive(this_speaker->feed_command_queue_, &feed_command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (feed_command_event.stop) {
-        // Stop signal from main thread
-        break;
-      }
-      feed_type = feed_command_event.feed_type;
-      data = feed_command_event.data;
-      remaining = feed_command_event.length;
-      current = 0;
-    }
-
-    if (remaining > 0) {
-      if (feed_type == FeedType::FILE) {
-        size_t bytes_written = this_speaker->write(data + current, remaining);
-        remaining -= bytes_written;
-        current += bytes_written;
-      }
-    }
-  }
-
-  event.type = TaskEventType::STOPPED;
-  xQueueSend(this_speaker->feed_event_queue_, &event, portMAX_DELAY);
-
-  while (true) {
-    delay(10);
-  }
 }
 
 size_t I2SAudioSpeaker::write(const uint8_t *data, size_t length) {
