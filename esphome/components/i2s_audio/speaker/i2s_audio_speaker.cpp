@@ -10,7 +10,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/ring_buffer.h"
 
-#include "esp_dsp.h" // temporarily added for volume reduction
+// #include "esp_dsp.h" // temporarily added for volume reduction
 
 // Major TODOs:
 //  - optimize buffer sizes/memory used for each task
@@ -19,22 +19,22 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t SAMPLE_RATE_HZ = 16000;   // 16 kHz
-static const size_t RING_BUFFER_LENGTH = 64;  // 0.064 seconds
+static const size_t SAMPLE_RATE_HZ = 16000;    // 16 kHz
+static const size_t RING_BUFFER_LENGTH = 200;  // 0.064 seconds
 static const size_t RING_BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * RING_BUFFER_LENGTH;
-static const size_t BUFFER_COUNT = 10;
-static const size_t DMA_BUFFER_COUNT = 3;
-static const size_t DMA_BUFFER_SIZE = 300;
-static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE;  
+static const size_t QUEUE_COUNT = 20;
+static const size_t DMA_BUFFER_COUNT = 4;
+static const size_t DMA_BUFFER_SIZE = 256;
+static const size_t BUFFER_SIZE = DMA_BUFFER_SIZE;
 
 static const char *const TAG = "i2s_audio.speaker";
 
 void I2SAudioSpeaker::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Speaker...");
 
-  this->play_command_queue_ = xQueueCreate(BUFFER_COUNT, sizeof(CommandEvent));
+  this->play_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->feed_command_queue_ = xQueueCreate(2, sizeof(FeedCommandEvent));
-  this->play_event_queue_ = xQueueCreate(BUFFER_COUNT, sizeof(TaskEvent));
+  this->play_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
   this->feed_event_queue_ = xQueueCreate(2, sizeof(TaskEvent));
 
   this->input_ring_buffer_ = RingBuffer::create(RING_BUFFER_SIZE * sizeof(int16_t));
@@ -55,8 +55,9 @@ void I2SAudioSpeaker::player_task(void *params) {
   xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
 
   ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *buffer = allocator.allocate(BUFFER_SIZE);
-  int16_t *temp_buffer = allocator.allocate(BUFFER_SIZE); // only adding this to temporarily hardcode a constant volume reduction
+  int16_t *buffer = allocator.allocate(2*BUFFER_SIZE);
+  int16_t *temp_buffer =
+      allocator.allocate(BUFFER_SIZE);  // only adding this to temporarily hardcode a constant volume reduction
 
   if ((buffer == nullptr) || (temp_buffer == nullptr)) {
     event.type = TaskEventType::WARNING;
@@ -81,8 +82,8 @@ void I2SAudioSpeaker::player_task(void *params) {
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = BUFFER_COUNT,
-      .dma_buf_len = BUFFER_SIZE,
+      .dma_buf_count = DMA_BUFFER_COUNT,
+      .dma_buf_len = DMA_BUFFER_SIZE,
       .use_apll = false,
       .tx_desc_auto_clear = true,
       .fixed_mclk = I2S_PIN_NO_CHANGE,
@@ -152,8 +153,8 @@ void I2SAudioSpeaker::player_task(void *params) {
   // Assumes incoming audio stream is mono channel 16000 Hz
   // TODO: Move everything to stereo streams. Mono to stereo conversion should happen before being written to the
   // speaker
-  uint32_t bits_cfg = (this_speaker->bits_per_sample_ << 16) | this_speaker->bits_per_sample_;
-  err = i2s_set_clk(this_speaker->parent_->get_port(), 16000, bits_cfg, I2S_CHANNEL_MONO);
+  // uint32_t bits_cfg = (this_speaker->bits_per_sample_ << 16) | this_speaker->bits_per_sample_;
+  // err = i2s_set_clk(this_speaker->parent_->get_port(), 16000, bits_cfg, I2S_CHANNEL_MONO);
 
   event.type = TaskEventType::STARTED;
   xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
@@ -167,12 +168,19 @@ void I2SAudioSpeaker::player_task(void *params) {
     }
 
     size_t delay_ms = 10;
-    if (event.type != TaskEventType::RUNNING) {
-      // If the speaker is not outputting audio, wait longer to initially fill the DMA buffer as much as possible
-      delay_ms = 50;
-    }
+    // if (event.type != TaskEventType::RUNNING) {
+    //   // If the speaker is not outputting audio, wait longer to initially fill the DMA buffer as much as possible
+    //   delay_ms = 50;
+    // }
 
-    size_t bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer, BUFFER_SIZE*sizeof(int16_t), (delay_ms / portTICK_PERIOD_MS));
+    size_t bytes_read = 0;
+    if (this_speaker->combine_streamer_ == nullptr) {
+      bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer, BUFFER_SIZE * sizeof(int16_t),
+                                                          (delay_ms / portTICK_PERIOD_MS));
+    } else {
+      bytes_read = this_speaker->combine_streamer_->read((uint8_t *) buffer, BUFFER_SIZE * sizeof(int16_t),
+                                                         (delay_ms / portTICK_PERIOD_MS));
+    }
 
     if (bytes_read > 0) {
       // its too loud for constant testing! this does lower the quality quite a bit though...
@@ -180,15 +188,20 @@ void I2SAudioSpeaker::player_task(void *params) {
       // dsps_mulc_s16_ae32(buffer, temp_buffer,bytes_read/sizeof(int16_t), volume_reduction, 1, 1);
       // std::memcpy((void *) buffer, (void *) temp_buffer, bytes_read/sizeof(int16_t));
 
+      for (int i = bytes_read/2-1; i >= 0; --i) {
+        buffer[2*i] = buffer[i];
+        buffer[2*i+1] = buffer[i];
+      }
+
       size_t bytes_written;
       if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
+        i2s_write(this_speaker->parent_->get_port(), buffer, 2*bytes_read, &bytes_written, portMAX_DELAY);
       } else {
-        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+        i2s_write_expand(this_speaker->parent_->get_port(), buffer, 2*bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
                          this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       }
 
-      if (bytes_written != bytes_read) {
+      if (bytes_written != 2*bytes_read) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_TIMEOUT;  // TODO: probably not the correct error...
         xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
@@ -196,6 +209,8 @@ void I2SAudioSpeaker::player_task(void *params) {
       event.type = TaskEventType::RUNNING;
       xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
     } else {
+      // i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+
       event.type = TaskEventType::IDLE;
       xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
     }
@@ -230,7 +245,7 @@ void I2SAudioSpeaker::start_() {
     return;  // Waiting for another i2s component to return lock
   }
 
-  xTaskCreate(I2SAudioSpeaker::player_task, "speaker_task", 3584, (void *) this, 23, &this->player_task_handle_);
+  xTaskCreate(I2SAudioSpeaker::player_task, "speaker_task", 4096, (void *) this, 23, &this->player_task_handle_);
   // xTaskCreate(I2SAudioSpeaker::feed_task, "feed_task", 8096, (void *) this, 1, &this->feed_task_handle_);
 }
 

@@ -16,6 +16,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
 
+#include "esphome/components/nabu/media_player/streamer.h"
 namespace esphome {
 namespace i2s_audio {
 
@@ -74,6 +75,8 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
 
   bool has_buffered_data() const override;
 
+  void set_combine_streamer(nabu::CombineStreamer *combine_streamer) { this->combine_streamer_ = combine_streamer; }
+
  protected:
   void start_();
   void watch_();
@@ -99,6 +102,8 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
   QueueHandle_t feed_command_queue_;
 
   std::unique_ptr<RingBuffer> input_ring_buffer_;
+
+  nabu::CombineStreamer *combine_streamer_;
 
   i2s_bits_per_sample_t bits_per_sample_;
 
