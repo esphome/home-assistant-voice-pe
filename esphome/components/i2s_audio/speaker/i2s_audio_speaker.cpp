@@ -209,7 +209,7 @@ void I2SAudioSpeaker::player_task(void *params) {
       event.type = TaskEventType::RUNNING;
       xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
     } else {
-      // i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+      i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
       event.type = TaskEventType::IDLE;
       xQueueSend(this_speaker->play_event_queue_, &event, portMAX_DELAY);
