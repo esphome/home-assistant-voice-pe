@@ -3,7 +3,6 @@
 #ifdef USE_ESP32
 
 #include <driver/i2s.h>
-#include <esp_http_client.h>
 
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
@@ -24,8 +23,8 @@ static const size_t RING_BUFFER_LENGTH = 200;  // 0.064 seconds
 static const size_t RING_BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * RING_BUFFER_LENGTH;
 static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
-static const size_t DMA_BUFFER_SIZE = 256;
-static const size_t BUFFER_SIZE = DMA_BUFFER_SIZE;
+static const size_t DMA_BUFFER_SIZE = 512;
+static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE;
 
 static const char *const TAG = "i2s_audio.speaker";
 
@@ -166,17 +165,18 @@ void I2SAudioSpeaker::player_task(void *params) {
     }
 
     size_t delay_ms = 10;
+    size_t bytes_to_read = DMA_BUFFER_SIZE*sizeof(int16_t);
     // if (event.type != TaskEventType::RUNNING) {
-    //   // If the speaker is not outputting audio, wait longer to initially fill the DMA buffer as much as possible
-    //   delay_ms = 50;
+    //   // Fill the entire DMA buffer if there is audio being outputed
+    //   bytes_to_read = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE*sizeof(int16_t);
     // }
 
     size_t bytes_read = 0;
     if (this_speaker->combine_streamer_ == nullptr) {
-      bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer, BUFFER_SIZE * sizeof(int16_t),
+      bytes_read = this_speaker->input_ring_buffer_->read((void *) buffer,bytes_to_read,
                                                           (delay_ms / portTICK_PERIOD_MS));
     } else {
-      bytes_read = this_speaker->combine_streamer_->read((uint8_t *) buffer, BUFFER_SIZE * sizeof(int16_t),
+      bytes_read = this_speaker->combine_streamer_->read((uint8_t *) buffer, bytes_to_read,
                                                          (delay_ms / portTICK_PERIOD_MS));
     }
 
@@ -186,6 +186,7 @@ void I2SAudioSpeaker::player_task(void *params) {
       // dsps_mulc_s16_ae32(buffer, temp_buffer,bytes_read/sizeof(int16_t), volume_reduction, 1, 1);
       // std::memcpy((void *) buffer, (void *) temp_buffer, bytes_read/sizeof(int16_t));
 
+      // Copy mono audio samples into both channels
       for (int i = bytes_read/2-1; i >= 0; --i) {
         buffer[2*i] = buffer[i];
         buffer[2*i+1] = buffer[i];

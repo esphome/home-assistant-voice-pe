@@ -8,8 +8,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
-#include <esp_http_client.h>
-
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
@@ -70,33 +68,24 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SAud
   void watch_();
   void stop_();
 
-  bool read_wav_header_();
-  bool initiate_client_(const std::string &new_uri);
-
   static void player_task(void *params);
-
-  bool is_playing_{false};
-
-  esp_http_client_handle_t client_ = nullptr;
 
   TaskHandle_t player_task_handle_{nullptr};
 
   QueueHandle_t play_event_queue_;
   QueueHandle_t play_command_queue_;
 
-
   std::unique_ptr<RingBuffer> input_ring_buffer_;
-
   nabu::CombineStreamer *combine_streamer_;
 
-  i2s_bits_per_sample_t bits_per_sample_;
-
   uint8_t dout_pin_{0};
+  uint8_t external_dac_channels_;
 
+  bool is_playing_{false};
+  i2s_bits_per_sample_t bits_per_sample_;
 #if SOC_I2S_SUPPORTS_DAC
   i2s_dac_mode_t internal_dac_mode_{I2S_DAC_CHANNEL_DISABLE};
 #endif
-  uint8_t external_dac_channels_;
 };
 
 }  // namespace i2s_audio
