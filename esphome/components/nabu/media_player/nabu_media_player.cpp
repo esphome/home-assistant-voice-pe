@@ -23,18 +23,18 @@ namespace nabu {
 //  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
 
 static const char *const TAG = "nabu_media_player";
-static const size_t TRANSFER_BUFFER_SIZE = 8192;
+// static const size_t TRANSFER_BUFFER_SIZE = 8192;
 
 void NabuMediaPlayer::setup() {
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
-  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  this->transfer_buffer_ = allocator.allocate(TRANSFER_BUFFER_SIZE * sizeof(int16_t));
-  if (this->transfer_buffer_ == nullptr) {
-    ESP_LOGW(TAG, "Could not allocate transfer buffer");
-    this->mark_failed();
-    return;
-  }
+  // ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+  // this->transfer_buffer_ = allocator.allocate(TRANSFER_BUFFER_SIZE * sizeof(int16_t));
+  // if (this->transfer_buffer_ == nullptr) {
+  //   ESP_LOGW(TAG, "Could not allocate transfer buffer");
+  //   this->mark_failed();
+  //   return;
+  // }
 
   this->media_control_command_queue_ = xQueueCreate(1, sizeof(MediaCallCommand));
 
@@ -50,6 +50,7 @@ void NabuMediaPlayer::watch_media_commands_() {
       if (this->combine_streamer_ == nullptr) {
         {
           this->combine_streamer_ = make_unique<CombineStreamer>();
+          this->speaker_->set_combine_streamer(this->combine_streamer_.get());
         }
       }
       this->combine_streamer_->start();
@@ -59,25 +60,14 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->announcement_pipeline_ =
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
-        if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
-          command_event.command = CommandEventType::STOP;
-          this->announcement_pipeline_->send_command(&command_event);
-          // WON"T PROPERLY RESTART
+        this->announcement_pipeline_->start(this->announcement_url_.value());
 
-        } else {
-          this->announcement_pipeline_->start(1, this->announcement_url_.value());
-        }
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
-        if (this->media_pipeline_state_ != PipelineState::STOPPED) {
-          command_event.command = CommandEventType::STOP;
-          this->media_pipeline_->send_command(&command_event);
-          // WON"T PROPERLY RESTART
-        } else {
-          this->media_pipeline_->start(1, this->media_url_.value());
-        }
+
+        this->media_pipeline_->start(this->media_url_.value());
       }
       this->is_paused_ = false;
     }
@@ -107,7 +97,7 @@ void NabuMediaPlayer::watch_media_commands_() {
           if (this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
             this->combine_streamer_->send_command(&command_event);
-            this->is_paused_= false;
+            this->is_paused_ = false;
           } else {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->combine_streamer_->send_command(&command_event);
@@ -203,20 +193,20 @@ void NabuMediaPlayer::watch_() {
   }
 }
 
-size_t transfer_data_(OutputStreamer *source_streamer, size_t free, uint8_t *buffer) {
-  if ((source_streamer == nullptr) || (source_streamer->available() == 0)) {
-    return 0;
-  }
-  return source_streamer->read(buffer, free);
-}
+// size_t transfer_data_(OutputStreamer *source_streamer, size_t free, uint8_t *buffer) {
+//   if ((source_streamer == nullptr) || (source_streamer->available() == 0)) {
+//     return 0;
+//   }
+//   return source_streamer->read(buffer, free);
+// }
 
 void NabuMediaPlayer::loop() {
   size_t bytes_read = 0;
 
-  bytes_read = transfer_data_(this->combine_streamer_.get(), this->speaker_->free_bytes(), this->transfer_buffer_);
-  if (bytes_read > 0) {
-    size_t bytes_written = this->speaker_->write(this->transfer_buffer_, bytes_read);
-  }
+  // bytes_read = transfer_data_(this->combine_streamer_.get(), this->speaker_->free_bytes(), this->transfer_buffer_);
+  // if (bytes_read > 0) {
+  //   size_t bytes_written = this->speaker_->write(this->transfer_buffer_, bytes_read);
+  // }
 
   this->watch_media_commands_();
   this->watch_();
@@ -224,13 +214,14 @@ void NabuMediaPlayer::loop() {
   // Determine state of the media player
   media_player::MediaPlayerState old_state = this->state;
 
-  if ((this->announcement_pipeline_state_ != PipelineState::STOPPING) && (this->announcement_pipeline_state_ != PipelineState::STOPPED)) {
+  if ((this->announcement_pipeline_state_ != PipelineState::STOPPING) &&
+      (this->announcement_pipeline_state_ != PipelineState::STOPPED)) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-  }
-  else {
+  } else {
     if (this->is_paused_) {
       this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
-    } else if ((this->media_pipeline_state_ == PipelineState::STOPPING) || (this->media_pipeline_state_ == PipelineState::STOPPED)) {
+    } else if ((this->media_pipeline_state_ == PipelineState::STOPPING) ||
+               (this->media_pipeline_state_ == PipelineState::STOPPED)) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;

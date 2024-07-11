@@ -64,17 +64,19 @@ class OutputStreamer {
   /// @param buffer stores the read data
   /// @param length how many bytes requested to read from the ring buffer
   /// @return number of bytes actually read; will be less than length if not available in ring buffer
-  size_t read(uint8_t *buffer, size_t length) {
+  size_t read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait = 0) {
     size_t available_bytes = this->available();
     size_t bytes_to_read = std::min(length, available_bytes);
     if (bytes_to_read > 0) {
-      return this->output_ring_buffer_->read((void *) buffer, bytes_to_read);
+      return this->output_ring_buffer_->read((void *) buffer, bytes_to_read, ticks_to_wait);
     }
     return 0;
   }
 
+  virtual void reset_ring_buffers() { this->output_ring_buffer_->reset();}
+
   virtual void start(UBaseType_t priority = 1) = 0;
-  virtual void stop() = 0;
+  virtual void stop();
 
  protected:
   TaskHandle_t task_handle_{nullptr};
@@ -88,16 +90,13 @@ class HTTPStreamer : public OutputStreamer {
   HTTPStreamer();
 
   void start(UBaseType_t priority = 1) override;
-  void stop() override;
-
-  void set_current_uri(const std::string &current_uri) { this->current_uri_ = current_uri; }
-  // std::string get_current_uri() { return this->current_uri_; }
+  void start(const std::string &uri, UBaseType_t priority = 1);
 
  protected:
   static void read_task_(void *params);
 
-  void set_stream_uri_(esp_http_client_handle_t *client, const std::string &new_uri);
-  void cleanup_(esp_http_client_handle_t *client);
+  void establish_connection_(esp_http_client_handle_t *client);
+  void cleanup_connection_(esp_http_client_handle_t *client);
 
   std::string current_uri_{};
 };
@@ -106,7 +105,7 @@ class DecodeStreamer : public OutputStreamer {
  public:
   DecodeStreamer();
   void start(UBaseType_t priority = 1) override;
-  void stop() override;
+  void reset_ring_buffers() override;
 
   size_t input_free() { return this->input_ring_buffer_->free(); }
   
@@ -124,7 +123,8 @@ class CombineStreamer : public OutputStreamer {
   CombineStreamer();
 
   void start(UBaseType_t priority = 1) override;
-  void stop() override;
+  // void stop() override;
+  void reset_ring_buffers() override;
 
   size_t media_free() { return this->media_ring_buffer_->free(); }
   size_t announcement_free() { return this->announcement_ring_buffer_->free(); }
@@ -173,9 +173,8 @@ class Pipeline {
     return 0;
   }
 
-  void start(UBaseType_t priority, const std::string &uri) {
-    this->reader_->set_current_uri(uri);
-    this->reader_->start();
+  void start(const std::string &uri, UBaseType_t priority = 1) {
+    this->reader_->start(uri);
     this->decoder_->start();
     if (this->task_handle_ == nullptr) {
       xTaskCreate(Pipeline::transfer_task_, "transfer_task", 8096, (void *) this, priority, &this->task_handle_);
