@@ -130,7 +130,7 @@ void NabuMediaPlayer::watch_() {
   TaskEvent event;
 
   if (this->announcement_pipeline_ != nullptr) {
-    if (this->announcement_pipeline_->read_event(&event)) {
+    while (this->announcement_pipeline_->read_event(&event)) {
       switch (event.type) {
         case EventType::STARTING:
           this->announcement_pipeline_state_ = PipelineState::STARTING;
@@ -164,7 +164,7 @@ void NabuMediaPlayer::watch_() {
         }
         case EventType::WARNING:
           ESP_LOGW(TAG, "Error reading announcement: %s", esp_err_to_name(event.err));
-          this->status_set_warning();
+          this->status_set_warning(esp_err_to_name(event.err));
           break;
       }
     }
@@ -206,7 +206,7 @@ void NabuMediaPlayer::watch_() {
           break;
         case EventType::WARNING:
           ESP_LOGW(TAG, "Error reading media: %s", esp_err_to_name(event.err));
-          this->status_set_warning();
+          this->status_set_warning(esp_err_to_name(event.err));
           break;
       }
     }

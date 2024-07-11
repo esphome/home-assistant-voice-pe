@@ -106,23 +106,24 @@ void DecodeStreamer::decode_task_(void *params) {
     // we will need to know how much we can fit in the output buffer as well depending the file type
     size_t bytes_free = this_streamer->output_ring_buffer_->free();
 
-    size_t bytes_to_read = std::min(bytes_free, bytes_available);
+    size_t max_bytes_to_read = std::min(bytes_free, bytes_available);
     size_t bytes_read = 0;
-    if (bytes_to_read > 0) {
-      bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
-    }
-
     if (media_file_type == MediaFileType::WAV) {
-      size_t header_offset = 0;
       if (!header_parsed) {
-        header_offset = 44;
         header_parsed = true;
+        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, 44);
+        max_bytes_to_read -= bytes_read;
         // TODO: Actually parse the header!
         // TODO: Pass on the stream information to mixer
       }
       size_t bytes_written = 0;
+      size_t bytes_read = 0;
+      if (max_bytes_to_read > 0) {
+        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, max_bytes_to_read);
+      }
+
       if (bytes_read > 0) {
-        bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer+header_offset, bytes_read-header_offset);
+        bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
       }
     }
 
@@ -143,7 +144,7 @@ void DecodeStreamer::decode_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(buffer, BUFFER_SIZE);
+  allocator.deallocate(buffer, BUFFER_SIZE * sizeof(int16_t));
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -317,7 +318,7 @@ void HTTPStreamer::read_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(buffer, HTTP_BUFFER_SIZE);
+  allocator.deallocate(buffer, HTTP_BUFFER_SIZE * sizeof(int16_t));
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -430,7 +431,7 @@ void CombineStreamer::combine_task_(void *params) {
     if ((output_free > 0) && (media_available * transfer_media + announcement_available > 0)) {
       size_t bytes_to_read = output_free;
 
-      if (media_available > 0) {
+      if (media_available * transfer_media > 0) {
         bytes_to_read = std::min(bytes_to_read, media_available);
       }
 
@@ -438,52 +439,54 @@ void CombineStreamer::combine_task_(void *params) {
         bytes_to_read = std::min(bytes_to_read, announcement_available);
       }
 
-      size_t media_bytes_read = 0;
-      if (transfer_media && (media_available > 0)) {
-        media_bytes_read = this_combiner->media_ring_buffer_->read((void *) media_buffer, bytes_to_read, 0);
-        if (media_bytes_read > 0) {
-          if (q15_ducking_ratio < (1 * std::pow(2, 15))) {
-            dsps_mulc_s16_ae32(media_buffer, combination_buffer, media_bytes_read, q15_ducking_ratio, 1, 1);
-            std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
+      if (bytes_to_read > 0) {
+        size_t media_bytes_read = 0;
+        if (media_available > 0) {
+          media_bytes_read = this_combiner->media_ring_buffer_->read((void *) media_buffer, bytes_to_read, 0);
+          if (media_bytes_read > 0) {
+            if (q15_ducking_ratio < (1 * std::pow(2, 15))) {
+              dsps_mulc_s16_ae32(media_buffer, combination_buffer, media_bytes_read, q15_ducking_ratio, 1, 1);
+              std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
+            }
           }
         }
-      }
 
-      size_t announcement_bytes_read = 0;
-      if (announcement_available > 0) {
-        announcement_bytes_read =
-            this_combiner->announcement_ring_buffer_->read((void *) announcement_buffer, bytes_to_read, 0);
-      }
+        size_t announcement_bytes_read = 0;
+        if (announcement_available > 0) {
+          announcement_bytes_read =
+              this_combiner->announcement_ring_buffer_->read((void *) announcement_buffer, bytes_to_read, 0);
+        }
 
-      size_t bytes_written = 0;
-      if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
-        // This adds the two signals together and then shifts it by 1 bit to avoid clipping
-        // TODO: Don't shift by 1 as the announcement stream will be quieter than desired (need to clamp?)
-        dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
-        bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
-      } else if (media_bytes_read > 0) {
-        bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
-        // size_t total_mono_samples = media_bytes_read/2;
-        // for (int i = 0; i < total_mono_samples; ++i) {
-        //   combination_buffer[2*i] = media_buffer[i];
-        //   combination_buffer[2*i+1] = media_buffer[i];
-        // }
+        size_t bytes_written = 0;
+        if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
+          // This adds the two signals together and then shifts it by 1 bit to avoid clipping
+          // TODO: Don't shift by 1 as the announcement stream will be quieter than desired (need to clamp?)
+          dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
+          bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
+        } else if (media_bytes_read > 0) {
+          bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
+          // size_t total_mono_samples = media_bytes_read/2;
+          // for (int i = 0; i < total_mono_samples; ++i) {
+          //   combination_buffer[2*i] = media_buffer[i];
+          //   combination_buffer[2*i+1] = media_buffer[i];
+          // }
 
-        // size_t stereo_bytes_used = total_mono_samples*2*sizeof(int16_t);
-        // ESP_LOGD("mixer", "free bytes in ring bufer %d; bytes wanting to write %d",
-        // this_combiner->output_ring_buffer_->free(), stereo_bytes_used); bytes_written =
-        // this_combiner->output_ring_buffer_->write((void *) media_buffer, stereo_bytes_used);
-      } else if (announcement_bytes_read > 0) {
-        bytes_written =
-            this_combiner->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
-      }
+          // size_t stereo_bytes_used = total_mono_samples*2*sizeof(int16_t);
+          // ESP_LOGD("mixer", "free bytes in ring bufer %d; bytes wanting to write %d",
+          // this_combiner->output_ring_buffer_->free(), stereo_bytes_used); bytes_written =
+          // this_combiner->output_ring_buffer_->write((void *) media_buffer, stereo_bytes_used);
+        } else if (announcement_bytes_read > 0) {
+          bytes_written =
+              this_combiner->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
+        }
 
-      if (bytes_written) {
-        event.type = EventType::RUNNING;
-        xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
-      } else if (this_combiner->output_ring_buffer_->available() == 0) {
-        event.type = EventType::IDLE;
-        xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+        if (bytes_written) {
+          event.type = EventType::RUNNING;
+          xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+        } else if (this_combiner->output_ring_buffer_->available() == 0) {
+          event.type = EventType::IDLE;
+          xQueueSend(this_combiner->event_queue_, &event, portMAX_DELAY);
+        }
       }
     }
   }
