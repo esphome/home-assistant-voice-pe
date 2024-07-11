@@ -74,12 +74,11 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
 
   i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
 
-  // // Transfer buffer for storing audio samples read from the mixer and then written to the speaker
-  // uint8_t *transfer_buffer_{nullptr};
-
   bool is_paused_{false};
   bool is_muted_{false};
 
+  bool pending_media_start_{false};
+  bool pending_announcement_start_{false};
   // speaker::StreamInfo stream_info_{
   //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
 };

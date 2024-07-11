@@ -60,16 +60,31 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->announcement_pipeline_ =
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
-        this->announcement_pipeline_->start(this->announcement_url_.value());
-
+        if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+          command_event.command = CommandEventType::STOP;
+          this->announcement_pipeline_->send_command(&command_event);
+          this->pending_announcement_start_ = true;
+        } else {
+          this->announcement_pipeline_->start(this->announcement_url_.value());
+        }
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
 
-        this->media_pipeline_->start(this->media_url_.value());
+        if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+          command_event.command = CommandEventType::STOP;
+          this->media_pipeline_->send_command(&command_event);
+          this->pending_media_start_ = true;
+        } else {
+          this->media_pipeline_->start(this->media_url_.value());
+        }
+        if (this->is_paused_) {
+          command_event.command = CommandEventType::RESUME_MEDIA;
+          this->combine_streamer_->send_command(&command_event);
+        }
+        this->is_paused_ = false;
       }
-      this->is_paused_ = false;
     }
 
     if (media_command.command.has_value()) {
@@ -139,8 +154,12 @@ void NabuMediaPlayer::watch_() {
         case EventType::STOPPED: {
           this->announcement_pipeline_->stop();
           ESP_LOGD(TAG, "Stopped Announcement Playback");
-
           this->announcement_pipeline_state_ = PipelineState::STOPPED;
+
+          if (this->pending_announcement_start_) {
+            this->announcement_pipeline_->start(this->announcement_url_.value());
+            this->pending_announcement_start_ = false;
+          }
           break;
         }
         case EventType::WARNING:
@@ -179,6 +198,11 @@ void NabuMediaPlayer::watch_() {
           this->media_pipeline_->stop();
 
           ESP_LOGD(TAG, "Stopped Media Playback");
+
+          if (this->pending_media_start_) {
+            this->media_pipeline_->start(this->media_url_.value());
+            this->pending_media_start_ = false;
+          }
           break;
         case EventType::WARNING:
           ESP_LOGW(TAG, "Error reading media: %s", esp_err_to_name(event.err));

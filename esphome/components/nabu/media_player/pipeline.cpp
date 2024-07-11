@@ -95,7 +95,7 @@ void Pipeline::transfer_task_(void *params) {
       if (command_event.command == CommandEventType::STOP) {
         this_pipeline->reader_->send_command(&command_event);
         this_pipeline->decoder_->send_command(&command_event);
-        break;
+        stopping = true;
       }
       if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
         this_pipeline->reader_->send_command(&command_event);
@@ -146,6 +146,7 @@ void Pipeline::transfer_task_(void *params) {
 
 void Pipeline::watch_() {
   TaskEvent event;
+  CommandEvent command_event;
 
   while (this->reader_->read_event(&event)) {
     switch (event.type) {
@@ -154,6 +155,9 @@ void Pipeline::watch_() {
         break;
       case EventType::STARTED:
         this->reading_ = true;
+        command_event.command = CommandEventType::START;
+        command_event.media_file_type = event.media_file_type;
+        this->decoder_->send_command(&command_event);
         break;
       case EventType::IDLE:
         this->reading_ = false;
@@ -167,7 +171,6 @@ void Pipeline::watch_() {
       case EventType::STOPPED: {
         this->reading_ = false;
         this->reader_->stop();
-        CommandEvent command_event;
         command_event.command = CommandEventType::STOP_GRACEFULLY;
         this->decoder_->send_command(&command_event);
         break;

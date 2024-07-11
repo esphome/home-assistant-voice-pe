@@ -82,16 +82,24 @@ void DecodeStreamer::decode_task_(void *params) {
   event.type = EventType::STARTED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
+  MediaFileType media_file_type = MediaFileType::NONE;
+
   bool stopping = false;
+  bool header_parsed = false;
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
         this_streamer->reset_ring_buffers();
+        media_file_type = command_event.media_file_type;
       } else if (command_event.command == CommandEventType::STOP) {
         break;
       } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
         stopping = true;
       }
+    }
+
+    if (media_file_type == MediaFileType::NONE) {
+      continue;
     }
 
     size_t bytes_available = this_streamer->input_ring_buffer_->available();
@@ -104,9 +112,18 @@ void DecodeStreamer::decode_task_(void *params) {
       bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
     }
 
-    size_t bytes_written = 0;
-    if (bytes_read > 0) {
-      bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
+    if (media_file_type == MediaFileType::WAV) {
+      size_t header_offset = 0;
+      if (!header_parsed) {
+        header_offset = 44;
+        header_parsed = true;
+        // TODO: Actually parse the header!
+        // TODO: Pass on the stream information to mixer
+      }
+      size_t bytes_written = 0;
+      if (bytes_read > 0) {
+        bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer+header_offset, bytes_read-header_offset);
+      }
     }
 
     if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
@@ -152,11 +169,11 @@ HTTPStreamer::HTTPStreamer() {
   this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
 }
 
-void HTTPStreamer::establish_connection_(esp_http_client_handle_t *client) {
+MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *client) {
   this->cleanup_connection_(client);
 
   if (this->current_uri_.empty()) {
-    return;
+    return MediaFileType::NONE;
   }
 
   esp_http_client_config_t config = {
@@ -169,14 +186,14 @@ void HTTPStreamer::establish_connection_(esp_http_client_handle_t *client) {
 
   if (client == nullptr) {
     // ESP_LOGE(TAG, "Failed to initialize HTTP connection");
-    return;
+    return MediaFileType::NONE;
   }
 
   esp_err_t err;
   if ((err = esp_http_client_open(*client, 0)) != ESP_OK) {
     // ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
     this->cleanup_connection_(client);
-    return;
+    return MediaFileType::NONE;
   }
 
   int content_length = esp_http_client_fetch_headers(*client);
@@ -184,20 +201,28 @@ void HTTPStreamer::establish_connection_(esp_http_client_handle_t *client) {
   if (content_length <= 0) {
     // ESP_LOGE(TAG, "Failed to get content length: %s", esp_err_to_name(err));
     this->cleanup_connection_(client);
-    return;
+    return MediaFileType::NONE;
   }
 
-  return;
+  char url[500];
+  if (esp_http_client_get_url(*client, url, 500) != ESP_OK) {
+    this->cleanup_connection_(client);
+    return MediaFileType::NONE;
+  }
+
+  std::string url_string = url;
+
+  if (str_endswith(url_string, ".wav")) {
+    return MediaFileType::WAV;
+  }
+
+  return MediaFileType::NONE;
 }
 
 void HTTPStreamer::start(UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
     xTaskCreate(HTTPStreamer::read_task_, "read_task", 8096, (void *) this, priority, &this->task_handle_);
   }
-
-  CommandEvent command_event;
-  command_event.command = CommandEventType::START;
-  this->send_command(&command_event);
 }
 
 void HTTPStreamer::start(const std::string &uri, UBaseType_t priority) {
@@ -240,15 +265,18 @@ void HTTPStreamer::read_task_(void *params) {
     return;
   }
 
-  event.type = EventType::STARTED;
-  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+  MediaFileType file_type = this_streamer->establish_connection_(&client);
+  if (file_type == MediaFileType::NONE) {
+    this_streamer->cleanup_connection_(&client);
+  } else {
+    event.type = EventType::STARTED;
+    event.media_file_type = file_type;
+    xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+  }
 
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::START) {
-        this_streamer->reset_ring_buffers();
-        this_streamer->establish_connection_(&client);
-      } else if (command_event.command == CommandEventType::STOP) {
+      if (command_event.command == CommandEventType::STOP) {
         this_streamer->cleanup_connection_(&client);
         break;
       } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
@@ -271,7 +299,6 @@ void HTTPStreamer::read_task_(void *params) {
       }
 
       if (esp_http_client_is_complete_data_received(client)) {
-        // this_streamer->current_uri_ = std::string();
         this_streamer->cleanup_connection_(&client);
       }
 

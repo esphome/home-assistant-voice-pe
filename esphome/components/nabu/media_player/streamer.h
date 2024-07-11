@@ -23,10 +23,18 @@ enum class EventType : uint8_t {
   STOPPED,
   WARNING = 255,
 };
+
+enum class MediaFileType : uint8_t {
+  NONE = 0,
+  WAV,
+};
+
 struct TaskEvent {
   EventType type;
   esp_err_t err;
+  MediaFileType media_file_type;
 };
+
 enum class CommandEventType : uint8_t {
   START,
   STOP,
@@ -35,14 +43,18 @@ enum class CommandEventType : uint8_t {
   PAUSE_MEDIA,
   RESUME_MEDIA,
 };
-struct CommandEvent {
-  CommandEventType command;
-  float ducking_ratio = 0.0;
-};
+
 
 enum class PipelineType : uint8_t {
   MEDIA,
   ANNOUNCEMENT,
+};
+
+
+struct CommandEvent {
+  CommandEventType command;
+  float ducking_ratio = 0.0;
+  MediaFileType media_file_type = MediaFileType::NONE;
 };
 
 class OutputStreamer {
@@ -93,7 +105,7 @@ class HTTPStreamer : public OutputStreamer {
  protected:
   static void read_task_(void *params);
 
-  void establish_connection_(esp_http_client_handle_t *client);
+  MediaFileType establish_connection_(esp_http_client_handle_t *client);
   void cleanup_connection_(esp_http_client_handle_t *client);
 
   std::string current_uri_{};
