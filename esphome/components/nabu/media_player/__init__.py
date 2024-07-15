@@ -37,6 +37,8 @@ async def to_code(config):
         # repo="https://github.com/espressif/esp-dsp",
         # ref="v1.3.0",
     )
+    cg.add_build_flag("-Wno-narrowing")
+    
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await media_player.register_media_player(var, config)

@@ -6,6 +6,10 @@
 #include "esphome/core/helpers.h"
 
 #include "esp_dsp.h"
+
+#include "mp3_decoder.h"
+// #include "flac_decoder.h"
+
 namespace esphome {
 namespace nabu {
 
@@ -62,8 +66,9 @@ void DecodeStreamer::decode_task_(void *params) {
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
   uint8_t *buffer = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
+  uint8_t *buffer_output = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
 
-  if (buffer == nullptr) {
+  if ((buffer == nullptr) || (buffer_output == nullptr)) {
     event.type = EventType::WARNING;
     event.err = ESP_ERR_NO_MEM;
     xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -83,6 +88,16 @@ void DecodeStreamer::decode_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   MediaFileType media_file_type = MediaFileType::NONE;
+
+  HMP3Decoder mp3_decoder = MP3InitDecoder();
+  MP3FrameInfo mp3_frame_info;
+  int mp3_bytes_left = 0;
+
+  uint8_t *mp3_buffer_current = nullptr;
+  bool mp3_printed_info = false;
+
+  int mp3_output_bytes_left = 0;
+  uint8_t *mp3_output_buffer_current = nullptr;
 
   bool stopping = false;
   bool header_parsed = false;
@@ -125,8 +140,95 @@ void DecodeStreamer::decode_task_(void *params) {
       if (bytes_read > 0) {
         bytes_written = this_streamer->output_ring_buffer_->write((void *) buffer, bytes_read);
       }
-    }
+    } else if (media_file_type == MediaFileType::MP3) {
+      if (mp3_output_bytes_left > 0) {
+        size_t bytes_free = this_streamer->output_ring_buffer_->free();
 
+        size_t bytes_to_write = std::min(static_cast<size_t>(mp3_output_bytes_left), bytes_free);
+
+        size_t bytes_written =
+            this_streamer->output_ring_buffer_->write((void *) mp3_output_buffer_current, bytes_to_write);
+
+        mp3_output_bytes_left -= bytes_written;
+        mp3_output_buffer_current += bytes_written;
+
+      } else {
+        // Shift unread data in buffer to start
+        if (mp3_bytes_left > 0) {
+          memmove(buffer, mp3_buffer_current, mp3_bytes_left);
+        }
+
+        // read in new mp3 data to fill the buffer
+        size_t bytes_available = this_streamer->input_ring_buffer_->available();
+        size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
+        if (bytes_to_read > 0) {
+          bytes_read = this_streamer->input_ring_buffer_->read((void *) (buffer + mp3_bytes_left), max_bytes_to_read);
+
+          // set the remaining part of the buffer to 0 if it wasn't completely filled
+          memset(buffer + mp3_bytes_left + bytes_read, 0, BUFFER_SIZE - mp3_bytes_left - bytes_read);
+
+          // update pointers
+          mp3_bytes_left += bytes_read;
+          mp3_buffer_current = buffer;
+        }
+
+        // Look for the next sync word
+        int32_t offset = MP3FindSyncWord(mp3_buffer_current, mp3_bytes_left);
+        if (offset < 0) {
+          // PROBLEM!
+          // this_->is_playing_ = false;
+          // this->cleanup_();
+          // return;
+        }
+
+        // Advance read pointer
+        mp3_buffer_current += offset;
+        mp3_bytes_left -= offset;
+
+        // Attempt to decode MP3 data at read pointer
+        int err = MP3Decode(mp3_decoder, &mp3_buffer_current, &mp3_bytes_left, (int16_t *) buffer_output, 0);
+        if (err) {
+          // switch (err) {
+          //   case ERR_MP3_MAINDATA_UNDERFLOW:
+          //     // Not a problem. Next call to decode will provide more data.
+          //     break;
+          //   default:
+          //     // Not much we can do
+          //     // ESP_LOGD(TAG, "Unexpected error decoding MP3 data: %d.", err);
+          //     this->is_playing_ = false;
+          //     this->cleanup_();
+          //     break;
+          // }
+        } else {
+          // Actual audio...maybe. The frame info struct:
+          // int bitrate;
+          // int nChans;
+          // int samprate;
+          // int bitsPerSample;
+          // int outputSamps;
+          // int layer;
+          // int version;
+          MP3GetLastFrameInfo(mp3_decoder, &mp3_frame_info);
+          if (mp3_frame_info.outputSamps > 0) {
+            mp3_output_bytes_left = mp3_frame_info.outputSamps * sizeof(int16_t);
+            mp3_output_buffer_current = buffer_output;
+            // Only bother if there are actual output samples
+            // if (!mp3_printed_info) {
+            // For debugging purposes.
+            // TODO: Resample
+            // mp3_printed_info = true;
+            // ESP_LOGD(TAG, "Sample Rate: %d", mp3_frame_info.samprate);
+            // ESP_LOGD(TAG, "Channels: %d", mp3_frame_info.nChans);
+            // ESP_LOGD(TAG, "Bits Per Sample: %d", mp3_frame_info.bitsPerSample);
+            // ESP_LOGD(TAG, "Bit Rate: %d", mp3_frame_info.bitrate);
+            // }
+            // size_t output_bytes = mp3_frame_info.outputSamps * sizeof(int16_t);
+
+            // int bytes_per_sample = (this->mp3_frame_info_.bitsPerSample / 8) * this->mp3_frame_info_.nChans;
+          }
+        }
+      }
+    }
     if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
       event.type = EventType::RUNNING;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -215,6 +317,8 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
 
   if (str_endswith(url_string, ".wav")) {
     return MediaFileType::WAV;
+  } else if (str_endswith(url_string, ".mp3")) {
+    return MediaFileType::MP3;
   }
 
   return MediaFileType::NONE;

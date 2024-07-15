@@ -11,6 +11,8 @@
 
 #include <esp_http_client.h>
 
+#include "mp3_decoder.h"
+
 namespace esphome {
 namespace nabu {
 
@@ -27,6 +29,7 @@ enum class EventType : uint8_t {
 enum class MediaFileType : uint8_t {
   NONE = 0,
   WAV,
+  MP3,
 };
 
 struct TaskEvent {
@@ -44,12 +47,10 @@ enum class CommandEventType : uint8_t {
   RESUME_MEDIA,
 };
 
-
 enum class PipelineType : uint8_t {
   MEDIA,
   ANNOUNCEMENT,
 };
-
 
 struct CommandEvent {
   CommandEventType command;
@@ -126,6 +127,12 @@ class DecodeStreamer : public OutputStreamer {
  protected:
   static void decode_task_(void *params);
   std::unique_ptr<RingBuffer> input_ring_buffer_;
+
+  // HMP3Decoder mp3_decoder_;
+  // MP3FrameInfo mp3_frame_info_;
+  // int mp3_bytes_left_ = 0;  // MP3 bytes left decode
+  // uint8_t *mp3_buffer_current_ = nullptr;
+  // bool mp3_printed_info_ = false;
 };
 
 class CombineStreamer : public OutputStreamer {

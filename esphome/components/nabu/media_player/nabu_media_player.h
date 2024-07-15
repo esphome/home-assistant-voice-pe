@@ -9,6 +9,8 @@
 #include "esphome/core/ring_buffer.h"
 
 // #include "mp3_decoder.h"
+#include "flac_decoder.h"
+
 #include "streamer.h"
 #include "pipeline.h"
 
