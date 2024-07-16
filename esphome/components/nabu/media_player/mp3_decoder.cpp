@@ -41,6 +41,7 @@
  **************************************************************************************/
 
 #include "mp3_decoder.h"
+#include "esphome/core/helpers.h"
 
 /* indexing = [version][samplerate index]
  * sample rate of frame (Hz)
@@ -8179,18 +8180,37 @@ MP3DecInfo *AllocateBuffers(void) {
   IMDCTInfo *mi;
   SubbandInfo *sbi;
 
-  mp3DecInfo = (MP3DecInfo *)malloc(sizeof(MP3DecInfo));
+  esphome::ExternalRAMAllocator<MP3DecInfo> mp3di_allocator(esphome::ExternalRAMAllocator<MP3DecInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<FrameHeader> fh_allocator(esphome::ExternalRAMAllocator<FrameHeader>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<SideInfo> si_allocator(esphome::ExternalRAMAllocator<SideInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<ScaleFactorInfo> sfi_allocator(esphome::ExternalRAMAllocator<ScaleFactorInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<HuffmanInfo> hi_allocator(esphome::ExternalRAMAllocator<HuffmanInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<DequantInfo> di_allocator(esphome::ExternalRAMAllocator<DequantInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<IMDCTInfo> mi_allocator(esphome::ExternalRAMAllocator<IMDCTInfo>::ALLOW_FAILURE);
+  esphome::ExternalRAMAllocator<SubbandInfo> sbi_allocator(esphome::ExternalRAMAllocator<SubbandInfo>::ALLOW_FAILURE);
+
+  // mp3DecInfo = (MP3DecInfo *)malloc(sizeof(MP3DecInfo));
+  mp3DecInfo = mp3di_allocator.allocate(1);
   if (!mp3DecInfo)
     return 0;
   ClearBuffer(mp3DecInfo, sizeof(MP3DecInfo));
 
-  fh = (FrameHeader *)malloc(sizeof(FrameHeader));
-  si = (SideInfo *)malloc(sizeof(SideInfo));
-  sfi = (ScaleFactorInfo *)malloc(sizeof(ScaleFactorInfo));
-  hi = (HuffmanInfo *)malloc(sizeof(HuffmanInfo));
-  di = (DequantInfo *)malloc(sizeof(DequantInfo));
-  mi = (IMDCTInfo *)malloc(sizeof(IMDCTInfo));
-  sbi = (SubbandInfo *)malloc(sizeof(SubbandInfo));
+
+
+  // fh = (FrameHeader *)malloc(sizeof(FrameHeader));
+  // si = (SideInfo *)malloc(sizeof(SideInfo));
+  // sfi = (ScaleFactorInfo *)malloc(sizeof(ScaleFactorInfo));
+  // hi = (HuffmanInfo *)malloc(sizeof(HuffmanInfo));
+  // di = (DequantInfo *)malloc(sizeof(DequantInfo));
+  // mi = (IMDCTInfo *)malloc(sizeof(IMDCTInfo));
+  // sbi = (SubbandInfo *)malloc(sizeof(SubbandInfo));
+  fh = fh_allocator.allocate(1);
+  si = si_allocator.allocate(1);
+  sfi = sfi_allocator.allocate(1);
+  hi = hi_allocator.allocate(1);
+  di = di_allocator.allocate(1);
+  mi = mi_allocator.allocate(1);
+  sbi = sbi_allocator.allocate(1);
 
   mp3DecInfo->FrameHeaderPS = (void *)fh;
   mp3DecInfo->SideInfoPS = (void *)si;

@@ -22,7 +22,7 @@ class Pipeline {
 
   size_t read(uint8_t *buffer, size_t length);
 
-  void start(const std::string &uri, UBaseType_t priority = 1);
+  void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
 
   void stop();
 

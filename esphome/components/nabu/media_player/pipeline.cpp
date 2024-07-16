@@ -6,7 +6,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 2048;
+static const size_t BUFFER_SIZE = 2 * 2048;
 
 static const size_t QUEUE_COUNT = 10;
 
@@ -30,11 +30,11 @@ size_t Pipeline::read(uint8_t *buffer, size_t length) {
   return 0;
 }
 
-void Pipeline::start(const std::string &uri, UBaseType_t priority) {
-  this->reader_->start(uri);
-  this->decoder_->start();
+void Pipeline::start(const std::string &uri, const std::string &task_name, UBaseType_t priority) {
+  this->reader_->start(uri, task_name + "_reader");
+  this->decoder_->start(task_name + "_reader");
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(Pipeline::transfer_task_, "transfer_task", 8096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(Pipeline::transfer_task_, task_name.c_str(), 8096, (void *) this, priority, &this->task_handle_);
   }
 }
 
@@ -65,7 +65,7 @@ void Pipeline::transfer_task_(void *params) {
   xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  uint8_t *transfer_buffer = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
+  uint8_t *transfer_buffer = allocator.allocate(BUFFER_SIZE);
   if (transfer_buffer == nullptr) {
     event.type = EventType::WARNING;
     event.err = ESP_ERR_NO_MEM;
@@ -92,7 +92,9 @@ void Pipeline::transfer_task_(void *params) {
 
   while (true) {
     if (xQueueReceive(this_pipeline->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::STOP) {
+      if (command_event.command == CommandEventType::START) {
+        this_pipeline->reader_->send_command(&command_event);
+      } else if (command_event.command == CommandEventType::STOP) {
         this_pipeline->reader_->send_command(&command_event);
         this_pipeline->decoder_->send_command(&command_event);
         stopping = true;
@@ -109,23 +111,22 @@ void Pipeline::transfer_task_(void *params) {
 
     // Move data from decoder to the mixer
     if (this_pipeline->pipeline_type_ == PipelineType::MEDIA) {
-      bytes_to_read = this_pipeline->mixer_->media_free();
+      bytes_to_read = std::min(this_pipeline->mixer_->media_free(), BUFFER_SIZE);
       bytes_read = this_pipeline->decoder_->read(transfer_buffer, bytes_to_read);
       bytes_written += this_pipeline->mixer_->write_media(transfer_buffer, bytes_read);
     } else if (this_pipeline->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
-      bytes_to_read = this_pipeline->mixer_->announcement_free();
+      bytes_to_read = std::min(this_pipeline->mixer_->announcement_free(), BUFFER_SIZE);
       bytes_read = this_pipeline->decoder_->read(transfer_buffer, bytes_to_read);
       bytes_written += this_pipeline->mixer_->write_announcement(transfer_buffer, bytes_read);
     }
 
     // Move data from http reader to decoder
-    bytes_to_read = this_pipeline->decoder_->input_free();
+    bytes_to_read = std::min(this_pipeline->decoder_->input_free(), BUFFER_SIZE);
     bytes_read = this_pipeline->reader_->read(transfer_buffer, bytes_to_read);
     bytes_written = this_pipeline->decoder_->write(transfer_buffer, bytes_read);
 
     this_pipeline->watch_();
 
-    // This isn't being called once teh reader and decoder have finished... so the pipeline never closes!
     if (!this_pipeline->reading_ && !this_pipeline->decoding_) {
       break;
     }

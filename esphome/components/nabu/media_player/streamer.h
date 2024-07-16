@@ -86,7 +86,7 @@ class OutputStreamer {
 
   virtual void reset_ring_buffers() { this->output_ring_buffer_->reset(); }
 
-  virtual void start(UBaseType_t priority = 1) = 0;
+  virtual void start(const std::string &task_name, UBaseType_t priority = 1) = 0;
   virtual void stop();
 
  protected:
@@ -100,8 +100,8 @@ class HTTPStreamer : public OutputStreamer {
  public:
   HTTPStreamer();
 
-  void start(UBaseType_t priority = 1) override;
-  void start(const std::string &uri, UBaseType_t priority = 1);
+  void start(const std::string &task_name, UBaseType_t priority = 1) override;
+  void start(const std::string &uri,const std::string &task_name, UBaseType_t priority = 1);
 
  protected:
   static void read_task_(void *params);
@@ -115,7 +115,7 @@ class HTTPStreamer : public OutputStreamer {
 class DecodeStreamer : public OutputStreamer {
  public:
   DecodeStreamer();
-  void start(UBaseType_t priority = 1) override;
+  void start(const std::string &task_name, UBaseType_t priority = 1) override;
   void reset_ring_buffers() override;
 
   size_t input_free() { return this->input_ring_buffer_->free(); }
@@ -139,7 +139,7 @@ class CombineStreamer : public OutputStreamer {
  public:
   CombineStreamer();
 
-  void start(UBaseType_t priority = 1) override;
+  void start(const std::string &task_name, UBaseType_t priority = 1) override;
   // void stop() override;
   void reset_ring_buffers() override;
 

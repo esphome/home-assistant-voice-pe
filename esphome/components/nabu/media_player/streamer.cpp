@@ -15,9 +15,8 @@ namespace nabu {
 
 // Major TODOs:
 //  - Rename/split up file, it contains more than one class
-//  - Ring buffers are potentially unsafe when used outside of a component
 
-static const size_t HTTP_BUFFER_SIZE = 8192;
+static const size_t HTTP_BUFFER_SIZE = 2 * 8192;
 static const size_t BUFFER_SIZE = 2048;
 
 static const size_t QUEUE_COUNT = 10;
@@ -35,9 +34,9 @@ DecodeStreamer::DecodeStreamer() {
   }
 }
 
-void DecodeStreamer::start(UBaseType_t priority) {
+void DecodeStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(DecodeStreamer::decode_task_, "decode_task", 8096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(DecodeStreamer::decode_task_, task_name.c_str(), 4092, (void *) this, priority, &this->task_handle_);
   }
 }
 
@@ -65,8 +64,8 @@ void DecodeStreamer::decode_task_(void *params) {
   CommandEvent command_event;
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  uint8_t *buffer = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
-  uint8_t *buffer_output = allocator.allocate(BUFFER_SIZE * sizeof(int16_t));
+  uint8_t *buffer = allocator.allocate(BUFFER_SIZE);         // * sizeof(int16_t));
+  uint8_t *buffer_output = allocator.allocate(BUFFER_SIZE);  // * sizeof(int16_t));
 
   if ((buffer == nullptr) || (buffer_output == nullptr)) {
     event.type = EventType::WARNING;
@@ -89,23 +88,46 @@ void DecodeStreamer::decode_task_(void *params) {
 
   MediaFileType media_file_type = MediaFileType::NONE;
 
+  // TODO: only initialize if needed
   HMP3Decoder mp3_decoder = MP3InitDecoder();
   MP3FrameInfo mp3_frame_info;
   int mp3_bytes_left = 0;
 
-  uint8_t *mp3_buffer_current = nullptr;
+  uint8_t *mp3_buffer_current = buffer;
   bool mp3_printed_info = false;
 
   int mp3_output_bytes_left = 0;
-  uint8_t *mp3_output_buffer_current = nullptr;
+  uint8_t *mp3_output_buffer_current = buffer_output;
 
   bool stopping = false;
   bool header_parsed = false;
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
+        if ((media_file_type == MediaFileType::NONE) || (media_file_type == MediaFileType::MP3)) {
+          MP3FreeDecoder(mp3_decoder);
+        }
+
+        // Reset state of everything
         this_streamer->reset_ring_buffers();
+        memset((void *) buffer, 0, BUFFER_SIZE);
+        memset((void *) buffer_output, 0, BUFFER_SIZE);
+
+        mp3_bytes_left = 0;
+
+        mp3_buffer_current = buffer;
+        mp3_printed_info = false;
+
+        mp3_output_bytes_left = 0;
+        mp3_output_buffer_current = buffer_output;
+
+        stopping = false;
+        header_parsed = false;
+
         media_file_type = command_event.media_file_type;
+        if (media_file_type == MediaFileType::MP3) {
+          mp3_decoder = MP3InitDecoder();
+        }
       } else if (command_event.command == CommandEventType::STOP) {
         break;
       } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
@@ -123,6 +145,9 @@ void DecodeStreamer::decode_task_(void *params) {
 
     size_t max_bytes_to_read = std::min(bytes_free, bytes_available);
     size_t bytes_read = 0;
+
+    // TODO: Pass on the streaming audio configuration to the mixer after determining from header; e.g., mono vs stereo,
+    // sample rate, bits per sample
     if (media_file_type == MediaFileType::WAV) {
       if (!header_parsed) {
         header_parsed = true;
@@ -154,7 +179,7 @@ void DecodeStreamer::decode_task_(void *params) {
 
       } else {
         // Shift unread data in buffer to start
-        if (mp3_bytes_left > 0) {
+        if ((mp3_bytes_left > 0) && (mp3_bytes_left < BUFFER_SIZE)) {
           memmove(buffer, mp3_buffer_current, mp3_bytes_left);
         }
 
@@ -162,69 +187,86 @@ void DecodeStreamer::decode_task_(void *params) {
         size_t bytes_available = this_streamer->input_ring_buffer_->available();
         size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
         if (bytes_to_read > 0) {
-          bytes_read = this_streamer->input_ring_buffer_->read((void *) (buffer + mp3_bytes_left), max_bytes_to_read);
+          uint8_t *new_mp3_data = buffer + mp3_bytes_left;
+          bytes_read = this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read);
 
-          // set the remaining part of the buffer to 0 if it wasn't completely filled
-          memset(buffer + mp3_bytes_left + bytes_read, 0, BUFFER_SIZE - mp3_bytes_left - bytes_read);
+          if (bytes_read < (BUFFER_SIZE - mp3_bytes_left)) {
+            // set the remaining part of the buffer to 0 if it wasn't completely filled
+            memset((void *) (buffer + mp3_bytes_left + bytes_read), 0, BUFFER_SIZE - mp3_bytes_left - bytes_read);
+          }
 
           // update pointers
           mp3_bytes_left += bytes_read;
           mp3_buffer_current = buffer;
         }
 
-        // Look for the next sync word
-        int32_t offset = MP3FindSyncWord(mp3_buffer_current, mp3_bytes_left);
-        if (offset < 0) {
-          // PROBLEM!
-          // this_->is_playing_ = false;
-          // this->cleanup_();
-          // return;
-        }
+        if (mp3_bytes_left > 0) {
+          // Look for the next sync word
+          int32_t offset = MP3FindSyncWord(mp3_buffer_current, mp3_bytes_left);
+          if (offset < 0) {
+            event.type = EventType::WARNING;
+            event.err = ESP_ERR_NO_MEM;
+            xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+            continue;
+          }
 
-        // Advance read pointer
-        mp3_buffer_current += offset;
-        mp3_bytes_left -= offset;
+          // Advance read pointer
+          mp3_buffer_current += offset;
+          mp3_bytes_left -= offset;
 
-        // Attempt to decode MP3 data at read pointer
-        int err = MP3Decode(mp3_decoder, &mp3_buffer_current, &mp3_bytes_left, (int16_t *) buffer_output, 0);
-        if (err) {
-          // switch (err) {
-          //   case ERR_MP3_MAINDATA_UNDERFLOW:
-          //     // Not a problem. Next call to decode will provide more data.
-          //     break;
-          //   default:
-          //     // Not much we can do
-          //     // ESP_LOGD(TAG, "Unexpected error decoding MP3 data: %d.", err);
-          //     this->is_playing_ = false;
-          //     this->cleanup_();
-          //     break;
-          // }
-        } else {
-          // Actual audio...maybe. The frame info struct:
-          // int bitrate;
-          // int nChans;
-          // int samprate;
-          // int bitsPerSample;
-          // int outputSamps;
-          // int layer;
-          // int version;
-          MP3GetLastFrameInfo(mp3_decoder, &mp3_frame_info);
-          if (mp3_frame_info.outputSamps > 0) {
-            mp3_output_bytes_left = mp3_frame_info.outputSamps * sizeof(int16_t);
-            mp3_output_buffer_current = buffer_output;
-            // Only bother if there are actual output samples
-            // if (!mp3_printed_info) {
-            // For debugging purposes.
-            // TODO: Resample
-            // mp3_printed_info = true;
-            // ESP_LOGD(TAG, "Sample Rate: %d", mp3_frame_info.samprate);
-            // ESP_LOGD(TAG, "Channels: %d", mp3_frame_info.nChans);
-            // ESP_LOGD(TAG, "Bits Per Sample: %d", mp3_frame_info.bitsPerSample);
-            // ESP_LOGD(TAG, "Bit Rate: %d", mp3_frame_info.bitrate);
-            // }
-            // size_t output_bytes = mp3_frame_info.outputSamps * sizeof(int16_t);
+          int err = MP3Decode(mp3_decoder, &mp3_buffer_current, &mp3_bytes_left, (int16_t *) buffer_output, 0);
+          if (err) {
+            switch (err) {
+              case ERR_MP3_MAINDATA_UNDERFLOW:
+                // Not a problem. Next call to decode will provide more data.
+                continue;
+                break;
+              case ERR_MP3_INDATA_UNDERFLOW:
+                // event.type = EventType::WARNING;
+                // event.err = ESP_ERR_INVALID_MAC;
+                // xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+                break;
+              default:
+                // TODO: Better handle mp3 decoder errors
+                // Not much we can do
+                // ESP_LOGD("mp3_decoder", "Unexpected error decoding MP3 data: %d.", err);
+                // event.type = EventType::WARNING;
+                // event.err = ESP_ERR_INVALID_ARG;
+                // xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+                break;
+            }
+          } else {
+            // Actual audio...maybe. The frame info struct:
+            // int bitrate;
+            // int nChans;
+            // int samprate;
+            // int bitsPerSample;
+            // int outputSamps;
+            // int layer;
+            // int version;
 
-            // int bytes_per_sample = (this->mp3_frame_info_.bitsPerSample / 8) * this->mp3_frame_info_.nChans;
+            // int bytes_decoded = (mp3_bytes_left - old_bytes_left);
+            // mp3_buffer_current += bytes_decoded;
+
+            MP3GetLastFrameInfo(mp3_decoder, &mp3_frame_info);
+            if (mp3_frame_info.outputSamps > 0) {
+              int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8) * mp3_frame_info.nChans;
+              mp3_output_bytes_left = mp3_frame_info.outputSamps * bytes_per_sample;
+              mp3_output_buffer_current = buffer_output;
+              // Only bother if there are actual output samples
+              // if (!mp3_printed_info) {
+              // For debugging purposes.
+              // TODO: Resample
+              // mp3_printed_info = true;
+              // ESP_LOGD(TAG, "Sample Rate: %d", mp3_frame_info.samprate);
+              // ESP_LOGD(TAG, "Channels: %d", mp3_frame_info.nChans);
+              // ESP_LOGD(TAG, "Bits Per Sample: %d", mp3_frame_info.bitsPerSample);
+              // ESP_LOGD(TAG, "Bit Rate: %d", mp3_frame_info.bitrate);
+              // }
+              // size_t output_bytes = mp3_frame_info.outputSamps * sizeof(int16_t);
+
+              // int bytes_per_sample = (this->mp3_frame_info_.bitsPerSample / 8) * this->mp3_frame_info_.nChans;
+            }
           }
         }
       }
@@ -246,7 +288,11 @@ void DecodeStreamer::decode_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(buffer, BUFFER_SIZE * sizeof(int16_t));
+  if (media_file_type == MediaFileType::MP3) {
+    MP3FreeDecoder(mp3_decoder);
+  }
+  allocator.deallocate(buffer, BUFFER_SIZE);         // * sizeof(int16_t));
+  allocator.deallocate(buffer_output, BUFFER_SIZE);  // * sizeof(int16_t));
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -262,7 +308,7 @@ void DecodeStreamer::reset_ring_buffers() {
 }
 
 HTTPStreamer::HTTPStreamer() {
-  this->output_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE * sizeof(int16_t));
+  this->output_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE);
   // TODO: Handle if this fails to allocate
   if (this->output_ring_buffer_ == nullptr) {
     return;
@@ -324,15 +370,18 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
   return MediaFileType::NONE;
 }
 
-void HTTPStreamer::start(UBaseType_t priority) {
+void HTTPStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(HTTPStreamer::read_task_, "read_task", 8096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(HTTPStreamer::read_task_, task_name.c_str(), 4096, (void *) this, priority, &this->task_handle_);
   }
 }
 
-void HTTPStreamer::start(const std::string &uri, UBaseType_t priority) {
+void HTTPStreamer::start(const std::string &uri, const std::string &task_name, UBaseType_t priority) {
   this->current_uri_ = uri;
-  this->start(priority);
+  this->start(task_name, priority);
+  CommandEvent command_event;
+  command_event.command = CommandEventType::START;
+  this->send_command(&command_event);
 }
 
 void HTTPStreamer::cleanup_connection_(esp_http_client_handle_t *client) {
@@ -352,7 +401,7 @@ void HTTPStreamer::read_task_(void *params) {
   esp_http_client_handle_t client = nullptr;
 
   ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  uint8_t *buffer = allocator.allocate(HTTP_BUFFER_SIZE * sizeof(int16_t));
+  uint8_t *buffer = allocator.allocate(HTTP_BUFFER_SIZE);
 
   if (buffer == nullptr) {
     event.type = EventType::WARNING;
@@ -370,18 +419,22 @@ void HTTPStreamer::read_task_(void *params) {
     return;
   }
 
-  MediaFileType file_type = this_streamer->establish_connection_(&client);
-  if (file_type == MediaFileType::NONE) {
-    this_streamer->cleanup_connection_(&client);
-  } else {
-    event.type = EventType::STARTED;
-    event.media_file_type = file_type;
-    xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
-  }
+  MediaFileType file_type = MediaFileType::NONE;
 
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::STOP) {
+      if (command_event.command == CommandEventType::START) {
+        file_type = this_streamer->establish_connection_(&client);
+        if (file_type == MediaFileType::NONE) {
+          this_streamer->cleanup_connection_(&client);
+          break;
+        } else {
+          this_streamer->reset_ring_buffers();
+          event.type = EventType::STARTED;
+          event.media_file_type = file_type;
+          xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+        }
+      } else if (command_event.command == CommandEventType::STOP) {
         this_streamer->cleanup_connection_(&client);
         break;
       } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
@@ -391,10 +444,10 @@ void HTTPStreamer::read_task_(void *params) {
     }
 
     if (client != nullptr) {
-      size_t read_bytes = this_streamer->output_ring_buffer_->free();
+      size_t bytes_to_read = this_streamer->output_ring_buffer_->free();
       int received_len = 0;
-      if (read_bytes > 0) {
-        received_len = esp_http_client_read(client, (char *) buffer, read_bytes);
+      if (bytes_to_read > 0) {
+        received_len = esp_http_client_read(client, (char *) buffer, bytes_to_read);
       }
 
       if (received_len > 0) {
@@ -413,8 +466,8 @@ void HTTPStreamer::read_task_(void *params) {
       // the connection is closed but there is still data in the ring buffer
       event.type = EventType::IDLE;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
-    } else {
-      // there is no active connection and the ring buffer is empty, so move to end task
+    } else if (file_type != MediaFileType::NONE) {
+      // there is no active connection, the ring buffer is empty, and a file was actually read, so move to end task
       break;
     }
   }
@@ -422,7 +475,7 @@ void HTTPStreamer::read_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(buffer, HTTP_BUFFER_SIZE * sizeof(int16_t));
+  allocator.deallocate(buffer, HTTP_BUFFER_SIZE);
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -433,9 +486,9 @@ void HTTPStreamer::read_task_(void *params) {
 }
 
 CombineStreamer::CombineStreamer() {
-  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
-  this->media_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
-  this->announcement_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
+  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
+  this->media_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
+  this->announcement_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
 
   // TODO: Handle not being able to allocate these...
   if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
@@ -466,9 +519,9 @@ size_t CombineStreamer::write_announcement(uint8_t *buffer, size_t length) {
   return 0;
 }
 
-void CombineStreamer::start(UBaseType_t priority) {
+void CombineStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(CombineStreamer::combine_task_, "combine_task", 8096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(CombineStreamer::combine_task_, task_name.c_str(), 4096, (void *) this, priority, &this->task_handle_);
   }
 }
 
@@ -533,7 +586,7 @@ void CombineStreamer::combine_task_(void *params) {
     size_t output_free = this_combiner->output_ring_buffer_->free();
 
     if ((output_free > 0) && (media_available * transfer_media + announcement_available > 0)) {
-      size_t bytes_to_read = output_free;
+      size_t bytes_to_read = std::min(output_free, BUFFER_SIZE);
 
       if (media_available * transfer_media > 0) {
         bytes_to_read = std::min(bytes_to_read, media_available);
@@ -569,16 +622,7 @@ void CombineStreamer::combine_task_(void *params) {
           bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
         } else if (media_bytes_read > 0) {
           bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
-          // size_t total_mono_samples = media_bytes_read/2;
-          // for (int i = 0; i < total_mono_samples; ++i) {
-          //   combination_buffer[2*i] = media_buffer[i];
-          //   combination_buffer[2*i+1] = media_buffer[i];
-          // }
 
-          // size_t stereo_bytes_used = total_mono_samples*2*sizeof(int16_t);
-          // ESP_LOGD("mixer", "free bytes in ring bufer %d; bytes wanting to write %d",
-          // this_combiner->output_ring_buffer_->free(), stereo_bytes_used); bytes_written =
-          // this_combiner->output_ring_buffer_->write((void *) media_buffer, stereo_bytes_used);
         } else if (announcement_bytes_read > 0) {
           bytes_written =
               this_combiner->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
