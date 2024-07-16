@@ -32,7 +32,7 @@ size_t Pipeline::read(uint8_t *buffer, size_t length) {
 
 void Pipeline::start(const std::string &uri, const std::string &task_name, UBaseType_t priority) {
   this->reader_->start(uri, task_name + "_reader");
-  this->decoder_->start(task_name + "_reader");
+  this->decoder_->start(task_name + "_decoder");
   if (this->task_handle_ == nullptr) {
     xTaskCreate(Pipeline::transfer_task_, task_name.c_str(), 8096, (void *) this, priority, &this->task_handle_);
   }
