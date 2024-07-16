@@ -187,7 +187,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
         size_t samples_read = bytes_read / sizeof(int32_t);
         samples.resize(samples_read);
         for (size_t i = 0; i < samples_read; i++) {
-          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 14;    // We are amplifying by a factor of 4 by only shifting 14 bits...
+          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 16;    // We are amplifying by a factor of 4 by only shifting 14 bits...
           samples[i] = clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
         }
         size_t bytes_free = this_microphone->output_ring_buffer_->free();
