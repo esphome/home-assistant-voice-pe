@@ -158,8 +158,9 @@ void DecodeStreamer::decode_task_(void *params) {
       }
       size_t bytes_written = 0;
       size_t bytes_read = 0;
+      size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
       if (max_bytes_to_read > 0) {
-        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, max_bytes_to_read);
+        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
       }
 
       if (bytes_read > 0) {
@@ -171,8 +172,12 @@ void DecodeStreamer::decode_task_(void *params) {
 
         size_t bytes_to_write = std::min(static_cast<size_t>(mp3_output_bytes_left), bytes_free);
 
-        size_t bytes_written =
+        size_t bytes_written = 0;
+        if (bytes_to_write > 0) {
+        bytes_written =
             this_streamer->output_ring_buffer_->write((void *) mp3_output_buffer_current, bytes_to_write);
+        }
+
 
         mp3_output_bytes_left -= bytes_written;
         mp3_output_buffer_current += bytes_written;
@@ -598,7 +603,7 @@ void CombineStreamer::combine_task_(void *params) {
 
       if (bytes_to_read > 0) {
         size_t media_bytes_read = 0;
-        if (media_available > 0) {
+        if (media_available * transfer_media > 0) {
           media_bytes_read = this_combiner->media_ring_buffer_->read((void *) media_buffer, bytes_to_read, 0);
           if (media_bytes_read > 0) {
             if (q15_ducking_ratio < (1 * std::pow(2, 15))) {
