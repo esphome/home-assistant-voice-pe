@@ -113,11 +113,12 @@ class VoiceAssistant : public Component {
     uint32_t flags = 0;
     flags |= VoiceAssistantFeature::FEATURE_VOICE_ASSISTANT;
     flags |= VoiceAssistantFeature::FEATURE_API_AUDIO;
-#ifdef USE_SPEAKER
-    if (this->speaker_ != nullptr) {
+    // TODO: Fix this hack! This makes the TTS response be sent as a wav file rather than an mp3, since the mp3 decoder isn't implemented yet
+// #ifdef USE_SPEAKER
+    // if (this->speaker_ != nullptr) {
       flags |= VoiceAssistantFeature::FEATURE_SPEAKER;
-    }
-#endif
+    // }
+// #endif
 
     if (this->has_timers_) {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
