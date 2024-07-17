@@ -1,0 +1,237 @@
+esphome:
+  name: esphome-voice-kit
+  friendly_name: ESPHome Voice Kit
+  name_add_mac_suffix: true
+  platformio_options:
+    board_build.flash_mode: dio
+  project:
+    name: esphome.voice-kit
+    version: "1.0"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32_S3_BOX_BOARD: "y"
+      # CONFIG_FREERTOS_USE_TRACE_FACILITY: "y"
+      # CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS: "y"
+
+wifi:
+  ap:
+
+logger:
+  level: DEBUG
+  logs:
+    sensor: WARN  # avoids logging debug sensor updates
+
+api:
+
+ota:
+  - platform: esphome
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: leds_internal
+    pin: GPIO21
+    rmt_channel: 1
+    num_leds: 12
+    rgb_order: GRB
+    chipset: WS2812
+    default_transition_length: 250ms
+    power_supply: led_power
+  - platform: partition
+    name: LEDs remapped
+    id: leds_remapped
+    segments:
+      - id: leds_internal
+        from: 7
+        to: 11
+      - id: leds_internal
+        from: 0
+        to: 6
+    effects:
+      - addressable_rainbow:
+          width: 12
+      - addressable_twinkle:
+      - addressable_lambda:
+          name: "Circling LED"
+          update_interval: 83ms # 1s / 12 leds
+          lambda: |-
+            static uint8_t index = 0;
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              if (i == index) {
+                it[i] = color;
+              } else if (i == (index + 11) % 12) {
+                it[i] = color * 128;
+              } else if (i == (index + 10) % 12) {
+                it[i] = color * 64;
+              } else if (i == (index + 9) % 12) {
+                it[i] = color * 32;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            index = (index + 1) % 12;
+
+binary_sensor:
+  - platform: gpio
+    id: center_button
+    pin:
+      number: GPIO17
+      inverted: true
+
+  - platform: gpio
+    id: mute_switch
+    pin: GPIO3
+
+power_supply:
+  - id: led_power
+    pin: GPIO45
+
+sensor:
+  - platform: rotary_encoder
+    id: dial
+    pin_a: GPIO16
+    pin_b: GPIO18
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Max Block Free"
+    loop_time:
+      name: "Loop Time"
+    psram:
+      name: "PSRAM Free"
+
+
+i2s_audio:
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin: 
+      number: GPIO8
+      allow_other_uses: true
+    i2s_mclk_pin: 
+      number: GPIO9
+      allow_other_uses: true
+    i2s_mode: secondary    
+  - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO7
+      allow_other_uses: true
+    i2s_bclk_pin: 
+      number: GPIO8
+      allow_other_uses: true
+    i2s_mclk_pin: 
+      number: GPIO9
+      allow_other_uses: true
+    i2s_mode: secondary    
+  # i2s_output data pin is gpio10
+
+  # This describes the second I2S interface between ESP32 and XMOS chip. Currently unused.
+  # - id: i2s_output
+  #   i2s_lrclk_pin:
+  #     number: GPIO14
+  #     # allow_other_uses: true
+  #   i2s_bclk_pin: 
+  #     number: GPIO13
+  #     # allow_other_uses: true
+  #   i2s_mclk_pin: 
+  #     number: GPIO12
+  #     # allow_other_uses: true
+  #   i2s_mode: primary #secondary    
+  # data line is GPIO15
+
+microphone:
+  - platform: i2s_audio
+    id: kit_mic
+    i2s_din_pin: GPIO11
+    adc_type: external
+    pdm: false
+    bits_per_sample: 32bit
+    channel: right
+    i2s_audio_id: i2s_input
+
+media_player:
+  - platform: nabu
+    id: nabu_media_player
+    name: nabu_media_player
+    internal: false
+    i2s_dout_pin: GPIO10
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_output
+
+
+file:
+  - id: timer_finished_wave_file
+    file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
+
+external_components:
+  - source: github://jesserockz/esphome-components
+    components: [file, udp_audio]
+    refresh: 0s
+  - source: 
+      type: git
+      url: https://github.com/esphome/voice-kit
+      ref: dev
+    components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
+
+micro_wake_word:
+  models:
+    - model: okay_nabu
+  vad:
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+voice_assistant:
+  id: va
+  microphone: kit_mic
+  media_player: nabu_media_player
+  use_wake_word: false
+  noise_suppression_level: 0
+  auto_gain: 0 dbfs
+  volume_multiplier: 1
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - micro_wake_word.stop:
+    - voice_assistant.stop:
+  on_start:
+    - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
+  on_listening:
+    - light.turn_on:
+        id: leds_remapped
+        blue: 100%
+        red: 0%
+        green: 0%
+        effect: "Circling LED"
+  on_end:
+    - wait_until:
+        not:
+          voice_assistant.is_running:
+    - lambda: id(nabu_media_player).set_ducking_ratio(1.0);
+    - micro_wake_word.start:
+    - light.turn_off: leds_remapped
+
+button:
+  - platform: restart
+    name: "Restart"
+
+debug:
+  update_interval: 5s
