@@ -306,10 +306,10 @@ void MicroWakeWord::update_model_probabilities_() {
   // Increase the counter since the last positive detection
   this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
 
-  static size_t total_inference_time = 0;
-  static size_t inference_count = 0;
+  // static size_t total_inference_time = 0;
+  // static size_t inference_count = 0;
 
-  size_t start_time = millis();
+  // size_t start_time = millis();
   for (auto &model : this->wake_word_models_) {
     // Perform inference
     model.perform_streaming_inference(audio_features);
@@ -317,13 +317,13 @@ void MicroWakeWord::update_model_probabilities_() {
 #ifdef USE_MICRO_WAKE_WORD_VAD
   this->vad_model_->perform_streaming_inference(audio_features);
 #endif
-  total_inference_time += (millis() - start_time);
-  ++inference_count;
-  if (inference_count > 500) {
-    ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
-    total_inference_time = 0;
-    inference_count = 0;
-  }
+  // total_inference_time += (millis() - start_time);
+  // ++inference_count;
+  // if (inference_count > 500) {
+  //   ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
+  //   total_inference_time = 0;
+  //   inference_count = 0;
+  // }
 }
 
 bool MicroWakeWord::detect_wake_words_() {
