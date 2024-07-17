@@ -36,9 +36,11 @@ class Pipeline {
 
   bool reading_{false};
   bool decoding_{false};
-
+  bool resampling_{false};
+  
   std::unique_ptr<HTTPStreamer> reader_;
   std::unique_ptr<DecodeStreamer> decoder_;
+  std::unique_ptr<ResampleStreamer> resampler_;
   CombineStreamer *mixer_;
 
   TaskHandle_t task_handle_{nullptr};

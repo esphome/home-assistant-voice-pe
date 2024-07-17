@@ -41,13 +41,13 @@ void ResampleStreamer::start(const std::string &task_name, UBaseType_t priority)
   }
 }
 
-void ResampleStreamer::stop() {
-  vTaskDelete(this->task_handle_);
-  this->task_handle_ = nullptr;
+// void ResampleStreamer::stop() {
+//   vTaskDelete(this->task_handle_);
+//   this->task_handle_ = nullptr;
 
-  xQueueReset(this->event_queue_);
-  xQueueReset(this->command_queue_);
-}
+//   xQueueReset(this->event_queue_);
+//   xQueueReset(this->command_queue_);
+// }
 
 size_t ResampleStreamer::write(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->input_ring_buffer_->free();
@@ -59,22 +59,22 @@ size_t ResampleStreamer::write(uint8_t *buffer, size_t length) {
 }
 
 void ResampleStreamer::resample_task_(void *params) {
-  DecodeStreamer *this_streamer = (DecodeStreamer *) params;
+  ResampleStreamer *this_streamer = (ResampleStreamer *) params;
 
   TaskEvent event;
   CommandEvent command_event;
 
-  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  uint8_t *input_buffer = allocator.allocate(BUFFER_SIZE);   // * sizeof(int16_t));
-  uint8_t *output_buffer = allocator.allocate(BUFFER_SIZE);  // * sizeof(int16_t));
+  ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+  int16_t *input_buffer = allocator.allocate(BUFFER_SIZE);   // * sizeof(int16_t));
+  int16_t *output_buffer = allocator.allocate(BUFFER_SIZE);  // * sizeof(int16_t));
 
-  uint8_t *input_buffer_current = input_buffer;
-  uint8_t *output_buffer_current = output_buffer;
+  int16_t *input_buffer_current = input_buffer;
+  int16_t *output_buffer_current = output_buffer;
 
   size_t input_buffer_length = 0;
   size_t output_buffer_length = 0;
 
-  if ((buffer == nullptr) || (buffer_output == nullptr)) {
+  if ((input_buffer == nullptr) || (output_buffer == nullptr)) {
     event.type = EventType::WARNING;
     event.err = ESP_ERR_NO_MEM;
     xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -95,54 +95,96 @@ void ResampleStreamer::resample_task_(void *params) {
 
   MediaFileType media_file_type = MediaFileType::NONE;
 
+  bool stopping = false;
+
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
         // Need to receive stream information here
 
+        media_file_type = command_event.media_file_type;
+
         input_buffer_current = input_buffer;
         output_buffer_current = output_buffer;
         input_buffer_length = 0;
-        output_buffer_length = 0;
+        output_buffer_length = 0;  // measured in bytes
       } else if (command_event.command == CommandEventType::STOP) {
         break;
+      } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
+        stopping = true;
       }
     }
 
-    if (media_file_type == MediaFileType::NONE) {
-      continue;
-    }
+    // if (media_file_type == MediaFileType::NONE) {
+    //   continue;
+    // }
 
-    if (output_bufer_length > 0) {
+    if (output_buffer_length > 0) {
       // If we have data in the internal output buffer, only work on writing it to the ring buffer
 
-      size_t bytes_to_write = std::min(output_buffer_length, this_streamer->output_ring_buffer_->available());
+      size_t bytes_to_write = std::min(output_buffer_length, this_streamer->output_ring_buffer_->free());
       size_t bytes_written = 0;
       if (bytes_to_write > 0) {
-        bytes_written = this_streamer->output_ring_buffer_->write(output_buffer_current, bytes_to_write);
+        bytes_written = this_streamer->output_ring_buffer_->write((void *) output_buffer_current, bytes_to_write);
+
+        output_buffer_current += bytes_written / sizeof(int16_t);
+        output_buffer_length -= bytes_written;
       }
 
-      output_buffer_length -= bytes_written;
-      output_buffer_current += bytes_written;
     } else {
-        // Shift unprocess data in the input buffer to start
-        if ((input_buffer_length > 0) && (input_buffer_length < BUFFER_SIZE)) {
-          memmove(input_buffer, input_buffer_current, input_buffer_length);
-          
-        }
+      //////
+      // Refill input buffer
+      //////
 
-      if (mono) {
-        for (int i = output_buffer_length / 2 - 1; i >= 0; --i) {
-          output_buffer[2 * i] = output_buffer[i];
-          output_buffer[2 * i + 1] = output_buffer[i];
-          output_buffer_length *= 2;  // double the bytes for stereo samples
-        }
+      // Move old data to the start of the buffer
+      if (input_buffer_length > 0) {
+        memmove((void *) input_buffer, (void *) input_buffer_current, input_buffer_length);
       }
+      input_buffer_current = input_buffer;
+
+      // Copy new data to the end of the of the buffer
+      size_t bytes_available = this_streamer->input_ring_buffer_->available();
+      size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+
+      if (bytes_to_read > 0) {
+        int16_t *new_input_buffer_data = input_buffer + input_buffer_length / sizeof(int16_t);
+        size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read);
+
+        input_buffer_length += bytes_read;
+      }
+
+      /////
+      // Resample here
+      /////
+
+      size_t bytes_to_transfer =
+          std::min(BUFFER_SIZE * sizeof(int16_t) / 2,
+                   input_buffer_length);  // Divide by two since we will convert mono to stereo in place
+      std::memcpy((void *) output_buffer, (void *) input_buffer_current, bytes_to_transfer);
+
+      input_buffer_current += bytes_to_transfer / sizeof(int16_t);
+      input_buffer_length -= bytes_to_transfer;
+
+      output_buffer_current = output_buffer;
+      output_buffer_length += bytes_to_transfer;
+
+      //////
+      // Convert mono to stereo
+      //////
+
+      for (int i = output_buffer_length / (sizeof(int16_t)) - 1; i >= 0; --i) {
+        output_buffer[2 * i] = output_buffer[i];
+        output_buffer[2 * i + 1] = output_buffer[i];
+      }
+
+      output_buffer_length *= 2; // double the bytes for stereo samples
     }
 
     if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
       event.type = EventType::RUNNING;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+    } else if (stopping) {
+      break;
     } else {
       event.type = EventType::IDLE;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -152,8 +194,8 @@ void ResampleStreamer::resample_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(buffer, BUFFER_SIZE);         // * sizeof(int16_t));
-  allocator.deallocate(buffer_output, BUFFER_SIZE);  // * sizeof(int16_t));
+  allocator.deallocate(input_buffer, BUFFER_SIZE);   // * sizeof(int16_t));
+  allocator.deallocate(output_buffer, BUFFER_SIZE);  // * sizeof(int16_t));
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -332,6 +374,7 @@ void DecodeStreamer::decode_task_(void *params) {
         if ((mp3_bytes_left > 0) && (mp3_bytes_left < BUFFER_SIZE)) {
           memmove(buffer, mp3_buffer_current, mp3_bytes_left);
         }
+        mp3_buffer_current = buffer;
 
         // read in new mp3 data to fill the buffer
         size_t bytes_available = this_streamer->input_ring_buffer_->available();
@@ -347,7 +390,6 @@ void DecodeStreamer::decode_task_(void *params) {
 
           // update pointers
           mp3_bytes_left += bytes_read;
-          mp3_buffer_current = buffer;
         }
 
         if (mp3_bytes_left > 0) {
