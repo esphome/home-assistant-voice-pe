@@ -168,9 +168,6 @@ void Pipeline::watch_() {
         command_event.command = CommandEventType::START;
         command_event.media_file_type = event.media_file_type;
         this->decoder_->send_command(&command_event);
-
-        // This is temporary! The decoder should send this message with the stream info
-        this->resampler_->send_command(&command_event);
         break;
       case EventType::IDLE:
         this->reading_ = true;
@@ -202,6 +199,10 @@ void Pipeline::watch_() {
         break;
       case EventType::STARTED:
         this->decoding_ = true;
+        command_event.command = CommandEventType::START;
+        command_event.media_file_type = event.media_file_type;
+        command_event.stream_info = event.stream_info;
+        this->resampler_->send_command(&command_event);
         break;
       case EventType::IDLE:
         this->decoding_ = true;
