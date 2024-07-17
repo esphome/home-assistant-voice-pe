@@ -3,8 +3,7 @@
 #ifdef USE_ESP_IDF
 
 #include "esphome/components/media_player/media_player.h"
-// #include "esphome/components/speaker/speaker.h"
-#include "esphome/components/i2s_audio/speaker/i2s_audio_speaker.h"
+#include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/core/component.h"
 #include "esphome/core/ring_buffer.h"
 
@@ -38,7 +37,7 @@ struct MediaCallCommand {
   optional<bool> new_url;
 };
 
-class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
+class NabuMediaPlayer : public Component, public media_player::MediaPlayer, public i2s_audio::I2SAudioOut {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
   void setup() override;
@@ -50,9 +49,12 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
 
   void start() {}
   void stop() {}
-  void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
+  // void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
 
   void set_ducking_ratio(float ducking_ratio) override;
+
+  void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
+  void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
 
  protected:
   // Receives commands from HA or from the voice assistant component
@@ -74,7 +76,13 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer {
   PipelineState media_pipeline_state_{PipelineState::STOPPED};
   PipelineState announcement_pipeline_state_{PipelineState::STOPPED};
 
-  i2s_audio::I2SAudioSpeaker *speaker_{nullptr};
+  void watch_speaker_();
+  static void speaker_task(void *params);
+  TaskHandle_t speaker_task_handle_{nullptr};
+  QueueHandle_t speaker_event_queue_;
+  QueueHandle_t speaker_command_queue_;
+  uint8_t dout_pin_{0};
+  i2s_bits_per_sample_t bits_per_sample_;
 
   bool is_paused_{false};
   bool is_muted_{false};
