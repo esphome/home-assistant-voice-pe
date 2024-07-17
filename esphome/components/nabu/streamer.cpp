@@ -17,7 +17,7 @@ namespace nabu {
 //  - Rename/split up file, it contains more than one class
 
 static const size_t HTTP_BUFFER_SIZE = 2 * 8192;
-static const size_t BUFFER_SIZE = 2048;
+static const size_t BUFFER_SIZE = 4*2048;
 
 static const size_t QUEUE_COUNT = 10;
 
@@ -65,8 +65,8 @@ void ResampleStreamer::resample_task_(void *params) {
   CommandEvent command_event;
 
   ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *input_buffer = allocator.allocate(BUFFER_SIZE);   // * sizeof(int16_t));
-  int16_t *output_buffer = allocator.allocate(BUFFER_SIZE);  // * sizeof(int16_t));
+  int16_t *input_buffer = allocator.allocate(BUFFER_SIZE);
+  int16_t *output_buffer = allocator.allocate(BUFFER_SIZE);
 
   int16_t *input_buffer_current = input_buffer;
   int16_t *output_buffer_current = output_buffer;
@@ -94,15 +94,26 @@ void ResampleStreamer::resample_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   MediaFileType media_file_type = MediaFileType::NONE;
+  StreamInfo stream_info;
+  stream_info.channels = 0;  // will be set once we receive the start command
 
   bool stopping = false;
 
+  uint8_t channel_factor = 1;
+
   while (true) {
-    if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
+    if (xQueueReceive(this_streamer->command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
         // Need to receive stream information here
-
         media_file_type = command_event.media_file_type;
+        stream_info = command_event.stream_info;
+
+        if (stream_info.channels > 0) {
+          constexpr uint8_t output_channels = 2;  // fix to stereo output for now
+          channel_factor = output_channels / stream_info.channels;
+        }
+
+        this_streamer->reset_ring_buffers();
 
         input_buffer_current = input_buffer;
         output_buffer_current = output_buffer;
@@ -115,10 +126,6 @@ void ResampleStreamer::resample_task_(void *params) {
       }
     }
 
-    // if (media_file_type == MediaFileType::NONE) {
-    //   continue;
-    // }
-
     if (output_buffer_length > 0) {
       // If we have data in the internal output buffer, only work on writing it to the ring buffer
 
@@ -130,7 +137,6 @@ void ResampleStreamer::resample_task_(void *params) {
         output_buffer_current += bytes_written / sizeof(int16_t);
         output_buffer_length -= bytes_written;
       }
-
     } else {
       //////
       // Refill input buffer
@@ -148,7 +154,7 @@ void ResampleStreamer::resample_task_(void *params) {
 
       if (bytes_to_read > 0) {
         int16_t *new_input_buffer_data = input_buffer + input_buffer_length / sizeof(int16_t);
-        size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read);
+        size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
 
         input_buffer_length += bytes_read;
       }
@@ -157,9 +163,7 @@ void ResampleStreamer::resample_task_(void *params) {
       // Resample here
       /////
 
-      size_t bytes_to_transfer =
-          std::min(BUFFER_SIZE * sizeof(int16_t) / 2,
-                   input_buffer_length);  // Divide by two since we will convert mono to stereo in place
+      size_t bytes_to_transfer = std::min(BUFFER_SIZE * sizeof(int16_t) / channel_factor, input_buffer_length);
       std::memcpy((void *) output_buffer, (void *) input_buffer_current, bytes_to_transfer);
 
       input_buffer_current += bytes_to_transfer / sizeof(int16_t);
@@ -168,16 +172,16 @@ void ResampleStreamer::resample_task_(void *params) {
       output_buffer_current = output_buffer;
       output_buffer_length += bytes_to_transfer;
 
-      //////
-      // Convert mono to stereo
-      //////
+      if (stream_info.channels == 1) {
+        // printf("converting mono to stereo");
+        // Convert mono to stereo
+        for (int i = output_buffer_length / (sizeof(int16_t)) - 1; i >= 0; --i) {
+          output_buffer[2 * i] = output_buffer[i];
+          output_buffer[2 * i + 1] = output_buffer[i];
+        }
 
-      for (int i = output_buffer_length / (sizeof(int16_t)) - 1; i >= 0; --i) {
-        output_buffer[2 * i] = output_buffer[i];
-        output_buffer[2 * i + 1] = output_buffer[i];
+        output_buffer_length *= 2;  // double the bytes for stereo samples
       }
-
-      output_buffer_length *= 2; // double the bytes for stereo samples
     }
 
     if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
@@ -272,8 +276,8 @@ void DecodeStreamer::decode_task_(void *params) {
     return;
   }
 
-  event.type = EventType::STARTED;
-  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+  // event.type = EventType::STARTED;
+  // xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   MediaFileType media_file_type = MediaFileType::NONE;
 
@@ -290,12 +294,18 @@ void DecodeStreamer::decode_task_(void *params) {
 
   bool stopping = false;
   bool header_parsed = false;
+
+  StreamInfo stream_info;
+
   while (true) {
-    if (xQueueReceive(this_streamer->command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
+    if (xQueueReceive(this_streamer->command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
         if ((media_file_type == MediaFileType::NONE) || (media_file_type == MediaFileType::MP3)) {
           MP3FreeDecoder(mp3_decoder);
         }
+
+        // Set to nonsense... the decoder should update when the header is analyzed
+        stream_info.channels = 0;
 
         // Reset state of everything
         this_streamer->reset_ring_buffers();
@@ -325,6 +335,7 @@ void DecodeStreamer::decode_task_(void *params) {
     }
 
     if (media_file_type == MediaFileType::NONE) {
+      vTaskDelay(10 / portTICK_PERIOD_MS);
       continue;
     }
 
@@ -343,13 +354,23 @@ void DecodeStreamer::decode_task_(void *params) {
         bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, 44);
         max_bytes_to_read -= bytes_read;
         // TODO: Actually parse the header!
-        // TODO: Pass on the stream information to mixer
+
+        StreamInfo old_stream_info = stream_info;
+        stream_info.channels = 1;
+        if (stream_info != old_stream_info) {
+          this_streamer->output_ring_buffer_->reset();
+
+          event.type = EventType::STARTED;
+          event.media_file_type = media_file_type;
+          event.stream_info = stream_info;
+          xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+        }
       }
       size_t bytes_written = 0;
       size_t bytes_read = 0;
       size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
       if (max_bytes_to_read > 0) {
-        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read);
+        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read, (10 / portTICK_PERIOD_MS));
       }
 
       if (bytes_read > 0) {
@@ -381,7 +402,7 @@ void DecodeStreamer::decode_task_(void *params) {
         size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
         if (bytes_to_read > 0) {
           uint8_t *new_mp3_data = buffer + mp3_bytes_left;
-          bytes_read = this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read);
+          bytes_read = this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
 
           if (bytes_read < (BUFFER_SIZE - mp3_bytes_left)) {
             // set the remaining part of the buffer to 0 if it wasn't completely filled
@@ -445,6 +466,21 @@ void DecodeStreamer::decode_task_(void *params) {
               int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8) * mp3_frame_info.nChans;
               mp3_output_bytes_left = mp3_frame_info.outputSamps * bytes_per_sample;
               mp3_output_buffer_current = buffer_output;
+
+              StreamInfo old_stream_info = stream_info;
+              stream_info.sample_rate = mp3_frame_info.samprate;
+              stream_info.channels = mp3_frame_info.nChans;
+              stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
+
+              // printf("channels: %d\n mp3_output_bytes_left: %d\n", stream_info.channels, mp3_output_bytes_left);
+              if (stream_info != old_stream_info) {
+                this_streamer->output_ring_buffer_->reset();
+
+                event.type = EventType::STARTED;
+                event.media_file_type = media_file_type;
+                event.stream_info = stream_info;
+                xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+              }
               // Only bother if there are actual output samples
               // if (!mp3_printed_info) {
               // For debugging purposes.

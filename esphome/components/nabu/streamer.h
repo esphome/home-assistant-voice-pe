@@ -16,6 +16,18 @@
 namespace esphome {
 namespace nabu {
 
+struct StreamInfo {
+  bool operator==(const StreamInfo& rhs) const{
+    return (channels == rhs.channels) && (bits_per_sample == rhs.bits_per_sample) && (sample_rate == rhs.sample_rate);
+  }
+  bool operator!=(const StreamInfo& rhs) const {
+    return !operator==(rhs);
+  }
+  uint8_t channels = 1;
+  uint8_t bits_per_sample = 16;
+  uint32_t sample_rate = 16000;
+};
+
 enum class EventType : uint8_t {
   STARTING = 0,
   STARTED,
@@ -36,6 +48,7 @@ struct TaskEvent {
   EventType type;
   esp_err_t err;
   MediaFileType media_file_type;
+  StreamInfo stream_info;
 };
 
 enum class CommandEventType : uint8_t {
@@ -56,6 +69,7 @@ struct CommandEvent {
   CommandEventType command;
   float ducking_ratio = 0.0;
   MediaFileType media_file_type = MediaFileType::NONE;
+  StreamInfo stream_info;
 };
 
 class OutputStreamer {
