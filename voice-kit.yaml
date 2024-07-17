@@ -7,6 +7,19 @@ esphome:
   project:
     name: esphome.voice-kit
     version: "1.0"
+  on_boot:
+    priority: 600
+    then:
+      - if:
+          condition:
+            binary_sensor.is_on: mute_switch 
+          then:
+            - light.turn_on:
+                brightness: 50%
+                id: leds_remapped
+                effect: "Muted"
+          else:
+            - light.turn_off: leds_remapped
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -39,54 +52,6 @@ psram:
   mode: octal
   speed: 80MHz
 
-
-light:
-  - platform: esp32_rmt_led_strip
-    id: leds_internal
-    pin: GPIO21
-    rmt_channel: 1
-    num_leds: 12
-    rgb_order: GRB
-    chipset: WS2812
-    default_transition_length: 250ms
-    power_supply: led_power
-  - platform: partition
-    name: LEDs remapped
-    id: leds_remapped
-    segments:
-      - id: leds_internal
-        from: 7
-        to: 11
-      - id: leds_internal
-        from: 0
-        to: 6
-    effects:
-      - addressable_rainbow:
-          width: 12
-      - addressable_twinkle:
-      - addressable_lambda:
-          name: "Circling LED"
-          update_interval: 83ms # 1s / 12 leds
-          lambda: |-
-            static uint8_t index = 0;
-            auto light_color = id(leds_remapped).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
-              if (i == index) {
-                it[i] = color;
-              } else if (i == (index + 11) % 12) {
-                it[i] = color * 128;
-              } else if (i == (index + 10) % 12) {
-                it[i] = color * 64;
-              } else if (i == (index + 9) % 12) {
-                it[i] = color * 32;
-              } else {
-                it[i] = Color::BLACK;
-              }
-            }
-            index = (index + 1) % 12;
-
 binary_sensor:
   - platform: gpio
     id: center_button
@@ -96,7 +61,123 @@ binary_sensor:
 
   - platform: gpio
     id: mute_switch
+    name: Muted
     pin: GPIO3
+    on_press:
+      - light.turn_on:
+          brightness: 50%
+          id: leds_remapped
+          effect: "Muted"
+    on_release:
+      - light.turn_off: leds_remapped
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: leds_internal
+    pin: GPIO21
+    rmt_channel: 1
+    num_leds: 12
+    rgb_order: GRB
+    chipset: WS2812
+    default_transition_length: 0ms
+    power_supply: led_power
+  - platform: partition
+    name: LEDs remapped
+    id: leds_remapped
+    default_transition_length: 0ms
+    segments:
+      - id: leds_internal
+        from: 7
+        to: 11
+      - id: leds_internal
+        from: 0
+        to: 6
+    effects:
+      - addressable_lambda:
+          name: "Listening"
+          update_interval: 40ms
+          lambda: |-
+            static uint8_t index = 0;
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              if (i == index) {
+                it[i] = color;
+              } else if (i == (index - 1) % 12) {
+                it[i] = color * 128;
+              } else if (i == (index + 6) % 12) {
+                it[i] = color;
+              } else if (i == (index + 5) % 12) {
+                it[i] = color * 128;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            index = (index + 1) % 12;
+      - addressable_lambda:
+          name: "Thinking"
+          update_interval: 20ms
+          lambda: |-
+            static uint8_t index = 0;
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              if (i == index) {
+                it[i] = color;
+              } else if (i == (index - 1) % 12) {
+                it[i] = color * 128;
+              } else if (i == (index + 6) % 12) {
+                it[i] = color;
+              } else if (i == (index + 5) % 12) {
+                it[i] = color * 128;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            index = (index + 1) % 12;
+      - addressable_lambda:
+          name: "Replying"
+          update_interval: 40ms
+          lambda: |-
+            static int8_t index = 0;
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              if (i == 11 - index) {
+                it[i] = color;
+              } else if (i == (11 - index + 1) % 12) {
+                it[i] = color * 128;
+              } else if (i == (11 - index + 6) % 12) {
+                it[i] = color;
+              } else if (i == (11 - index + 7) % 12) {
+                it[i] = color * 128;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            index = (index + 1) % 12;
+      - addressable_lambda:
+          name: "Muted"
+          update_interval: 1s
+          lambda: |-
+            static int8_t index = 0;
+            Color color(255, 0, 0);
+            for (int i = 0; i < 12; i++) {
+              if (i == 2) {
+                it[i] = color;
+              } else if (i == 3) {
+                it[i] = color;
+              } else if (i == 8) {
+                it[i] = color;
+              } else if (i == 9) {
+                it[i] = color;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
 
 power_supply:
   - id: led_power
@@ -216,11 +297,19 @@ voice_assistant:
     - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
   on_listening:
     - light.turn_on:
+        brightness: 100%
         id: leds_remapped
-        blue: 100%
-        red: 0%
-        green: 0%
-        effect: "Circling LED"
+        effect: "Listening"
+  on_stt_vad_end:
+    - light.turn_on:
+        brightness: 100%
+        id: leds_remapped
+        effect: "Thinking"
+  on_tts_start:
+    - light.turn_on:
+        brightness: 100%
+        id: leds_remapped
+        effect: "Replying"
   on_end:
     - wait_until:
         not:
