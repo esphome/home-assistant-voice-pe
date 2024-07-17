@@ -14,7 +14,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
 
-#include "esphome/components/nabu/media_player/streamer.h"
+#include "esphome/components/nabu/streamer.h"
 namespace esphome {
 namespace i2s_audio {
 
