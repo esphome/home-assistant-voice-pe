@@ -149,7 +149,6 @@ static void stats_task(void *arg) {
 //  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
 
 static const char *const TAG = "nabu_media_player";
-// static const size_t TRANSFER_BUFFER_SIZE = 8192;
 
 void NabuMediaPlayer::setup() {
   xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
@@ -225,11 +224,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
       .skip_msk = false,
 #endif
   };
-  // #if SOC_I2S_SUPPORTS_DAC
-  //   if (this_speaker->internal_dac_mode_ != I2S_DAC_CHANNEL_DISABLE) {
-  //     config.mode = (i2s_mode_t) (config.mode | I2S_MODE_DAC_BUILT_IN);
-  //   }
-  // #endif
+
   esp_err_t err = i2s_driver_install(this_speaker->parent_->get_port(), &config, 0, nullptr);
   if (err != ESP_OK) {
     event.type = EventType::WARNING;
@@ -347,27 +342,17 @@ void NabuMediaPlayer::watch_media_commands_() {
 
   if (xQueueReceive(this->media_control_command_queue_, &media_command, 0) == pdTRUE) {
     if (media_command.new_url.has_value() && media_command.new_url.value()) {
-      // if (this->combine_streamer_ == nullptr) {
-      //   {
-      //     this->combine_streamer_ = make_unique<CombineStreamer>();
-      //     // this->speaker_->set_combine_streamer(this->combine_streamer_.get());
-      //   }
-      // }
-      // this->combine_streamer_->start("mixer");
-
       if (media_command.announce.has_value() && media_command.announce.value()) {
         if (this->announcement_pipeline_ == nullptr) {
           this->announcement_pipeline_ =
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
         this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
-        // }
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
         this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
-        // }
         if (this->is_paused_) {
           command_event.command = CommandEventType::RESUME_MEDIA;
           this->combine_streamer_->send_command(&command_event);
@@ -426,11 +411,8 @@ void NabuMediaPlayer::watch_speaker_() {
         ESP_LOGD(TAG, "Started Media Player Speaker");
         break;
       case EventType::IDLE:
-        // this->is_playing_ = false;
         break;
       case EventType::RUNNING:
-        // this->is_playing_ = true;
-        // this->status_clear_warning();
         break;
       case EventType::STOPPING:
         ESP_LOGD(TAG, "Stopping Media Player Speaker");

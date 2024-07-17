@@ -47,7 +47,7 @@ async def to_code(config):
         # repo="https://github.com/espressif/esp-dsp",
         # ref="v1.3.0",
     )
-    cg.add_build_flag("-Wno-narrowing")
+    cg.add_build_flag("-Wno-narrowing") # Necessary to compile helix mp3 decoder
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
