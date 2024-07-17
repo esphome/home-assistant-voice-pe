@@ -127,12 +127,23 @@ class DecodeStreamer : public OutputStreamer {
  protected:
   static void decode_task_(void *params);
   std::unique_ptr<RingBuffer> input_ring_buffer_;
+};
 
-  // HMP3Decoder mp3_decoder_;
-  // MP3FrameInfo mp3_frame_info_;
-  // int mp3_bytes_left_ = 0;  // MP3 bytes left decode
-  // uint8_t *mp3_buffer_current_ = nullptr;
-  // bool mp3_printed_info_ = false;
+class ResampleStreamer : public OutputStreamer {
+ public:
+  DecodeStreamer();
+  void start(const std::string &task_name, UBaseType_t priority = 1) override;
+  void reset_ring_buffers() override;
+
+  size_t input_free() { return this->input_ring_buffer_->free(); }
+
+  bool empty() { return (this->input_ring_buffer_->available() + this->output_ring_buffer_->available()) == 0; }
+
+  size_t write(uint8_t *buffer, size_t length);
+
+ protected:
+  static void resample_task_(void *params);
+  std::unique_ptr<RingBuffer> input_ring_buffer_;
 };
 
 class CombineStreamer : public OutputStreamer {
