@@ -275,7 +275,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
     }
 
     size_t delay_ms = 10;
-    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t);
+    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * 2;  // *2 for stereo
     // if (event.type != TaskEventType::RUNNING) {
     //   // Fill the entire DMA buffer if there is audio being outputed
     //   bytes_to_read = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE*sizeof(int16_t);
@@ -292,27 +292,29 @@ void NabuMediaPlayer::speaker_task(void *params) {
       // dsps_mulc_s16_ae32(buffer, temp_buffer,bytes_read/sizeof(int16_t), volume_reduction, 1, 1);
       // std::memcpy((void *) buffer, (void *) temp_buffer, bytes_read/sizeof(int16_t));
 
-      // Copy mono audio samples into both channels
-      for (int i = bytes_read / 2 - 1; i >= 0; --i) {
-        buffer[2 * i] = buffer[i];
-        buffer[2 * i + 1] = buffer[i];
-      }
+      // // Copy mono audio samples into both channels
+      // for (int i = bytes_read / 2 - 1; i >= 0; --i) {
+      //   buffer[2 * i] = buffer[i];
+      //   buffer[2 * i + 1] = buffer[i];
+      // }
 
       size_t bytes_written;
       if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-        i2s_write(this_speaker->parent_->get_port(), buffer, 2 * bytes_read, &bytes_written, portMAX_DELAY);
+        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
       } else {
-        i2s_write_expand(this_speaker->parent_->get_port(), buffer, 2 * bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
                          this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       }
 
-      if (bytes_written != 2 * bytes_read) {
+      if (bytes_written != bytes_read) {
         event.type = EventType::WARNING;
-        event.err = ESP_ERR_TIMEOUT;  // TODO: probably not the correct error...
+        event.err = ESP_ERR_TIMEOUT;  // TODO: not the correct error...
+        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+      } else {
+        event.type = EventType::RUNNING;
         xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
       }
-      event.type = EventType::RUNNING;
-      xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
     } else {
       i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 

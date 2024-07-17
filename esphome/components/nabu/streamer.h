@@ -131,7 +131,7 @@ class DecodeStreamer : public OutputStreamer {
 
 class ResampleStreamer : public OutputStreamer {
  public:
-  DecodeStreamer();
+  ResampleStreamer();
   void start(const std::string &task_name, UBaseType_t priority = 1) override;
   void reset_ring_buffers() override;
 
