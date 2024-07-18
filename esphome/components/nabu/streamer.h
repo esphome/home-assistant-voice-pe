@@ -11,8 +11,6 @@
 
 #include <esp_http_client.h>
 
-#include "mp3_decoder.h"
-
 namespace esphome {
 namespace nabu {
 
