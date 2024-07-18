@@ -442,25 +442,21 @@ voice_assistant:
         brightness: 100%
         id: leds_remapped
         effect: "Waiting for Command"
-        #effect: none
   on_stt_vad_start:
     - light.turn_on:
         brightness: 100%
         id: leds_remapped
         effect: "Listening For Command"
-        #effect: Twinkle
   on_stt_vad_end:
     - light.turn_on:
         brightness: 100%
         id: leds_remapped
         effect: "Thinking"
-        #effect: Listening For Command
   on_tts_start:
     - light.turn_on:
         brightness: 100%
         id: leds_remapped
         effect: "Replying"
-        #effect: Thinking
   on_end:
     - wait_until:
         not:
