@@ -13,7 +13,7 @@ namespace nabu {
 // Major TODOs:
 //  - Rename/split up file, it contains more than one class
 
-static const size_t HTTP_BUFFER_SIZE = 2 * 8192;
+static const size_t HTTP_BUFFER_SIZE = 4 * 8192;
 static const size_t BUFFER_SIZE = 4 * 2048;
 
 static const size_t QUEUE_COUNT = 10;
@@ -55,24 +55,24 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
   *client = esp_http_client_init(&config);
 
   if (client == nullptr) {
-    // ESP_LOGE(TAG, "Failed to initialize HTTP connection");
+    printf("Failed to initialize HTTP connection");
     return MediaFileType::NONE;
   }
 
   esp_err_t err;
   if ((err = esp_http_client_open(*client, 0)) != ESP_OK) {
-    // ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+    printf("Failed to open HTTP connection");
     this->cleanup_connection_(client);
     return MediaFileType::NONE;
   }
 
   int content_length = esp_http_client_fetch_headers(*client);
 
-  if (content_length <= 0) {
-    // ESP_LOGE(TAG, "Failed to get content length: %s", esp_err_to_name(err));
-    this->cleanup_connection_(client);
-    return MediaFileType::NONE;
-  }
+  // if (content_length <= 0) {
+  //   printf("Fialed to get content length");
+  //   this->cleanup_connection_(client);
+  //   return MediaFileType::NONE;
+  // }
 
   char url[500];
   if (esp_http_client_get_url(*client, url, 500) != ESP_OK) {
@@ -81,12 +81,23 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
   }
 
   std::string url_string = url;
+// return MediaFileType::FLAC;
+//   size_t found = url_string.find(".flac");
+//   if (found!=std::string::npos) {
+//     return MediaFileType::FLAC;
+//   }
+
+  printf("cleand up url: %s", url_string.c_str());
 
   if (str_endswith(url_string, ".wav")) {
     return MediaFileType::WAV;
   } else if (str_endswith(url_string, ".mp3")) {
     return MediaFileType::MP3;
+  } else if (str_endswith(url_string, ".flac")) {
+    return MediaFileType::FLAC;
   }
+
+  printf("couldn't determine file type: %s", url_string.c_str());
 
   return MediaFileType::NONE;
 }
