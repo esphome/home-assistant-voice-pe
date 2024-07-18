@@ -287,7 +287,6 @@ void DecodeStreamer::decode_task_(void *params) {
   int mp3_bytes_left = 0;
 
   uint8_t *mp3_buffer_current = buffer;
-  bool mp3_printed_info = false;
 
   int mp3_output_bytes_left = 0;
   uint8_t *mp3_output_buffer_current = buffer_output;
@@ -315,7 +314,6 @@ void DecodeStreamer::decode_task_(void *params) {
         mp3_bytes_left = 0;
 
         mp3_buffer_current = buffer;
-        mp3_printed_info = false;
 
         mp3_output_bytes_left = 0;
         mp3_output_buffer_current = buffer_output;
@@ -404,11 +402,6 @@ void DecodeStreamer::decode_task_(void *params) {
           uint8_t *new_mp3_data = buffer + mp3_bytes_left;
           bytes_read = this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
 
-          if (bytes_read < (BUFFER_SIZE - mp3_bytes_left)) {
-            // set the remaining part of the buffer to 0 if it wasn't completely filled
-            memset((void *) (buffer + mp3_bytes_left + bytes_read), 0, BUFFER_SIZE - mp3_bytes_left - bytes_read);
-          }
-
           // update pointers
           mp3_bytes_left += bytes_read;
         }
@@ -458,12 +451,9 @@ void DecodeStreamer::decode_task_(void *params) {
             // int layer;
             // int version;
 
-            // int bytes_decoded = (mp3_bytes_left - old_bytes_left);
-            // mp3_buffer_current += bytes_decoded;
-
             MP3GetLastFrameInfo(mp3_decoder, &mp3_frame_info);
             if (mp3_frame_info.outputSamps > 0) {
-              int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8) * mp3_frame_info.nChans;
+              int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8);
               mp3_output_bytes_left = mp3_frame_info.outputSamps * bytes_per_sample;
               mp3_output_buffer_current = buffer_output;
 
@@ -472,7 +462,6 @@ void DecodeStreamer::decode_task_(void *params) {
               stream_info.channels = mp3_frame_info.nChans;
               stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
 
-              // printf("channels: %d\n mp3_output_bytes_left: %d\n", stream_info.channels, mp3_output_bytes_left);
               if (stream_info != old_stream_info) {
                 this_streamer->output_ring_buffer_->reset();
 
@@ -480,20 +469,7 @@ void DecodeStreamer::decode_task_(void *params) {
                 event.media_file_type = media_file_type;
                 event.stream_info = stream_info;
                 xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
-              }
-              // Only bother if there are actual output samples
-              // if (!mp3_printed_info) {
-              // For debugging purposes.
-              // TODO: Resample
-              // mp3_printed_info = true;
-              // ESP_LOGD(TAG, "Sample Rate: %d", mp3_frame_info.samprate);
-              // ESP_LOGD(TAG, "Channels: %d", mp3_frame_info.nChans);
-              // ESP_LOGD(TAG, "Bits Per Sample: %d", mp3_frame_info.bitsPerSample);
-              // ESP_LOGD(TAG, "Bit Rate: %d", mp3_frame_info.bitrate);
-              // }
-              // size_t output_bytes = mp3_frame_info.outputSamps * sizeof(int16_t);
-
-              // int bytes_per_sample = (this->mp3_frame_info_.bitsPerSample / 8) * this->mp3_frame_info_.nChans;
+              };
             }
           }
         }
