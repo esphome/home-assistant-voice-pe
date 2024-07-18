@@ -8,6 +8,9 @@
 #include "esp_dsp.h"
 
 #include "mp3_decoder.h"
+
+#include "biquad.h"
+#include "resampler.h"
 // #include "flac_decoder.h"
 
 namespace esphome {
@@ -17,9 +20,12 @@ namespace nabu {
 //  - Rename/split up file, it contains more than one class
 
 static const size_t HTTP_BUFFER_SIZE = 2 * 8192;
-static const size_t BUFFER_SIZE = 4*2048;
+static const size_t BUFFER_SIZE = 4 * 2048;
 
 static const size_t QUEUE_COUNT = 10;
+
+static const size_t NUM_TAPS = 64;
+static const size_t NUM_FILTERS = 64;
 
 ResampleStreamer::ResampleStreamer() {
   this->input_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
@@ -68,6 +74,10 @@ void ResampleStreamer::resample_task_(void *params) {
   int16_t *input_buffer = allocator.allocate(BUFFER_SIZE);
   int16_t *output_buffer = allocator.allocate(BUFFER_SIZE);
 
+  ExternalRAMAllocator<float> float_allocator(ExternalRAMAllocator<float>::ALLOW_FAILURE);
+  float *float_input_buffer = float_allocator.allocate(BUFFER_SIZE);
+  float *float_output_buffer = float_allocator.allocate(BUFFER_SIZE);
+
   int16_t *input_buffer_current = input_buffer;
   int16_t *output_buffer_current = output_buffer;
 
@@ -97,6 +107,18 @@ void ResampleStreamer::resample_task_(void *params) {
   StreamInfo stream_info;
   stream_info.channels = 0;  // will be set once we receive the start command
 
+  bool resample = false;
+  Resample *resampler = nullptr;
+  float sample_ratio = 1.0;
+  float lowpass_ratio = 1.0;
+  int flags = 0;
+  Biquad lowpass[2][2];
+  BiquadCoefficients lowpass_coeff;
+
+  bool pre_post_filter = true;
+  bool pre_filter = false;
+  bool post_filter = false;
+
   bool stopping = false;
 
   uint8_t channel_factor = 1;
@@ -111,6 +133,54 @@ void ResampleStreamer::resample_task_(void *params) {
         if (stream_info.channels > 0) {
           constexpr uint8_t output_channels = 2;  // fix to stereo output for now
           channel_factor = output_channels / stream_info.channels;
+        }
+        float resample_rate = 16000.0f;
+        if (stream_info.sample_rate != 16000) {
+          resample = true;
+          sample_ratio = resample_rate / stream_info.sample_rate;
+          if (sample_ratio < 1.0) {
+            lowpass_ratio -= (10.24 / 16);
+
+            if (lowpass_ratio < 0.84) {
+              lowpass_ratio = 0.84;
+            }
+
+            if (lowpass_ratio < sample_ratio) {
+              // avoid discontinuities near unity sample ratios
+              lowpass_ratio = sample_ratio;
+            }
+          }
+          if (lowpass_ratio * sample_ratio < 0.98 && pre_post_filter) {
+            double cutoff = lowpass_ratio * sample_ratio / 2.0;
+            biquad_lowpass(&lowpass_coeff, cutoff);
+            pre_filter = true;
+          }
+
+          if (lowpass_ratio / sample_ratio < 0.98 && pre_post_filter && !pre_filter) {
+            double cutoff = lowpass_ratio / sample_ratio / 2.0;
+            biquad_lowpass(&lowpass_coeff, cutoff);
+            post_filter = true;
+          }
+
+          if (pre_filter || post_filter) {
+            for (int i = 0; i < stream_info.channels; ++i) {
+              biquad_init(&lowpass[i][0], &lowpass_coeff, 1.0);
+              biquad_init(&lowpass[i][1], &lowpass_coeff, 1.0);
+            }
+          }
+
+          if (sample_ratio < 1.0) {
+            resampler = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, sample_ratio * lowpass_ratio,
+                                     flags | INCLUDE_LOWPASS);
+          } else if (lowpass_ratio < 1.0) {
+            resampler = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, lowpass_ratio, flags | INCLUDE_LOWPASS);
+          } else {
+            resampler = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, 1.0, flags);
+          }
+
+          // resampleAdvancePosition(resampler, NUM_TAPS / 2.0);
+        } else {
+          resample = false;
         }
 
         this_streamer->reset_ring_buffers();
@@ -154,7 +224,8 @@ void ResampleStreamer::resample_task_(void *params) {
 
       if (bytes_to_read > 0) {
         int16_t *new_input_buffer_data = input_buffer + input_buffer_length / sizeof(int16_t);
-        size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
+        size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read,
+                                                                    (10 / portTICK_PERIOD_MS));
 
         input_buffer_length += bytes_read;
       }
@@ -163,17 +234,73 @@ void ResampleStreamer::resample_task_(void *params) {
       // Resample here
       /////
 
-      size_t bytes_to_transfer = std::min(BUFFER_SIZE * sizeof(int16_t) / channel_factor, input_buffer_length);
-      std::memcpy((void *) output_buffer, (void *) input_buffer_current, bytes_to_transfer);
+      if (resample) {
+        if (input_buffer_length > 0) {
+          // Samples are indiviudal int16 values. Frames include 1 sample for mono and 2 samples for stereo
+          // Be careful converting between bytes, samples, and frames!
+          // 1 sample = 2 bytes = sizeof(int16_t)
+          // if mono:
+          //    1 frame = 1 sample
+          // if stereo:
+          //    1 frame = 2 samples (left and right)
 
-      input_buffer_current += bytes_to_transfer / sizeof(int16_t);
-      input_buffer_length -= bytes_to_transfer;
+          size_t samples_read = input_buffer_length / sizeof(int16_t);
 
-      output_buffer_current = output_buffer;
-      output_buffer_length += bytes_to_transfer;
+          // This is inefficient! It reconverts any samples that weren't used in the previous resampling run
+          for (int i = 0; i < samples_read; ++i) {
+            float_input_buffer[i] = static_cast<float>(input_buffer[i]) / 32768.0f;
+          }
+
+          size_t frames_read = samples_read/stream_info.channels;
+
+          if (pre_filter) {
+            for (int i = 0; i < stream_info.channels; ++i) {
+              biquad_apply_buffer(&lowpass[i][0], float_input_buffer + i, frames_read, stream_info.channels);
+              biquad_apply_buffer(&lowpass[i][1], float_input_buffer + i, frames_read, stream_info.channels);
+            }
+          }
+
+          ResampleResult res;
+
+          res = resampleProcessInterleaved(resampler, float_input_buffer, frames_read, float_output_buffer,
+                                           BUFFER_SIZE / channel_factor, sample_ratio);
+
+          size_t frames_used = res.input_used;
+          size_t samples_used = frames_used * stream_info.channels;
+
+          size_t frames_generated = res.output_generated;
+          if (post_filter) {
+            for (int i = 0; i < stream_info.channels; ++i) {
+              biquad_apply_buffer(&lowpass[i][0], float_output_buffer + i, frames_generated, stream_info.channels);
+              biquad_apply_buffer(&lowpass[i][1], float_output_buffer + i, frames_generated, stream_info.channels);
+            }
+          }
+
+          size_t samples_generated = frames_generated * stream_info.channels;
+
+          for (int i = 0; i < samples_generated; ++i) {
+            output_buffer[i] = static_cast<int16_t>(float_output_buffer[i] * 32767);
+          }
+
+          input_buffer_current += samples_used;
+          input_buffer_length -= samples_used * sizeof(int16_t);
+
+          output_buffer_current = output_buffer;
+          output_buffer_length += samples_generated * sizeof(int16_t);
+        }
+
+      } else {
+        size_t bytes_to_transfer = std::min(BUFFER_SIZE * sizeof(int16_t) / channel_factor, input_buffer_length);
+        std::memcpy((void *) output_buffer, (void *) input_buffer_current, bytes_to_transfer);
+
+        input_buffer_current += bytes_to_transfer / sizeof(int16_t);
+        input_buffer_length -= bytes_to_transfer;
+
+        output_buffer_current = output_buffer;
+        output_buffer_length += bytes_to_transfer;
+      }
 
       if (stream_info.channels == 1) {
-        // printf("converting mono to stereo");
         // Convert mono to stereo
         for (int i = output_buffer_length / (sizeof(int16_t)) - 1; i >= 0; --i) {
           output_buffer[2 * i] = output_buffer[i];
@@ -184,7 +311,7 @@ void ResampleStreamer::resample_task_(void *params) {
       }
     }
 
-    if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
+    if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available() || (output_buffer_length > 0) || (input_buffer_length > 0)) {
       event.type = EventType::RUNNING;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
     } else if (stopping) {
@@ -198,8 +325,14 @@ void ResampleStreamer::resample_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  allocator.deallocate(input_buffer, BUFFER_SIZE);   // * sizeof(int16_t));
-  allocator.deallocate(output_buffer, BUFFER_SIZE);  // * sizeof(int16_t));
+  allocator.deallocate(input_buffer, BUFFER_SIZE);
+  allocator.deallocate(output_buffer, BUFFER_SIZE);
+  float_allocator.deallocate(float_input_buffer, BUFFER_SIZE);
+  float_allocator.deallocate(float_output_buffer, BUFFER_SIZE);
+
+  if (resampler != nullptr) {
+    resampleFree(resampler);
+  }
 
   event.type = EventType::STOPPED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
@@ -354,7 +487,10 @@ void DecodeStreamer::decode_task_(void *params) {
         // TODO: Actually parse the header!
 
         StreamInfo old_stream_info = stream_info;
+
         stream_info.channels = 1;
+        stream_info.sample_rate = 16000;
+
         if (stream_info != old_stream_info) {
           this_streamer->output_ring_buffer_->reset();
 
@@ -400,7 +536,8 @@ void DecodeStreamer::decode_task_(void *params) {
         size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
         if (bytes_to_read > 0) {
           uint8_t *new_mp3_data = buffer + mp3_bytes_left;
-          bytes_read = this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
+          bytes_read =
+              this_streamer->input_ring_buffer_->read((void *) new_mp3_data, bytes_to_read, (10 / portTICK_PERIOD_MS));
 
           // update pointers
           mp3_bytes_left += bytes_read;
