@@ -2,25 +2,23 @@
 
 #ifdef USE_ESP_IDF
 
-#include "esphome/core/ring_buffer.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/ring_buffer.h"
 
 #include <esp_http_client.h>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 namespace esphome {
 namespace nabu {
 
 struct StreamInfo {
-  bool operator==(const StreamInfo& rhs) const{
+  bool operator==(const StreamInfo &rhs) const {
     return (channels == rhs.channels) && (bits_per_sample == rhs.bits_per_sample) && (sample_rate == rhs.sample_rate);
   }
-  bool operator!=(const StreamInfo& rhs) const {
-    return !operator==(rhs);
-  }
+  bool operator!=(const StreamInfo &rhs) const { return !operator==(rhs); }
   uint8_t channels = 1;
   uint8_t bits_per_sample = 16;
   uint32_t sample_rate = 16000;
@@ -113,7 +111,7 @@ class HTTPStreamer : public OutputStreamer {
   HTTPStreamer();
 
   void start(const std::string &task_name, UBaseType_t priority = 1) override;
-  void start(const std::string &uri,const std::string &task_name, UBaseType_t priority = 1);
+  void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
 
  protected:
   static void read_task_(void *params);
@@ -122,71 +120,6 @@ class HTTPStreamer : public OutputStreamer {
   void cleanup_connection_(esp_http_client_handle_t *client);
 
   std::string current_uri_{};
-};
-
-class DecodeStreamer : public OutputStreamer {
- public:
-  DecodeStreamer();
-  void start(const std::string &task_name, UBaseType_t priority = 1) override;
-  void reset_ring_buffers() override;
-
-  size_t input_free() { return this->input_ring_buffer_->free(); }
-
-  bool empty() { return (this->input_ring_buffer_->available() + this->output_ring_buffer_->available()) == 0; }
-
-  size_t write(uint8_t *buffer, size_t length);
-
- protected:
-  static void decode_task_(void *params);
-  std::unique_ptr<RingBuffer> input_ring_buffer_;
-};
-
-class ResampleStreamer : public OutputStreamer {
- public:
-  ResampleStreamer();
-  void start(const std::string &task_name, UBaseType_t priority = 1) override;
-  void reset_ring_buffers() override;
-
-  size_t input_free() { return this->input_ring_buffer_->free(); }
-
-  bool empty() { return (this->input_ring_buffer_->available() + this->output_ring_buffer_->available()) == 0; }
-
-  size_t write(uint8_t *buffer, size_t length);
-
- protected:
-  static void resample_task_(void *params);
-  std::unique_ptr<RingBuffer> input_ring_buffer_;
-};
-
-class CombineStreamer : public OutputStreamer {
- public:
-  CombineStreamer();
-
-  void start(const std::string &task_name, UBaseType_t priority = 1) override;
-  // void stop() override;
-  void reset_ring_buffers() override;
-
-  size_t media_free() { return this->media_ring_buffer_->free(); }
-  size_t announcement_free() { return this->announcement_ring_buffer_->free(); }
-
-  size_t write_media(uint8_t *buffer, size_t length);
-  size_t write_announcement(uint8_t *buffer, size_t length);
-
-  BaseType_t read_media_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
-    return xQueueReceive(this->media_event_queue_, event, ticks_to_wait);
-  }
-  BaseType_t read_announcement_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
-    return xQueueReceive(this->announcement_event_queue_, event, ticks_to_wait);
-  }
-
- protected:
-  static void combine_task_(void *params);
-
-  std::unique_ptr<RingBuffer> media_ring_buffer_;
-  std::unique_ptr<RingBuffer> announcement_ring_buffer_;
-
-  QueueHandle_t media_event_queue_;
-  QueueHandle_t announcement_event_queue_;
 };
 
 }  // namespace nabu
