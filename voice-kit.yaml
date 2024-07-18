@@ -12,7 +12,7 @@ esphome:
     then:
       - if:
           condition:
-            binary_sensor.is_on: mute_switch 
+            binary_sensor.is_on: mute_switch
           then:
             - light.turn_on:
                 brightness: 50%
@@ -71,6 +71,12 @@ binary_sensor:
     on_release:
       - light.turn_off: leds_remapped
 
+globals:
+   - id: global_led_animation_index
+     type: int
+     restore_value: no
+     initial_value: '0'
+
 light:
   - platform: esp32_rmt_led_strip
     id: leds_internal
@@ -95,70 +101,111 @@ light:
     effects:
       - addressable_lambda:
           name: "Listening"
-          update_interval: 40ms
+          update_interval: 100ms
           lambda: |-
-            static uint8_t index = 0;
             auto light_color = id(leds_remapped).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
-              if (i == index) {
+              if (i == id(global_led_animation_index) % 12) {
                 it[i] = color;
-              } else if (i == (index - 1) % 12) {
+              } else if (i == (id(global_led_animation_index) + 11) % 12) {
+                it[i] = color * 192;
+              } else if (i == (id(global_led_animation_index) + 10) % 12) {
                 it[i] = color * 128;
-              } else if (i == (index + 6) % 12) {
+              } else if (i == (id(global_led_animation_index) + 6) % 12) {
                 it[i] = color;
-              } else if (i == (index + 5) % 12) {
+              } else if (i == (id(global_led_animation_index) + 5) % 12) {
+                it[i] = color * 192;
+              } else if (i == (id(global_led_animation_index) + 4) % 12) {
                 it[i] = color * 128;
               } else {
                 it[i] = Color::BLACK;
               }
             }
-            index = (index + 1) % 12;
+            id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 12;
+      - addressable_lambda:
+          name: "Listening Fast"
+          update_interval: 50ms
+          lambda: |-
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              if (i == id(global_led_animation_index) % 12) {
+                it[i] = color;
+              } else if (i == (id(global_led_animation_index) + 11) % 12) {
+                it[i] = color * 192;
+              } else if (i == (id(global_led_animation_index) + 10) % 12) {
+                it[i] = color * 128;
+              } else if (i == (id(global_led_animation_index) + 6) % 12) {
+                it[i] = color;
+              } else if (i == (id(global_led_animation_index) + 5) % 12) {
+                it[i] = color * 192;
+              } else if (i == (id(global_led_animation_index) + 4) % 12) {
+                it[i] = color * 128;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 12;
       - addressable_lambda:
           name: "Thinking"
-          update_interval: 20ms
+          update_interval: 10ms
           lambda: |-
-            static uint8_t index = 0;
+            static uint8_t brightness_step = 0;
+            static bool brightness_decreasing = true;
+            static uint8_t brightness_step_number = 10;
+            if (initial_run) {
+              brightness_step = 0;
+              brightness_decreasing = true;
+            }
             auto light_color = id(leds_remapped).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
-              if (i == index) {
-                it[i] = color;
-              } else if (i == (index - 1) % 12) {
-                it[i] = color * 128;
-              } else if (i == (index + 6) % 12) {
-                it[i] = color;
-              } else if (i == (index + 5) % 12) {
-                it[i] = color * 128;
+              if (i == id(global_led_animation_index) % 12) {
+                it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
+              } else if (i == (id(global_led_animation_index) + 6) % 12) {
+                it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
               } else {
                 it[i] = Color::BLACK;
               }
             }
-            index = (index + 1) % 12;
+            if (brightness_decreasing) {
+              brightness_step++;
+            } else {
+              brightness_step--;
+            }
+            if (brightness_step == 0 || brightness_step == brightness_step_number) {
+              brightness_decreasing = !brightness_decreasing;
+            }
       - addressable_lambda:
           name: "Replying"
-          update_interval: 40ms
+          update_interval: 50ms
           lambda: |-
-            static int8_t index = 0;
+            id(global_led_animation_index) = (12 + id(global_led_animation_index) - 1) % 12;
             auto light_color = id(leds_remapped).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
-              if (i == 11 - index) {
+              if (i == (id(global_led_animation_index)) % 12) {
                 it[i] = color;
-              } else if (i == (11 - index + 1) % 12) {
+              } else if (i == ( id(global_led_animation_index) + 1) % 12) {
+                it[i] = color * 192;
+              } else if (i == ( id(global_led_animation_index) + 2) % 12) {
                 it[i] = color * 128;
-              } else if (i == (11 - index + 6) % 12) {
+              } else if (i == ( id(global_led_animation_index) + 6) % 12) {
                 it[i] = color;
-              } else if (i == (11 - index + 7) % 12) {
+              } else if (i == ( id(global_led_animation_index) + 7) % 12) {
+                it[i] = color * 192;
+              } else if (i == ( id(global_led_animation_index) + 8) % 12) {
                 it[i] = color * 128;
               } else {
                 it[i] = Color::BLACK;
               }
             }
-            index = (index + 1) % 12;
+
       - addressable_lambda:
           name: "Muted"
           update_interval: 1s
@@ -204,24 +251,24 @@ i2s_audio:
     i2s_lrclk_pin:
       number: GPIO7
       allow_other_uses: true
-    i2s_bclk_pin: 
+    i2s_bclk_pin:
       number: GPIO8
       allow_other_uses: true
-    i2s_mclk_pin: 
+    i2s_mclk_pin:
       number: GPIO9
       allow_other_uses: true
-    i2s_mode: secondary    
+    i2s_mode: secondary
   - id: i2s_output
     i2s_lrclk_pin:
       number: GPIO7
       allow_other_uses: true
-    i2s_bclk_pin: 
+    i2s_bclk_pin:
       number: GPIO8
       allow_other_uses: true
-    i2s_mclk_pin: 
+    i2s_mclk_pin:
       number: GPIO9
       allow_other_uses: true
-    i2s_mode: secondary    
+    i2s_mode: secondary
   # i2s_output data pin is gpio10
 
   # This describes the second I2S interface between ESP32 and XMOS chip. Currently unused.
@@ -229,13 +276,13 @@ i2s_audio:
   #   i2s_lrclk_pin:
   #     number: GPIO14
   #     # allow_other_uses: true
-  #   i2s_bclk_pin: 
+  #   i2s_bclk_pin:
   #     number: GPIO13
   #     # allow_other_uses: true
-  #   i2s_mclk_pin: 
+  #   i2s_mclk_pin:
   #     number: GPIO12
   #     # allow_other_uses: true
-  #   i2s_mode: primary #secondary    
+  #   i2s_mode: primary #secondary
   # data line is GPIO15
 
 microphone:
@@ -266,7 +313,7 @@ external_components:
   - source: github://jesserockz/esphome-components
     components: [file, udp_audio]
     refresh: 0s
-  - source: 
+  - source:
       type: git
       url: https://github.com/esphome/voice-kit
       ref: dev
@@ -300,6 +347,11 @@ voice_assistant:
         brightness: 100%
         id: leds_remapped
         effect: "Listening"
+  on_stt_vad_start:
+    - light.turn_on:
+        brightness: 100%
+        id: leds_remapped
+        effect: "Listening Fast"
   on_stt_vad_end:
     - light.turn_on:
         brightness: 100%
