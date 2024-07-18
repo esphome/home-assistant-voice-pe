@@ -2,14 +2,17 @@
 
 #ifdef USE_ESP_IDF
 
-#include "esphome/core/ring_buffer.h"
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
+#include "streamer.h"
+#include "combine_streamer.h"
+#include "decode_streamer.h"
+#include "resample_streamer.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/ring_buffer.h"
 
-#include "streamer.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 namespace esphome {
 namespace nabu {
@@ -37,7 +40,7 @@ class Pipeline {
   bool reading_{false};
   bool decoding_{false};
   bool resampling_{false};
-  
+
   std::unique_ptr<HTTPStreamer> reader_;
   std::unique_ptr<DecodeStreamer> decoder_;
   std::unique_ptr<ResampleStreamer> resampler_;
