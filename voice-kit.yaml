@@ -1,3 +1,22 @@
+substitutions:
+  # Phases of the Voice Assistant
+  # The voice assistant is ready to be triggered by a wake word
+  voice_assist_idle_phase_id: '1'
+  # The voice assistant is waiting for a voice command (after being triggered by the wake word)
+  voice_assist_waiting_for_command_phase_id: '2'
+  # The voice assistant is listening for a voice command
+  voice_assist_listening_for_command_phase_id: '3'
+  # The voice assistant is currently processing the command
+  voice_assist_thinking_phase_id: '4'
+  # The voice assistant is replying to the command
+  voice_assist_replying_phase_id: '5'
+  # The voice assistant is not ready
+  voice_assist_not_ready_phase_id: '10'
+  # The voice assistant encountered an error
+  voice_assist_error_phase_id: '11'
+  # The voice assistant is muted and will not reply to a wake word
+  voice_assist_muted_phase_id: '12'
+
 esphome:
   name: esphome-voice-kit
   friendly_name: ESPHome Voice Kit
@@ -52,6 +71,23 @@ psram:
   mode: octal
   speed: 80MHz
 
+globals:
+  # Global index for our LEDs. So that switching between different animation does not led to unwanted effects.
+  - id: global_led_animation_index
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Global initialisation variable. Initialized to true and set to fasle once everything is connected. Only used to have a smooth "plugging" experience
+  - id: init_in_progress
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+  # Global variable tracking the pahse of the voice assistant (defined above). Initialized to not_ready
+  - id: voice_assistant_phase
+    type: int
+    restore_value: no
+    initial_value: ${voice_assist_not_ready_phase_id}
+
 binary_sensor:
   - platform: gpio
     id: center_button
@@ -71,11 +107,17 @@ binary_sensor:
     on_release:
       - light.turn_off: leds_remapped
 
-globals:
-   - id: global_led_animation_index
-     type: int
-     restore_value: no
-     initial_value: '0'
+
+
+number:
+  - platform: template
+    id: fake_volume
+    internal: true
+    optimistic: true
+    min_value: 0
+    max_value: 12
+    initial_value: 12
+    step: 1
 
 light:
   - platform: esp32_rmt_led_strip
@@ -100,7 +142,7 @@ light:
         to: 6
     effects:
       - addressable_lambda:
-          name: "Listening"
+          name: "Waiting for Command"
           update_interval: 100ms
           lambda: |-
             auto light_color = id(leds_remapped).current_values;
@@ -125,7 +167,7 @@ light:
             }
             id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 12;
       - addressable_lambda:
-          name: "Listening Fast"
+          name: "Listening For Command"
           update_interval: 50ms
           lambda: |-
             auto light_color = id(leds_remapped).current_values;
@@ -205,7 +247,6 @@ light:
                 it[i] = Color::BLACK;
               }
             }
-
       - addressable_lambda:
           name: "Muted"
           update_interval: 1s
@@ -225,6 +266,30 @@ light:
                 it[i] = Color::BLACK;
               }
             }
+      - addressable_lambda:
+          name: "Volume Display"
+          update_interval: 50ms
+          lambda: |-
+            auto light_color = id(leds_remapped).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            auto nb_leds_on = id(fake_volume).state;
+            for (int i = 0; i < 12; i++) {
+              if (i < nb_leds_on) {
+                it[i] = color;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+      - addressable_rainbow:
+          width: 12
+      - addressable_twinkle:
+          twinkle_probability: 50%
+      - addressable_random_twinkle:
+          twinkle_probability: 50%
+      - addressable_scan:
+          move_interval: 10ms
+          scan_width: 3
 
 power_supply:
   - id: led_power
@@ -235,6 +300,11 @@ sensor:
     id: dial
     pin_a: GPIO16
     pin_b: GPIO18
+    on_clockwise:
+      - script.execute: increase_volume
+    on_anticlockwise:
+      - script.execute: decrease_volume
+
   - platform: debug
     free:
       name: "Heap Free"
@@ -244,6 +314,32 @@ sensor:
       name: "Loop Time"
     psram:
       name: "PSRAM Free"
+
+script:
+  - id: increase_volume
+    mode: restart
+    then:
+      - number.increment:
+          id: fake_volume
+          cycle: false
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Volume Display"
+      - delay: 2s
+      - light.turn_off: leds_remapped
+  - id: decrease_volume
+    mode: restart
+    then:
+      - number.decrement:
+          id: fake_volume
+          cycle: false
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Volume Display"
+      - delay: 2s
+      - light.turn_off: leds_remapped
 
 
 i2s_audio:
@@ -304,7 +400,6 @@ media_player:
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
 
-
 file:
   - id: timer_finished_wave_file
     file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
@@ -346,12 +441,12 @@ voice_assistant:
     - light.turn_on:
         brightness: 100%
         id: leds_remapped
-        effect: "Listening"
+        effect: "Waiting for Command"
   on_stt_vad_start:
     - light.turn_on:
         brightness: 100%
         id: leds_remapped
-        effect: "Listening Fast"
+        effect: "Listening For Command"
   on_stt_vad_end:
     - light.turn_on:
         brightness: 100%
