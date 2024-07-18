@@ -38,6 +38,7 @@ enum class MediaFileType : uint8_t {
   NONE = 0,
   WAV,
   MP3,
+  FLAC,
 };
 
 struct TaskEvent {

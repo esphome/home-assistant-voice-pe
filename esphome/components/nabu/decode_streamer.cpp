@@ -2,6 +2,7 @@
 
 #include "decode_streamer.h"
 
+#include "flac_decoder.h"
 #include "mp3_decoder.h"
 #include "streamer.h"
 
@@ -11,7 +12,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 8192;
+static const size_t BUFFER_SIZE = 4 * 8192;
 static const size_t QUEUE_COUNT = 10;
 
 DecodeStreamer::DecodeStreamer() {
@@ -75,6 +76,14 @@ void DecodeStreamer::decode_task_(void *params) {
 
   // TODO: only initialize if needed
   HMP3Decoder mp3_decoder = MP3InitDecoder();
+
+  flac::FLACDecoder flac_decoder = flac::FLACDecoder(buffer, BUFFER_SIZE, BUFFER_SIZE / 8);
+  size_t flac_decoder_output_buffer_size = 0;
+  size_t output_flac_bytes = 0;
+  uint8_t *flac_buffer_current = buffer;
+  uint8_t *flac_output_buffer_current = buffer_output;
+  size_t flac_input_length = 0;
+
   MP3FrameInfo mp3_frame_info;
   int mp3_bytes_left = 0;
 
@@ -112,6 +121,12 @@ void DecodeStreamer::decode_task_(void *params) {
 
         stopping = false;
         header_parsed = false;
+
+        size_t flac_decoder_output_buffer_size = 0;
+        size_t output_flac_bytes = 0;
+        uint8_t *flac_buffer_current = buffer;
+        uint8_t *flac_output_buffer_current = buffer_output;
+        size_t flac_input_length = 0;
 
         media_file_type = command_event.media_file_type;
         if (media_file_type == MediaFileType::MP3) {
@@ -270,7 +285,88 @@ void DecodeStreamer::decode_task_(void *params) {
           }
         }
       }
+    } else if (media_file_type == MediaFileType::FLAC) {
+      if (output_flac_bytes > 0) {
+        size_t bytes_to_write = std::min(output_flac_bytes, this_streamer->output_ring_buffer_->free());
+        if (bytes_to_write > 0) {
+          size_t bytes_written =
+              this_streamer->output_ring_buffer_->write((void *) flac_output_buffer_current, bytes_to_write);
+
+          flac_output_buffer_current += bytes_written;
+          output_flac_bytes -= bytes_written;
+        }
+      } else {
+        if (flac_input_length > 0) {
+          memmove((void *) buffer, (void *) flac_buffer_current, flac_input_length);
+        }
+        flac_buffer_current = buffer;
+
+        size_t bytes_to_read =
+            std::min(this_streamer->input_ring_buffer_->available(), BUFFER_SIZE - flac_input_length);
+
+        if (bytes_to_read > 0) {
+          uint8_t *new_flac_buffer_data = buffer + flac_input_length;
+          size_t bytes_read = this_streamer->input_ring_buffer_->read((void *) new_flac_buffer_data, bytes_to_read,
+                                                                      (10 / portTICK_PERIOD_MS));
+          flac_input_length += bytes_read;
+        }
+
+        if (((flac_input_length > 0) && header_parsed) || (flac_input_length >8192)) {
+          if (!header_parsed) {
+            header_parsed = true;
+            printf("flac_input_length=%d", flac_input_length);
+            auto result = flac_decoder.read_header(flac_input_length);
+            if (result != flac::FLAC_DECODER_SUCCESS) {
+              printf("failed to read flac header %d", result);
+              printf("%.*s", 4, (char *) buffer);
+              break;
+            } else {
+                printf("successfully read flac header");
+            }
+
+            flac_input_length -= flac_decoder.get_bytes_index();
+            flac_buffer_current += flac_decoder.get_bytes_index();
+
+            StreamInfo old_stream_info = stream_info;
+
+            stream_info.channels = flac_decoder.get_num_channels();
+            stream_info.sample_rate = flac_decoder.get_sample_rate();
+            stream_info.bits_per_sample = flac_decoder.get_sample_depth();
+
+            if (stream_info != old_stream_info) {
+              this_streamer->output_ring_buffer_->reset();
+
+              event.type = EventType::STARTED;
+              event.media_file_type = media_file_type;
+              event.stream_info = stream_info;
+              xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+            }
+
+            flac_decoder_output_buffer_size = flac_decoder.get_output_buffer_size();
+            if (BUFFER_SIZE < flac_decoder_output_buffer_size * sizeof(int16_t)) {
+              printf("output buffer is not big enough");
+              break;
+            }
+          } else {
+            uint32_t output_samples = 0;
+            auto result = flac_decoder.decode_frame((int16_t *) buffer_output, &output_samples, flac_input_length);
+
+            if (result != flac::FLAC_DECODER_SUCCESS) {
+              printf("failed to read flac file %d", result);
+            //   printf("%.*s", 4, (char *) buffer);
+              break;
+            }
+
+            flac_input_length -= flac_decoder.get_bytes_index();
+            flac_buffer_current += flac_decoder.get_bytes_index();
+
+            flac_output_buffer_current = buffer_output;
+            output_flac_bytes = output_samples * sizeof(int16_t);
+          }
+        }
+      }
     }
+
     if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
       event.type = EventType::RUNNING;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
