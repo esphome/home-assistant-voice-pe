@@ -367,7 +367,9 @@ void NabuMediaPlayer::watch_media_commands_() {
 
     if (media_command.volume.has_value()) {
       this->set_volume_(media_command.volume.value());
+      this->unmute_();
       this->is_muted_ = false;
+      this->publish_state();
     }
 
     if (media_command.command.has_value()) {
@@ -403,18 +405,15 @@ void NabuMediaPlayer::watch_media_commands_() {
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
-          if (!this->is_muted_) {
-            this->mute_();
-            this->is_muted_ = true;
-          } else {
-            this->unmute_();
-            this->is_muted_ = false;
-          }
+          this->mute_();
+          this->is_muted_ = true;
+          this->publish_state();
           break;
         }
         case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
           this->unmute_();
           this->is_muted_ = false;
+          this->publish_state();
           break;
         default:
           break;

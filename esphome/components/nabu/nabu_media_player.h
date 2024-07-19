@@ -46,8 +46,8 @@ class NabuMediaPlayer : public Component,
   void loop() override;
 
   // MediaPlayer implementations
-  bool is_muted() const override { return this->is_muted_; }
   media_player::MediaPlayerTraits get_traits() override;
+  bool is_muted() const override { return this->is_muted_; }
 
   void start() {}
   void stop() {}
