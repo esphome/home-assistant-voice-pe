@@ -27,18 +27,18 @@ esphome:
     name: esphome.voice-kit
     version: "1.0"
   on_boot:
-    priority: 600
-    then:
-      - if:
-          condition:
-            binary_sensor.is_on: mute_switch
-          then:
-            - light.turn_on:
-                brightness: 50%
-                id: leds_remapped
-                effect: "Muted"
-          else:
-            - light.turn_off: leds_remapped
+      priority: 600
+      then:
+        # Run the script to refresh the LED status
+        - script.execute: control_leds
+        # If after 30 second, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
+        - delay: 10min
+        - if:
+            condition:
+              lambda: return id(init_in_progress);
+            then:
+              - lambda: id(init_in_progress) = false;
+              - script.execute: control_leds
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -57,6 +57,14 @@ esp32:
 
 wifi:
   ap:
+  on_connect:
+    - script.execute: control_leds
+    - delay: 5s  # Gives time for improv results to be transmitted
+    - ble.disable:
+    - script.execute: control_leds
+  on_disconnect:
+    - ble.enable:
+    - script.execute: control_leds
 
 logger:
   level: DEBUG
@@ -64,11 +72,18 @@ logger:
     sensor: WARN  # avoids logging debug sensor updates
 
 api:
+  on_client_connected:
+    - script.execute: control_leds
+  on_client_disconnected:
+    - script.execute: control_leds
 
 ota:
   - platform: esphome
 
 improv_serial:
+
+esp32_improv:
+  authorizer: center_button
 
 psram:
   mode: octal
@@ -90,6 +105,10 @@ globals:
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
+  - id: dial_touched
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 binary_sensor:
   - platform: gpio
@@ -103,12 +122,9 @@ binary_sensor:
     name: Muted
     pin: GPIO3
     on_press:
-      - light.turn_on:
-          brightness: 50%
-          id: leds_remapped
-          effect: "Muted"
+      - script.execute: control_leds
     on_release:
-      - light.turn_off: leds_remapped
+      - script.execute: control_leds
 
 
 
@@ -144,6 +160,18 @@ light:
         from: 0
         to: 6
     effects:
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 250ms
+          update_interval: 250ms
+          min_brightness: 50%
+          max_brightness: 100%
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 100ms
+          update_interval: 100ms
+          min_brightness: 50%
+          max_brightness: 100%
       - addressable_lambda:
           name: "Waiting for Command"
           update_interval: 100ms
@@ -285,12 +313,16 @@ light:
               }
             }
       - addressable_rainbow:
+          name: "Rainbow"
           width: 12
       - addressable_twinkle:
+          name: "Twinkle"
           twinkle_probability: 50%
       - addressable_random_twinkle:
+          name: "Random Twinkle"
           twinkle_probability: 50%
       - addressable_scan:
+          name: "Scan"
           move_interval: 10ms
           scan_width: 3
 
@@ -319,30 +351,205 @@ sensor:
       name: "PSRAM Free"
 
 script:
+  # Master script controling the LEDs, based on differente conditions : initialisation in progress, wifi and api connceted and voice assistant phase.
+  # For the sake of simplicity and re-usability, the script calls child sripts defined below.
+  # This script will be called everytime one of these conditions is changing.
+  - id: control_leds
+    then:
+      - logger.log: control_leds
+      - if:
+          condition:
+            lambda: return !id(init_in_progress);
+          then:
+            - if:
+                condition:
+                  wifi.connected:
+                then:
+                  - if:
+                      condition:
+                        api.connected:
+                      then:
+                        - if:
+                            condition:
+                              lambda: return !id(dial_touched);
+                            then:
+                              - if:
+                                  condition:
+                                    binary_sensor.is_off: mute_switch
+                                  then:
+                                    - lambda: |
+                                        switch(id(voice_assistant_phase)) {
+                                          case ${voice_assist_waiting_for_command_phase_id}:
+                                            id(control_leds_voice_assist_waiting_for_command_phase).execute();
+                                            break;
+                                          case ${voice_assist_listening_for_command_phase_id}:
+                                            id(control_leds_voice_assist_listening_for_command_phase).execute();
+                                            break;
+                                          case ${voice_assist_thinking_phase_id}:
+                                            id(control_leds_voice_assist_thinking_phase).execute();
+                                            break;
+                                          case ${voice_assist_replying_phase_id}:
+                                            id(control_leds_voice_assist_replying_phase).execute();
+                                            break;
+                                          case ${voice_assist_error_phase_id}:
+                                            id(control_leds_voice_assist_error_phase).execute();
+                                            break;
+                                          case ${voice_assist_muted_phase_id}:
+                                            id(control_leds_voice_assist_muted_phase).execute();
+                                            break;
+                                          case ${voice_assist_not_ready_phase_id}:
+                                            id(control_leds_voice_assist_not_ready_phase).execute();
+                                            break;
+                                          default:
+                                            id(control_leds_voice_assist_idle_phase).execute();
+                                            break;
+                                        }
+                                  else:
+                                    - script.execute: control_leds_voice_assist_muted_phase
+                            else:
+                              - script.execute: control_leds_dial_touched
+                      else:
+                        - script.execute: control_leds_no_ha_connection_state
+                else:
+                  - script.execute: control_leds_no_ha_connection_state
+          else:
+            - script.execute: control_leds_init_state
+
+
+  # Script executed during initialisation
+  - id: control_leds_init_state
+    then:
+      - if:
+          condition:
+            not: wifi.connected
+          then:
+            - light.turn_on:
+                brightness: 100%
+                red: 0
+                green: 0
+                blue: 1.0
+                id: leds_remapped
+                effect: "Twinkle"
+          else:
+            - light.turn_on:
+                brightness: 100%
+                red: 0
+                green: 1.0
+                blue: 0
+                id: leds_remapped
+                effect: "Twinkle"
+
+
+  # Script executed when the device has no connection to Home Assistant
+  - id: control_leds_no_ha_connection_state
+    then:
+      - logger.log: control_leds_no_ha_connection_state
+      - light.turn_on:
+          brightness: 100%
+          red: 1
+          green: 0
+          blue: 0
+          id: leds_remapped
+          effect: "Twinkle"
+
+
+  # Script executed when the voice assistant is idle (waiting for a wake word)
+  - id: control_leds_voice_assist_idle_phase
+    then:
+      - light.turn_off: leds_remapped
+
+
+  # Script executed when the voice assistant is waiting for a command (After the wake word)
+  - id: control_leds_voice_assist_waiting_for_command_phase
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Waiting for Command"
+
+  # Script executed when the voice assistant is listenintg to a command
+  - id: control_leds_voice_assist_listening_for_command_phase
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Listening For Command"
+
+
+  # Script executed when the voice assistant is thinking to a command
+  - id: control_leds_voice_assist_thinking_phase
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Thinking"
+
+
+  # Script executed when the voice assistant is thinking to a command
+  - id: control_leds_voice_assist_replying_phase
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Replying"
+
+
+  # Script executed when the voice assistant is thinking to a command (# TO BE DONE)
+  - id: control_leds_voice_assist_error_phase
+    then:
+      - light.turn_off: leds_remapped
+
+
+  # Script executed when the voice assistant is muted
+  - id: control_leds_voice_assist_muted_phase
+    then:
+      - light.turn_on:
+          brightness: 50%
+          id: leds_remapped
+          effect: "Muted"
+
+  # Script executed when the voice assistant is not ready
+  - id: control_leds_voice_assist_not_ready_phase
+    then:
+      - light.turn_on:
+          brightness: 100%
+          red: 1
+          green: 0
+          blue: 0
+          id: leds_remapped
+          effect: "Twinkle"
+
+  # Script executed when the dial is touched
+  - id: control_leds_dial_touched
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: leds_remapped
+          effect: "Volume Display"
+
+
   - id: increase_volume
     mode: restart
     then:
       - number.increment:
           id: fake_volume
           cycle: false
-      - light.turn_on:
-          brightness: 100%
-          id: leds_remapped
-          effect: "Volume Display"
+      - lambda: id(dial_touched) = true;
+      - script.execute: control_leds
       - delay: 2s
-      - light.turn_off: leds_remapped
+      - lambda: id(dial_touched) = false;
+      - script.execute: control_leds
   - id: decrease_volume
     mode: restart
     then:
       - number.decrement:
           id: fake_volume
           cycle: false
-      - light.turn_on:
-          brightness: 100%
-          id: leds_remapped
-          effect: "Volume Display"
+      - lambda: id(dial_touched) = true;
+      - script.execute: control_leds
       - delay: 2s
-      - light.turn_off: leds_remapped
+      - lambda: id(dial_touched) = false;
+      - script.execute: control_leds
 
 
 i2s_audio:
@@ -434,43 +641,44 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
+    - wait_until:
+        not: ble.enabled
+    - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
   on_client_disconnected:
     - micro_wake_word.stop:
     - voice_assistant.stop:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
+    - script.execute: control_leds
   on_start:
     - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
   on_listening:
-    - light.turn_on:
-        brightness: 100%
-        id: leds_remapped
-        effect: "Waiting for Command"
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
   on_stt_vad_start:
-    - light.turn_on:
-        brightness: 100%
-        id: leds_remapped
-        effect: "Listening For Command"
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
   on_stt_vad_end:
-    - light.turn_on:
-        brightness: 100%
-        id: leds_remapped
-        effect: "Thinking"
+    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+    - script.execute: control_leds
   on_tts_start:
-    - light.turn_on:
-        brightness: 100%
-        id: leds_remapped
-        effect: "Replying"
+    - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+    - script.execute: control_leds
   on_end:
     - wait_until:
         not:
           voice_assistant.is_running:
     - lambda: id(nabu_media_player).set_ducking_ratio(1.0);
     - micro_wake_word.start:
-    - light.turn_off: leds_remapped
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
 
 button:
   - platform: restart
     name: "Restart"
-
+  - platform: factory_reset
+    name: "Factory Reset"
 debug:
   update_interval: 5s
