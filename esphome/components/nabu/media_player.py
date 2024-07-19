@@ -4,7 +4,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
 from esphome.const import CONF_ID
-from esphome.components import esp32, media_player, speaker
+from esphome.components import esp32, i2c, media_player
 
 from esphome.components.i2s_audio import (
     BITS_PER_SAMPLE,
@@ -22,7 +22,12 @@ DEPENDENCIES = ["media_player"]
 nabu_ns = cg.esphome_ns.namespace("nabu")
 NabuMediaPlayer = nabu_ns.class_("NabuMediaPlayer")
 NabuMediaPlayer = nabu_ns.class_(
-    "NabuMediaPlayer", NabuMediaPlayer, media_player.MediaPlayer, cg.Component, I2SAudioOut,
+    "NabuMediaPlayer",
+    NabuMediaPlayer,
+    media_player.MediaPlayer,
+    cg.Component,
+    I2SAudioOut,
+    i2c.I2CDevice,
 )
 
 CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
@@ -35,7 +40,7 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
         ),
     }
-)
+).extend(i2c.i2c_device_schema(0x18))
 
 
 # @coroutine_with_priority(100.0)
@@ -47,12 +52,13 @@ async def to_code(config):
         # repo="https://github.com/espressif/esp-dsp",
         # ref="v1.3.0",
     )
-    cg.add_build_flag("-Wno-narrowing") # Necessary to compile helix mp3 decoder
+    cg.add_build_flag("-Wno-narrowing")  # Necessary to compile helix mp3 decoder
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await media_player.register_media_player(var, config)
-    
+    await i2c.register_i2c_device(var, config)
+
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
     cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))

@@ -15,6 +15,8 @@
 
 #include <esp_http_client.h>
 
+#include "esphome/components/i2c/i2c.h"
+
 namespace esphome {
 namespace nabu {
 
@@ -34,7 +36,10 @@ struct MediaCallCommand {
   optional<bool> new_url;
 };
 
-class NabuMediaPlayer : public Component, public media_player::MediaPlayer, public i2s_audio::I2SAudioOut {
+class NabuMediaPlayer : public Component,
+                        public media_player::MediaPlayer,
+                        public i2s_audio::I2SAudioOut,
+                        public i2c::I2CDevice {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
   void setup() override;
@@ -57,6 +62,13 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
+
+  float get_dac_volume_(bool publish = true);
+  void set_volume_(float volume, bool publish = true);
+
+  bool mute_();
+  bool unmute_();
+
   optional<std::string> media_url_{};         // only modified by control function
   optional<std::string> announcement_url_{};  // only modified by control function
   QueueHandle_t media_control_command_queue_;
@@ -83,6 +95,8 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 
   bool is_paused_{false};
   bool is_muted_{false};
+
+  bool is_idle_muted_{false};
 
   // speaker::StreamInfo stream_info_{
   //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
