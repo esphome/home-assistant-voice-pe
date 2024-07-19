@@ -1,0 +1,71 @@
+name: Build ESPHome firmware
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-firmware:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.1.7
+      - name: Build Firmware
+        uses: esphome/build-action@v3.2.0
+        id: esphome-build
+        with:
+          yaml_file: voice-kit.yaml
+          version: latest
+          cache: true
+      - name: Move generated files to output
+        run: |
+          mkdir -p output
+          mv ${{ steps.esphome-build.outputs.name }} output/
+          jq --arg version "${{ steps.esphome-build.outputs.project-version }}" \
+            '{"name": "ESPHome Voice Kit", "version": $version, "home_assistant_domain": "esphome", "new_install_prompt_erase": false, "builds":[.]}' \
+            output/${{ steps.esphome-build.outputs.name }}/manifest.json > output/manifest.json
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4.3.4
+        with:
+          path: output
+          name: voice-kit
+
+  build-pages:
+    name: Build pages
+    runs-on: ubuntu-latest
+    needs:
+      - build-firmware
+    steps:
+      - uses: actions/checkout@v4.1.7
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          name: voice-kit
+          path: output
+      - run: cp -R static/* output/
+      - uses: actions/upload-pages-artifact@v3.0.1
+        with:
+          path: output
+          retention-days: 1
+
+  deploy:
+    # TODO: Change this to `release` later.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build-pages
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5.0.0
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4.0.5
