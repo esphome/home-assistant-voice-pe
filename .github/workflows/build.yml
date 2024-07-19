@@ -29,10 +29,30 @@ jobs:
             output/${{ steps.esphome-build.outputs.name }}/manifest.json > output/manifest.json
 
       - name: Upload firmware
+        id: upload-artifact
         uses: actions/upload-artifact@v4.3.4
         with:
           path: output
           name: voice-kit
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `Firmware built successfully! :tada:
+
+                [Download][download] and extract the firmware to install with https://web.esphome.io
+
+                Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
+
+                [download]: ${{ steps.upload-artifact.outputs.artifact-url }}
+                `
+            })
 
   build-pages:
     name: Build pages
