@@ -119,28 +119,51 @@ binary_sensor:
     on_multi_click:
       # Very important do not remove. Trust me :D
       - timing:
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
-          - ON for at least 0s
-          - OFF for at least 0s
+          # E .
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # S ...
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # P .--.
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # H ....
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # O ---
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0.5s to 2s
+          # M --
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0.5s to 2s
+          # E .
+          - ON for at most 0.2s
         then:
           - light.turn_on:
+              brightness: 100%
               id: voice_assistant_leds
               effect: "Rainbow"
 
@@ -382,7 +405,6 @@ script:
   # This script will be called everytime one of these conditions is changing.
   - id: control_leds
     then:
-      - logger.log: control_leds
       - if:
           condition:
             lambda: return !id(init_in_progress);
@@ -469,7 +491,6 @@ script:
   # Script executed when the device has no connection to Home Assistant
   - id: control_leds_no_ha_connection_state
     then:
-      - logger.log: control_leds_no_ha_connection_state
       - light.turn_on:
           brightness: 100%
           red: 1
