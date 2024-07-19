@@ -13,6 +13,41 @@
 namespace esphome {
 namespace nabu {
 
+// TODO:
+//  - Handle reading wav headers... -> avoids pops at start of TTS playback
+//  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
+//  - The various tasks are not uniform in their running/idle states. Be consistent!
+//  - Determine the best place to yield in each task... it's inconsistent
+//    - Be careful of different task priorities... for example, the speaker task had issues yielding unless the delay
+//      was in the command queue receiving part
+//      - This showed up when I removed the "IDLE" and "RUNNING" task messages, caused WDT
+//    - Probably best to delay at the reading ring buffer stages... but this could also prevent necessary yielding
+//      while streaming
+//  - Define I2C registers with static const instead of hardcoding for volume/muting
+//  - Starting playback of an encoded file while currently playing typically won't work
+//    - Fully stop all the streamer tasks before starting up again (perform this in the pipeline class)
+//  - Ensure buffers are fuller before starting to stream media (especially with the resampler active) to avoid
+//    initial stuttering
+//  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
+//    unnecessary parts (look at the mp3 decoder in particular)
+//  - The decoder streaming class is messy with the various input/output buffers being inconsistently named
+//    - Use same output buffer for mp3 and flac
+//    - Could we move ring buffer direct reading into the mp3 decoder? That would make life easier...
+//    - We can dynamically set the output buffer size for FLAC files
+//  - Apply the biquad filters in the resampler (but this may slow it down even more)
+//    - Requires better handling of the float buffer
+//  - Add ability to stop an announcement immediately via a media player command
+//  - Running into stuttering with high sample rate FLAC files with resampling
+//    - No resampling will probably fix this entirely
+//    - Moving mWW into tasks will avoid monopolizing an entire CPU core (since it currently is in the main loop with a
+//      high frequency looper), this should also help
+//    - Increasing the task priority may also be necessary for the audio streaming components
+//  - Update the yaml file to include I2C portions needed for volume control via the DAC
+//  - Ducking algorithm results in quiter TTS messages when mixed with media vs standalone TTS messages
+//    - Probably will need to compute the RMS of each stream... or carefully clamp values or both...
+//    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
+//    - Add a YAML action for setting the ducking level instead of requiring a lambda
+
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 10;
 static const size_t DMA_BUFFER_COUNT = 4;
@@ -134,11 +169,6 @@ static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 //     // vTaskDelay(STATS_TICKS);
 //   }
 // }
-
-// Major TODOs:
-//  - Handle reading wav headers... the function exists (but needs to be more robust) -> avoids pops at start of
-//  playback
-//  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
 
 static const char *const TAG = "nabu_media_player";
 
@@ -281,17 +311,6 @@ void NabuMediaPlayer::speaker_task(void *params) {
         this_speaker->combine_streamer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
 
     if (bytes_read > 0) {
-      // its too loud for constant testing! this does lower the quality quite a bit though...
-      // int16_t volume_reduction = (int16_t) (0.5f * std::pow(2, 15));
-      // dsps_mulc_s16_ae32(buffer, temp_buffer,bytes_read/sizeof(int16_t), volume_reduction, 1, 1);
-      // std::memcpy((void *) buffer, (void *) temp_buffer, bytes_read/sizeof(int16_t));
-
-      // // Copy mono audio samples into both channels
-      // for (int i = bytes_read / 2 - 1; i >= 0; --i) {
-      //   buffer[2 * i] = buffer[i];
-      //   buffer[2 * i + 1] = buffer[i];
-      // }
-
       size_t bytes_written;
       if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
         i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);

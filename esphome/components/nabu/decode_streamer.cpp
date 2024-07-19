@@ -12,7 +12,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 4 * 8192;
+static const size_t BUFFER_SIZE = 4 * 8192; // FLAC can require very large output buffers...
 static const size_t QUEUE_COUNT = 10;
 
 DecodeStreamer::DecodeStreamer() {
