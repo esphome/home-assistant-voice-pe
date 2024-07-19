@@ -116,6 +116,57 @@ binary_sensor:
     pin:
       number: GPIO17
       inverted: true
+    on_multi_click:
+      # Very important do not remove. Trust me :D
+      - timing:
+          # E .
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # S ...
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # P .--.
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # H ....
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # O ---
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0.5s to 2s
+          # M --
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for 0.5s to 2s
+          # E .
+          - ON for at most 0.2s
+        then:
+          - light.turn_on:
+              brightness: 100%
+              id: voice_assistant_leds
+              effect: "Rainbow"
+
 
   - platform: gpio
     id: mute_switch
@@ -125,8 +176,6 @@ binary_sensor:
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
-
-
 
 number:
   - platform: template
@@ -149,8 +198,8 @@ light:
     default_transition_length: 0ms
     power_supply: led_power
   - platform: partition
-    name: LEDs remapped
-    id: leds_remapped
+    id: voice_assistant_leds
+    internal: true
     default_transition_length: 0ms
     segments:
       - id: leds_internal
@@ -160,23 +209,11 @@ light:
         from: 0
         to: 6
     effects:
-      - pulse:
-          name: "Slow Pulse"
-          transition_length: 250ms
-          update_interval: 250ms
-          min_brightness: 50%
-          max_brightness: 100%
-      - pulse:
-          name: "Fast Pulse"
-          transition_length: 100ms
-          update_interval: 100ms
-          min_brightness: 50%
-          max_brightness: 100%
       - addressable_lambda:
           name: "Waiting for Command"
           update_interval: 100ms
           lambda: |-
-            auto light_color = id(leds_remapped).current_values;
+            auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -201,7 +238,7 @@ light:
           name: "Listening For Command"
           update_interval: 50ms
           lambda: |-
-            auto light_color = id(leds_remapped).current_values;
+            auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -233,7 +270,7 @@ light:
               brightness_step = 0;
               brightness_decreasing = true;
             }
-            auto light_color = id(leds_remapped).current_values;
+            auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -258,7 +295,7 @@ light:
           update_interval: 50ms
           lambda: |-
             id(global_led_animation_index) = (12 + id(global_led_animation_index) - 1) % 12;
-            auto light_color = id(leds_remapped).current_values;
+            auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -301,7 +338,7 @@ light:
           name: "Volume Display"
           update_interval: 50ms
           lambda: |-
-            auto light_color = id(leds_remapped).current_values;
+            auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             auto nb_leds_on = id(fake_volume).state;
@@ -312,19 +349,31 @@ light:
                 it[i] = Color::BLACK;
               }
             }
-      - addressable_rainbow:
-          name: "Rainbow"
-          width: 12
       - addressable_twinkle:
           name: "Twinkle"
           twinkle_probability: 50%
-      - addressable_random_twinkle:
-          name: "Random Twinkle"
-          twinkle_probability: 50%
-      - addressable_scan:
-          name: "Scan"
-          move_interval: 10ms
-          scan_width: 3
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 100ms
+          update_interval: 100ms
+          min_brightness: 50%
+          max_brightness: 100%
+      - addressable_rainbow:
+          name: "Rainbow"
+          width: 12
+
+  - platform: partition
+    id: led_ring
+    name: LED Ring
+    default_transition_length: 0ms
+    restore_mode: RESTORE_DEFAULT_OFF
+    segments:
+      - id: leds_internal
+        from: 7
+        to: 11
+      - id: leds_internal
+        from: 0
+        to: 6
 
 power_supply:
   - id: led_power
@@ -356,7 +405,6 @@ script:
   # This script will be called everytime one of these conditions is changing.
   - id: control_leds
     then:
-      - logger.log: control_leds
       - if:
           condition:
             lambda: return !id(init_in_progress);
@@ -428,7 +476,7 @@ script:
                 red: 0
                 green: 0
                 blue: 1.0
-                id: leds_remapped
+                id: voice_assistant_leds
                 effect: "Twinkle"
           else:
             - light.turn_on:
@@ -436,27 +484,31 @@ script:
                 red: 0
                 green: 1.0
                 blue: 0
-                id: leds_remapped
+                id: voice_assistant_leds
                 effect: "Twinkle"
 
 
   # Script executed when the device has no connection to Home Assistant
   - id: control_leds_no_ha_connection_state
     then:
-      - logger.log: control_leds_no_ha_connection_state
       - light.turn_on:
           brightness: 100%
           red: 1
           green: 0
           blue: 0
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Twinkle"
 
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
   - id: control_leds_voice_assist_idle_phase
     then:
-      - light.turn_off: leds_remapped
+      - light.turn_off: voice_assistant_leds
+      - if:
+          condition:
+            light.is_on: led_ring
+          then:
+            light.turn_on: led_ring
 
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
@@ -464,7 +516,7 @@ script:
     then:
       - light.turn_on:
           brightness: 100%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Waiting for Command"
 
   # Script executed when the voice assistant is listenintg to a command
@@ -472,7 +524,7 @@ script:
     then:
       - light.turn_on:
           brightness: 100%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Listening For Command"
 
 
@@ -481,7 +533,7 @@ script:
     then:
       - light.turn_on:
           brightness: 100%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Thinking"
 
 
@@ -490,14 +542,20 @@ script:
     then:
       - light.turn_on:
           brightness: 100%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Replying"
 
 
   # Script executed when the voice assistant is thinking to a command (# TO BE DONE)
   - id: control_leds_voice_assist_error_phase
     then:
-      - light.turn_off: leds_remapped
+      - light.turn_on:
+          brightness: 100%
+          red: 1
+          green: 0
+          blue: 0
+          id: voice_assistant_leds
+          effect: "Fast Pulse"
 
 
   # Script executed when the voice assistant is muted
@@ -505,7 +563,7 @@ script:
     then:
       - light.turn_on:
           brightness: 50%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Muted"
 
   # Script executed when the voice assistant is not ready
@@ -516,7 +574,7 @@ script:
           red: 1
           green: 0
           blue: 0
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Twinkle"
 
   # Script executed when the dial is touched
@@ -524,7 +582,7 @@ script:
     then:
       - light.turn_on:
           brightness: 100%
-          id: leds_remapped
+          id: voice_assistant_leds
           effect: "Volume Display"
 
 
@@ -652,6 +710,16 @@ voice_assistant:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
+  on_error:
+    - if:
+        condition:
+          lambda: return !id(init_in_progress);
+        then:
+          - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+          - script.execute: control_leds
+          - delay: 1s
+          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+          - script.execute: control_leds
   on_start:
     - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
   on_listening:
