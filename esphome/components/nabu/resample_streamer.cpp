@@ -12,11 +12,11 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 2048;
+static const size_t BUFFER_SIZE = 2*2048;
 static const size_t QUEUE_COUNT = 10;
 
-static const size_t NUM_TAPS = 64;
-static const size_t NUM_FILTERS = 64;
+static const size_t NUM_TAPS = 16;
+static const size_t NUM_FILTERS = 16;
 static const bool USE_PRE_POST_FILTER = false;
 
 ResampleStreamer::ResampleStreamer() {
@@ -62,11 +62,17 @@ void ResampleStreamer::resample_task_(void *params) {
   float *float_input_buffer = float_allocator.allocate(BUFFER_SIZE);
   float *float_output_buffer = float_allocator.allocate(BUFFER_SIZE);
 
+  // float *float_filtered_buffer = float_allocator.allocate(BUFFER_SIZE);
+
   int16_t *input_buffer_current = input_buffer;
   int16_t *output_buffer_current = output_buffer;
 
+  float *float_input_buffer_current = float_input_buffer;
+
   size_t input_buffer_length = 0;
   size_t output_buffer_length = 0;
+
+  size_t float_input_buffer_length = 0;
 
   if ((input_buffer == nullptr) || (output_buffer == nullptr)) {
     event.type = EventType::WARNING;
@@ -118,8 +124,8 @@ void ResampleStreamer::resample_task_(void *params) {
           constexpr uint8_t output_channels = 2;  // fix to stereo output for now
           channel_factor = output_channels / stream_info.channels;
         }
-        float resample_rate = 16000.0f;
-        if (stream_info.sample_rate != 16000) {
+        float resample_rate = 48000.0f;
+        if (stream_info.sample_rate != resample_rate) {
           resample = true;
           sample_ratio = resample_rate / stream_info.sample_rate;
           if (sample_ratio < 1.0) {
@@ -204,8 +210,10 @@ void ResampleStreamer::resample_task_(void *params) {
       input_buffer_current = input_buffer;
 
       // Copy new data to the end of the of the buffer
-      size_t bytes_available = this_streamer->input_ring_buffer_->available();
-      size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+      // size_t bytes_available = this_streamer->input_ring_buffer_->available();
+      // size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+
+      size_t bytes_to_read = BUFFER_SIZE * sizeof(int16_t) - input_buffer_length;
 
       if (bytes_to_read > 0) {
         int16_t *new_input_buffer_data = input_buffer + input_buffer_length / sizeof(int16_t);

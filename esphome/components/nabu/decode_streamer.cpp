@@ -176,7 +176,8 @@ void DecodeStreamer::decode_task_(void *params) {
       }
       size_t bytes_written = 0;
       size_t bytes_read = 0;
-      size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
+    //   size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
+      size_t bytes_to_read = std::min(this_streamer->output_ring_buffer_->free(), BUFFER_SIZE);
       if (max_bytes_to_read > 0) {
         bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, bytes_to_read, (10 / portTICK_PERIOD_MS));
       }
@@ -207,7 +208,8 @@ void DecodeStreamer::decode_task_(void *params) {
 
         // read in new mp3 data to fill the buffer
         size_t bytes_available = this_streamer->input_ring_buffer_->available();
-        size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
+        // size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE - mp3_bytes_left);
+        size_t bytes_to_read = BUFFER_SIZE - mp3_bytes_left;
         if (bytes_to_read > 0) {
           uint8_t *new_mp3_data = buffer + mp3_bytes_left;
           bytes_read =
@@ -301,8 +303,9 @@ void DecodeStreamer::decode_task_(void *params) {
         }
         flac_buffer_current = buffer;
 
-        size_t bytes_to_read =
-            std::min(this_streamer->input_ring_buffer_->available(), BUFFER_SIZE - flac_input_length);
+        // size_t bytes_to_read =
+        //     std::min(this_streamer->input_ring_buffer_->available(), BUFFER_SIZE - flac_input_length);
+        size_t bytes_to_read = BUFFER_SIZE - flac_input_length;
 
         if (bytes_to_read > 0) {
           uint8_t *new_flac_buffer_data = buffer + flac_input_length;

@@ -10,7 +10,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 2048;
+static const size_t BUFFER_SIZE = 4*2048;
 static const size_t QUEUE_COUNT = 10;
 
 CombineStreamer::CombineStreamer() {

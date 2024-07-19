@@ -204,8 +204,8 @@ void NabuMediaPlayer::speaker_task(void *params) {
   }
 
   i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = 16000,
+      .mode = (i2s_mode_t)  (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
+      .sample_rate = 48000,
       .bits_per_sample = this_speaker->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -215,7 +215,8 @@ void NabuMediaPlayer::speaker_task(void *params) {
       .use_apll = false,
       .tx_desc_auto_clear = true,
       .fixed_mclk = I2S_PIN_NO_CHANGE,
-      .mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT,
+      // .mclk_multiple = I2S_MCLK_MULTIPLE_128,
+      // .mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT,
       .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT,
 #if SOC_I2S_SUPPORTS_TDM
       .chan_mask = (i2s_channel_t) (I2S_TDM_ACTIVE_CH0 | I2S_TDM_ACTIVE_CH1),
