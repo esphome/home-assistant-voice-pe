@@ -46,12 +46,11 @@ jobs:
               repo: context.repo.repo,
               body: `Firmware built successfully! :tada:
 
-                [Download][download] and extract the firmware to install with https://web.esphome.io
+            [Download][download] and extract the firmware to install with https://web.esphome.io
 
-                Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
+            Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
 
-                [download]: ${{ steps.upload-artifact.outputs.artifact-url }}
-                `
+            [download]: ${{ steps.upload-artifact.outputs.artifact-url }}`
             })
 
   build-pages:
