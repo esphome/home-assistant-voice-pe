@@ -170,6 +170,8 @@ void NabuMediaPlayer::setup() {
 
   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 4096, (void *) this, 23, &this->speaker_task_handle_);
 
+  this->get_dac_volume_();
+
   ESP_LOGI(TAG, "Set up nabu media player");
 }
 
@@ -267,7 +269,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
   xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
   while (true) {
-    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
+    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
         // Stop signal from main thread
         break;
@@ -363,6 +365,11 @@ void NabuMediaPlayer::watch_media_commands_() {
       }
     }
 
+    if (media_command.volume.has_value()) {
+      this->set_volume_(media_command.volume.value());
+      this->is_muted_ = false;
+    }
+
     if (media_command.command.has_value()) {
       switch (media_command.command.value()) {
         case media_player::MEDIA_PLAYER_COMMAND_PLAY:
@@ -394,6 +401,20 @@ void NabuMediaPlayer::watch_media_commands_() {
             this->combine_streamer_->send_command(&command_event);
             this->is_paused_ = true;
           }
+          break;
+        case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
+          if (!this->is_muted_) {
+            this->mute_();
+            this->is_muted_ = true;
+          } else {
+            this->unmute_();
+            this->is_muted_ = false;
+          }
+          break;
+        }
+        case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
+          this->unmute_();
+          this->is_muted_ = false;
           break;
         default:
           break;
@@ -520,26 +541,56 @@ void NabuMediaPlayer::watch_() {
 }
 
 void NabuMediaPlayer::loop() {
-  size_t bytes_read = 0;
-
+  uint32_t start_time = millis();
   this->watch_media_commands_();
+  uint32_t media_commands = millis();
   this->watch_();
+  uint32_t watch_event = millis();
   this->watch_speaker_();
+  uint32_t speaker_events = millis();
 
+  uint32_t media_duration = media_commands - start_time;
+  uint32_t watch_duration = watch_event - start_time;
+  uint32_t speaker_duration = speaker_events - start_time;
+  if (media_duration > 20) {
+    ESP_LOGD(TAG, "long media command duration: %d ms", media_duration);
+  }
+  if (watch_duration > 20) {
+    ESP_LOGD(TAG, "long watch event duration: %d ms", watch_duration);
+  }
+  if (speaker_duration > 20) {
+    ESP_LOGD(TAG, "long speaker event duration: %d ms", speaker_duration);
+  }
   // Determine state of the media player
   media_player::MediaPlayerState old_state = this->state;
 
   if ((this->announcement_pipeline_state_ != PipelineState::STOPPING) &&
       (this->announcement_pipeline_state_ != PipelineState::STOPPED)) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+    if (this->is_idle_muted_ && !this->is_muted_) {
+      this->unmute_();
+      this->is_idle_muted_ = false;
+    }
   } else {
     if (this->is_paused_) {
       this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
+      if (!this->is_idle_muted_) {
+        this->mute_();
+        this->is_idle_muted_ = true;
+      }
     } else if ((this->media_pipeline_state_ == PipelineState::STOPPING) ||
                (this->media_pipeline_state_ == PipelineState::STOPPED)) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+      if (!this->is_idle_muted_) {
+        this->mute_();
+        this->is_idle_muted_ = true;
+      }
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+      if (this->is_idle_muted_ && !this->is_muted_) {
+        this->unmute_();
+        this->is_idle_muted_ = false;
+      }
     }
   }
 
@@ -595,6 +646,75 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   traits.set_supports_pause(true);
   return traits;
 };
+
+// TODO: Better handle error reading... use std::optional?
+float NabuMediaPlayer::get_dac_volume_(bool publish) {
+  if (!this->write_byte(0x00, 0x00)) {
+    // switch to page 1
+    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
+    return 0.0f;
+  }
+  uint8_t dac_volume = 0;
+  if (!this->read_byte(0x41, &dac_volume)) {
+    ESP_LOGE(TAG, "Failed to read the volume from the DAC");
+    return 0.0f;
+  }
+
+  float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
+  if (publish) {
+    this->volume = volume;
+  }
+
+  return volume;
+}
+
+void NabuMediaPlayer::set_volume_(float volume, bool publish) {
+  int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
+  if (!this->write_byte(0x00, 0x00)) {
+    // switch to page 1
+    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
+    return;
+  }
+
+  if (!this->write_byte(0x41, dac_volume) || !this->write_byte(0x42, dac_volume)) {
+    ESP_LOGE(TAG, "Failed to set volume on DAC");
+    return;
+  }
+
+  if (publish)
+    this->volume = volume;
+}
+
+bool NabuMediaPlayer::mute_() {
+  if (!this->write_byte(0x00, 0x01)) {
+    // switch to page 1
+    ESP_LOGE(TAG, "Failed to switch to page 1");
+    return false;
+  }
+
+  if (!this->write_byte(0x12, 0x40) || !(this->write_byte(0x13, 0x40))) {
+    // mute left and right channels
+    ESP_LOGE(TAG, "Failed to mute left and right channels");
+    return false;
+  }
+
+  return true;
+}
+bool NabuMediaPlayer::unmute_() {
+  if (!this->write_byte(0x00, 0x01)) {
+    // switch to page 1
+    ESP_LOGE(TAG, "Failed to switch to page 1");
+    return false;
+  }
+
+  if (!this->write_byte(0x12, 0x00) || !(this->write_byte(0x13, 0x00))) {
+    // mute left and right channels
+    ESP_LOGE(TAG, "Failed to unmute left and right channels");
+    return false;
+  }
+
+  return true;
+}
 
 }  // namespace nabu
 }  // namespace esphome
