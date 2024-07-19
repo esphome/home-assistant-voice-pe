@@ -8,22 +8,15 @@
 
 namespace flac {
 
-FLACDecoderResult FLACDecoder::read_header(size_t bytes_left) {
-  
-  this->bytes_left_ = bytes_left;
-  this->buffer_index_ = 0;
-
-  if (bytes_left == 0) {
+FLACDecoderResult FLACDecoder::read_header() {
+  if (this->out_of_data_) {
     return FLAC_DECODER_ERROR_OUT_OF_DATA;
   }
-  // if (this->out_of_data_) {
-  //   return FLAC_DECODER_ERROR_OUT_OF_DATA;
-  // }
 
-  // if (this->bytes_left_ < this->min_buffer_size_) {
-  //   // Refill the buffer before reading the header
-  //   this->fill_buffer();
-  // }
+  if (this->bytes_left_ < this->min_buffer_size_) {
+    // Refill the buffer before reading the header
+    this->fill_buffer();
+  }
 
   // File must start with 'fLaC'
   if (this->read_uint(32) != FLAC_MAGIC_NUMBER) {
@@ -64,31 +57,26 @@ FLACDecoderResult FLACDecoder::read_header(size_t bytes_left) {
         if (this->out_of_data_) {
           return FLAC_DECODER_ERROR_OUT_OF_DATA;
         }
-      } // for each byte in block
-    }   // variable block
-  }     // while not last
+      }  // for each byte in block
+    }  // variable block
+  }  // while not last
 
-  if ((this->sample_rate_ == 0) || (this->num_channels_ == 0) ||
-      (this->sample_depth_ == 0) || (this->max_block_size_ == 0)) {
+  if ((this->sample_rate_ == 0) || (this->num_channels_ == 0) || (this->sample_depth_ == 0) ||
+      (this->max_block_size_ == 0)) {
     return FLAC_DECODER_ERROR_BAD_HEADER;
   }
-  // this->min_buffer_size_ = this->min_block_size_ * this->num_channels_;
 
   // Successfully read header
   return FLAC_DECODER_SUCCESS;
-} // read_header
+}  // read_header
 
-FLACDecoderResult FLACDecoder::decode_frame(int16_t *output_buffer,
-                                            uint32_t *num_samples, size_t bytes_left) {
+FLACDecoderResult FLACDecoder::decode_frame(int16_t *output_buffer, uint32_t *num_samples) {
   *num_samples = 0;
-  this->buffer_index_ = 0;
-  this->bytes_left_ = bytes_left;
 
   if (!this->block_samples_) {
     // freed in free_buffers()
-     esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
+    esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
     this->block_samples_ = allocator.allocate(this->max_block_size_ * this->num_channels_);
-        // new int32_t[this->max_block_size_ * this->num_channels_];
   }
 
   if (this->bytes_left_ == 0) {
@@ -162,14 +150,13 @@ FLACDecoderResult FLACDecoder::decode_frame(int16_t *output_buffer,
   std::size_t output_index = 0;
   for (uint32_t i = 0; i < block_size; i++) {
     for (uint32_t j = 0; j < this->num_channels_; j++) {
-      output_buffer[output_index] =
-          this->block_samples_[(j * block_size) + i] + addend;
+      output_buffer[output_index] = this->block_samples_[(j * block_size) + i] + addend;
       output_index++;
     }
   }
 
   return FLAC_DECODER_SUCCESS;
-} // decode_frame
+}  // decode_frame
 
 void FLACDecoder::free_buffers() {
   if (this->block_samples_) {
@@ -181,54 +168,64 @@ void FLACDecoder::free_buffers() {
 
   this->block_result_.clear();
   this->block_result_.shrink_to_fit();
-} // free_buffers
+}  // free_buffers
 
 std::size_t FLACDecoder::fill_buffer() {
   if (this->bytes_left_ > 0) {
-    memmove(this->buffer_, this->buffer_ + this->buffer_index_,
-            this->bytes_left_);
+    memmove(this->buffer_, this->buffer_ + this->buffer_index_, this->bytes_left_);
   }
-  std::size_t bytes_read =
-      fread(this->buffer_ + this->bytes_left_, sizeof(uint8_t),
-            this->buffer_size_ - this->bytes_left_, stdin);
+
+  uint8_t *new_buffer_data = this->buffer_ + this->bytes_left_;
+
+  // TODO: This is hacky... we don't want to keep delaying every time fill_buffer is called if the file is done
+  // otherwise the decoder task will take a long time to end despite the media being finished
+  // if ((this->input_ring_buffer_->available() == 0) && (this->unsuccessful_read_count_ < 10)) {
+  // vTaskDelay(10 / portTICK_PERIOD_MS);
+  // }
+
+  std::size_t bytes_read = 0;
+  if (this->input_ring_buffer_->available() > 0) {
+    bytes_read = this->input_ring_buffer_->read((void *) new_buffer_data, this->buffer_size_ - this->bytes_left_,
+                                                0 / portTICK_PERIOD_MS);
+  }
+
+  // if (bytes_read > 0) {
+  //   this->unsuccessful_read_count_ = 0;
+  // } else if (this->unsuccessful_read_count_ < 10) {
+  //   ++this->unsuccessful_read_count_;
+  // }
 
   this->buffer_index_ = 0;
   this->bytes_left_ += bytes_read;
 
   return bytes_read;
-} // fill_buffer
+}  // fill_buffer
 
-FLACDecoderResult FLACDecoder::decode_subframes(uint32_t block_size,
-                                                uint32_t sample_depth,
+FLACDecoderResult FLACDecoder::decode_subframes(uint32_t block_size, uint32_t sample_depth,
                                                 uint32_t channel_assignment) {
   FLACDecoderResult result = FLAC_DECODER_SUCCESS;
   if (channel_assignment <= 7) {
     std::size_t block_samples_offset = 0;
     for (std::size_t i = 0; i < channel_assignment + 1; i++) {
-      result =
-          this->decode_subframe(block_size, sample_depth, block_samples_offset);
+      result = this->decode_subframe(block_size, sample_depth, block_samples_offset);
       if (result != FLAC_DECODER_SUCCESS) {
         return result;
       }
       block_samples_offset += block_size;
     }
   } else if ((8 <= channel_assignment) && (channel_assignment <= 10)) {
-    result = this->decode_subframe(
-        block_size, sample_depth + ((channel_assignment == 9) ? 1 : 0), 0);
+    result = this->decode_subframe(block_size, sample_depth + ((channel_assignment == 9) ? 1 : 0), 0);
     if (result != FLAC_DECODER_SUCCESS) {
       return result;
     }
-    result = this->decode_subframe(
-        block_size, sample_depth + ((channel_assignment == 9) ? 0 : 1),
-        block_size);
+    result = this->decode_subframe(block_size, sample_depth + ((channel_assignment == 9) ? 0 : 1), block_size);
     if (result != FLAC_DECODER_SUCCESS) {
       return result;
     }
 
     if (channel_assignment == 8) {
       for (std::size_t i = 0; i < block_size; i++) {
-        this->block_samples_[block_size + i] =
-            this->block_samples_[i] - this->block_samples_[block_size + i];
+        this->block_samples_[block_size + i] = this->block_samples_[i] - this->block_samples_[block_size + i];
       }
     } else if (channel_assignment == 9) {
       for (std::size_t i = 0; i < block_size; i++) {
@@ -247,11 +244,10 @@ FLACDecoderResult FLACDecoder::decode_subframes(uint32_t block_size,
   }
 
   return result;
-} // decode_subframes
+}  // decode_subframes
 
-FLACDecoderResult
-FLACDecoder::decode_subframe(uint32_t block_size, uint32_t sample_depth,
-                             std::size_t block_samples_offset) {
+FLACDecoderResult FLACDecoder::decode_subframe(uint32_t block_size, uint32_t sample_depth,
+                                               std::size_t block_samples_offset) {
   this->read_uint(1);
 
   uint32_t type = this->read_uint(6);
@@ -278,17 +274,14 @@ FLACDecoder::decode_subframe(uint32_t block_size, uint32_t sample_depth,
   } else if (type == 1) {
     // Verbatim
     for (std::size_t i = 0; i < block_size; i++) {
-      this->block_samples_[block_samples_offset + i] =
-          (this->read_sint(sample_depth) << shift);
+      this->block_samples_[block_samples_offset + i] = (this->read_sint(sample_depth) << shift);
     }
   } else if ((8 <= type) && (type <= 12)) {
     // Fixed prediction
-    result = this->decode_fixed_subframe(block_size, block_samples_offset,
-                                         type - 8, sample_depth);
+    result = this->decode_fixed_subframe(block_size, block_samples_offset, type - 8, sample_depth);
   } else if ((32 <= type) && (type <= 63)) {
     // LPC (linear predictive coding)
-    result = this->decode_lpc_subframe(block_size, block_samples_offset,
-                                       type - 31, sample_depth);
+    result = this->decode_lpc_subframe(block_size, block_samples_offset, type - 31, sample_depth);
     if (result != FLAC_DECODER_SUCCESS) {
       return result;
     }
@@ -302,12 +295,10 @@ FLACDecoder::decode_subframe(uint32_t block_size, uint32_t sample_depth,
   }
 
   return result;
-} // decode_subframe
+}  // decode_subframe
 
-FLACDecoderResult
-FLACDecoder::decode_fixed_subframe(uint32_t block_size,
-                                   std::size_t block_samples_offset,
-                                   uint32_t pre_order, uint32_t sample_depth) {
+FLACDecoderResult FLACDecoder::decode_fixed_subframe(uint32_t block_size, std::size_t block_samples_offset,
+                                                     uint32_t pre_order, uint32_t sample_depth) {
   if (pre_order > 4) {
     return FLAC_DECODER_ERROR_BAD_FIXED_PREDICTION_ORDER;
   }
@@ -324,16 +315,13 @@ FLACDecoder::decode_fixed_subframe(uint32_t block_size,
   }
   restore_linear_prediction(FLAC_FIXED_COEFFICIENTS[pre_order], 0);
 
-  std::copy(this->block_result_.begin(), this->block_result_.end(),
-            this->block_samples_ + block_samples_offset);
+  std::copy(this->block_result_.begin(), this->block_result_.end(), this->block_samples_ + block_samples_offset);
 
   return result;
-} // decode_fixed_subframe
+}  // decode_fixed_subframe
 
-FLACDecoderResult
-FLACDecoder::decode_lpc_subframe(uint32_t block_size,
-                                 std::size_t block_samples_offset,
-                                 uint32_t lpc_order, uint32_t sample_depth) {
+FLACDecoderResult FLACDecoder::decode_lpc_subframe(uint32_t block_size, std::size_t block_samples_offset,
+                                                   uint32_t lpc_order, uint32_t sample_depth) {
   FLACDecoderResult result = FLAC_DECODER_SUCCESS;
 
   this->block_result_.clear();
@@ -355,11 +343,10 @@ FLACDecoder::decode_lpc_subframe(uint32_t block_size,
   }
   restore_linear_prediction(coefs, shift);
 
-  std::copy(this->block_result_.begin(), this->block_result_.end(),
-            this->block_samples_ + block_samples_offset);
+  std::copy(this->block_result_.begin(), this->block_result_.end(), this->block_samples_ + block_samples_offset);
 
   return result;
-} // decode_lpc_subframe
+}  // decode_lpc_subframe
 
 FLACDecoderResult FLACDecoder::decode_residuals(uint32_t block_size) {
   uint32_t method = this->read_uint(2);
@@ -396,13 +383,12 @@ FLACDecoderResult FLACDecoder::decode_residuals(uint32_t block_size) {
         this->block_result_.push_back(this->read_sint(num_bits));
       }
     }
-  } // for each partition
+  }  // for each partition
 
   return FLAC_DECODER_SUCCESS;
-} // decode_residuals
+}  // decode_residuals
 
-void FLACDecoder::restore_linear_prediction(const std::vector<int32_t> &coefs,
-                                            int32_t shift) {
+void FLACDecoder::restore_linear_prediction(const std::vector<int32_t> &coefs, int32_t shift) {
   for (std::size_t i = coefs.size(); i < this->block_result_.size(); i++) {
     int32_t sum = 0;
     for (std::size_t j = 0; j < coefs.size(); j++) {
@@ -410,12 +396,12 @@ void FLACDecoder::restore_linear_prediction(const std::vector<int32_t> &coefs,
     }
     this->block_result_[i] += (sum >> shift);
   }
-} // restore_linear_prediction
+}  // restore_linear_prediction
 
 uint32_t FLACDecoder::read_uint(std::size_t num_bits) {
-  // if (this->bytes_left_ < this->min_buffer_size_) {
-  //   this->fill_buffer();
-  // }
+  if (this->bytes_left_ < this->min_buffer_size_) {
+    this->fill_buffer();
+  }
 
   if (this->bytes_left_ == 0) {
     this->out_of_data_ = true;
@@ -443,13 +429,12 @@ uint32_t FLACDecoder::read_uint(std::size_t num_bits) {
   }
 
   return result;
-} // read_uint
+}  // read_uint
 
 int32_t FLACDecoder::read_sint(std::size_t num_bits) {
   uint32_t next_int = this->read_uint(num_bits);
-  return (int32_t)next_int -
-         (((int32_t)next_int >> (num_bits - 1)) << num_bits);
-} // read_sint
+  return (int32_t) next_int - (((int32_t) next_int >> (num_bits - 1)) << num_bits);
+}  // read_sint
 
 int64_t FLACDecoder::read_rice_sint(uint8_t param) {
   long value = 0;
@@ -461,10 +446,8 @@ int64_t FLACDecoder::read_rice_sint(uint8_t param) {
   }
   value = (value << param) | this->read_uint(param);
   return (value >> 1) ^ -(value & 1);
-} // read_rice_sint
+}  // read_rice_sint
 
-void FLACDecoder::align_to_byte() {
-  this->bit_buffer_length_ -= (this->bit_buffer_length_ % 8);
-} // align_to_byte
+void FLACDecoder::align_to_byte() { this->bit_buffer_length_ -= (this->bit_buffer_length_ % 8); }  // align_to_byte
 
-} // namespace flac
+}  // namespace flac

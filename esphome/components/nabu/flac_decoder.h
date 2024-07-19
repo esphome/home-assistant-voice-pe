@@ -8,6 +8,7 @@
 #define _FLAC_DECODER_H
 
 #include "esphome/core/helpers.h"
+#include "esphome/core/ring_buffer.h"
 
 #include <cstdint>
 #include <vector>
@@ -59,21 +60,21 @@ public:
    * buffer_size - size of the data buffer
    * min_buffer_size - min bytes in buffer before fill_buffer is called
    */
-  FLACDecoder(uint8_t *buffer, const std::size_t buffer_size,
-              const std::size_t min_buffer_size)
+  FLACDecoder(uint8_t *buffer, const std::size_t buffer_size, const std::size_t min_buffer_size,
+              esphome::RingBuffer *input_ring_buffer)
       : buffer_(buffer), buffer_size_(buffer_size),
-        min_buffer_size_(min_buffer_size) {}
+        min_buffer_size_(min_buffer_size), input_ring_buffer_(input_ring_buffer) {}
 
   ~FLACDecoder() { this->free_buffers(); }
 
   /* Reads FLAC header from buffer.
    * Must be called before decode_frame. */
-  FLACDecoderResult read_header(size_t bytes_left);
+  FLACDecoderResult read_header();
 
   /* Decodes a single frame of audio.
    * Copies num_samples into output_buffer.
    * Use get_output_buffer_size() to allocate output_buffer. */
-  FLACDecoderResult decode_frame(int16_t *output_buffer, uint32_t *num_samples, size_t bytes_left);
+  FLACDecoderResult decode_frame(int16_t *output_buffer, uint32_t *num_samples);
 
   /* Frees internal memory. */
   void free_buffers();
@@ -196,6 +197,8 @@ private:
 
   /* Buffer of decoded samples at full precision (single channel). */
   std::vector<int32_t, esphome::ExternalRAMAllocator<int32_t>> block_result_;
+
+  esphome::RingBuffer *input_ring_buffer_;
 };
 
 } // namespace flac

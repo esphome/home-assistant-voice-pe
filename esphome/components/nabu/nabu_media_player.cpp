@@ -138,14 +138,6 @@ static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 // Major TODOs:
 //  - Handle reading wav headers... the function exists (but needs to be more robust) -> avoids pops at start of
 //  playback
-//  - Handle stereo streams
-//    - Careful if media stream and announcement stream have different number of channels
-//    - Eventually I want the speaker component to accept stereo audio by default
-//    - PCM streams should send the essential details to each step in this process to automatically handle different
-//      streaming characteristics
-//  - Implement a resampler... we probably won't be able to change on-the-fly the sample rate before feeding into the
-//    XMOS chip
-//    - only 16 bit mono channel 16 kHz audio is supported at the momemnt!
 //  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
 
 static const char *const TAG = "nabu_media_player";
