@@ -25,7 +25,7 @@ jobs:
           mkdir -p output
           mv ${{ steps.esphome-build.outputs.name }} output/
           jq --arg version "${{ steps.esphome-build.outputs.project-version }}" \
-            '{"name": "ESPHome Voice Kit", "version": $version, "home_assistant_domain": "esphome", "new_install_skip_erase": false, "builds":[.]}' \
+            '{"name": "ESPHome Voice Kit", "version": $version, "home_assistant_domain": "esphome", "new_install_prompt_erase": false, "builds":[.]}' \
             output/${{ steps.esphome-build.outputs.name }}/manifest.json > output/manifest.json
 
       - name: Upload firmware
