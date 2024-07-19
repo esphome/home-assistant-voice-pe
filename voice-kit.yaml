@@ -67,6 +67,8 @@ api:
 ota:
   - platform: esphome
 
+improv_serial:
+
 psram:
   mode: octal
   speed: 80MHz
