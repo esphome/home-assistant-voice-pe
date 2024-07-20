@@ -20,6 +20,18 @@
 namespace esphome {
 namespace nabu {
 
+static const uint8_t DAC_PAGE_SELECTION_REGISTER = 0x00;
+static const uint8_t DAC_LEFT_MUTE_REGISTER = 0x12;
+static const uint8_t DAC_RIGHT_MUTE_REGISTER = 0x13;
+static const uint8_t DAC_LEFT_VOLUME_REGISTER = 0x41;
+static const uint8_t DAC_RIGHT_VOLUME_REGISTER = 0x42;
+
+static const uint8_t DAC_VOLUME_PAGE = 0x00;
+static const uint8_t DAC_MUTE_PAGE = 0x01;
+
+static const uint8_t DAC_MUTE_COMMAND = 0x40;
+static const uint8_t DAC_UNMUTE_COMMAND = 0x00;
+
 enum class PipelineState : uint8_t {
   STARTING,
   STARTED,

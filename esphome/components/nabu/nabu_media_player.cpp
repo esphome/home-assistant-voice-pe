@@ -1,6 +1,6 @@
-#include "nabu_media_player.h"
-
 #ifdef USE_ESP_IDF
+
+#include "nabu_media_player.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -16,14 +16,13 @@ namespace nabu {
 // TODO:
 //  - Handle reading wav headers... -> avoids pops at start of TTS playback
 //  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
-//  - The various tasks are not uniform in their running/idle states. Be consistent!
+//  - The various tasks are not uniform in their running/idle states meaning. Be consistent!
 //  - Determine the best place to yield in each task... it's inconsistent
 //    - Be careful of different task priorities... for example, the speaker task had issues yielding unless the delay
 //      was in the command queue receiving part
 //      - This showed up when I removed the "IDLE" and "RUNNING" task messages, caused WDT
 //    - Probably best to delay at the reading ring buffer stages... but this could also prevent necessary yielding
 //      while streaming
-//  - Define I2C registers with static const instead of hardcoding for volume/muting
 //  - Starting playback of an encoded file while currently playing typically won't work
 //    - Fully stop all the streamer tasks before starting up again (perform this in the pipeline class)
 //  - Ensure buffers are fuller before starting to stream media (especially with the resampler active) to avoid
@@ -42,7 +41,6 @@ namespace nabu {
 //    - Moving mWW into tasks will avoid monopolizing an entire CPU core (since it currently is in the main loop with a
 //      high frequency looper), this should also help
 //    - Increasing the task priority may also be necessary for the audio streaming components
-//  - Update the yaml file to include I2C portions needed for volume control via the DAC
 //  - Ducking algorithm results in quiter TTS messages when mixed with media vs standalone TTS messages
 //    - Probably will need to compute the RMS of each stream... or carefully clamp values or both...
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
@@ -559,26 +557,10 @@ void NabuMediaPlayer::watch_() {
 }
 
 void NabuMediaPlayer::loop() {
-  uint32_t start_time = millis();
   this->watch_media_commands_();
-  uint32_t media_commands = millis();
   this->watch_();
-  uint32_t watch_event = millis();
   this->watch_speaker_();
-  uint32_t speaker_events = millis();
 
-  uint32_t media_duration = media_commands - start_time;
-  uint32_t watch_duration = watch_event - start_time;
-  uint32_t speaker_duration = speaker_events - start_time;
-  if (media_duration > 20) {
-    ESP_LOGD(TAG, "long media command duration: %d ms", media_duration);
-  }
-  if (watch_duration > 20) {
-    ESP_LOGD(TAG, "long watch event duration: %d ms", watch_duration);
-  }
-  if (speaker_duration > 20) {
-    ESP_LOGD(TAG, "long speaker event duration: %d ms", speaker_duration);
-  }
   // Determine state of the media player
   media_player::MediaPlayerState old_state = this->state;
 
@@ -688,14 +670,13 @@ float NabuMediaPlayer::get_dac_volume_(bool publish) {
 
 void NabuMediaPlayer::set_volume_(float volume, bool publish) {
   int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
-  if (!this->write_byte(0x00, 0x00)) {
-    // switch to page 1
-    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
     return;
   }
 
-  if (!this->write_byte(0x41, dac_volume) || !this->write_byte(0x42, dac_volume)) {
-    ESP_LOGE(TAG, "Failed to set volume on DAC");
+  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) || !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
+    ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
     return;
   }
 
@@ -704,30 +685,26 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
 }
 
 bool NabuMediaPlayer::mute_() {
-  if (!this->write_byte(0x00, 0x01)) {
-    // switch to page 1
-    ESP_LOGE(TAG, "Failed to switch to page 1");
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
     return false;
   }
 
-  if (!this->write_byte(0x12, 0x40) || !(this->write_byte(0x13, 0x40))) {
-    // mute left and right channels
-    ESP_LOGE(TAG, "Failed to mute left and right channels");
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) || !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
+    ESP_LOGE(TAG, "DAC failed to mute left and right channels");
     return false;
   }
 
   return true;
 }
 bool NabuMediaPlayer::unmute_() {
-  if (!this->write_byte(0x00, 0x01)) {
-    // switch to page 1
-    ESP_LOGE(TAG, "Failed to switch to page 1");
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
     return false;
   }
 
-  if (!this->write_byte(0x12, 0x00) || !(this->write_byte(0x13, 0x00))) {
-    // mute left and right channels
-    ESP_LOGE(TAG, "Failed to unmute left and right channels");
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) || !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
+    ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
     return false;
   }
 
