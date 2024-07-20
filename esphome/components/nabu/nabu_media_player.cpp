@@ -43,6 +43,8 @@ namespace nabu {
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
+//  - Verify ring buffers are reset in a safe way (only tasks that read should reset it?)
+//  - Make announcement flag in media command more effecient code wise (its checked in multiple spots)
 
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 20;
