@@ -13,10 +13,8 @@ namespace nabu {
 // Major TODOs:
 //  - Rename/split up file, it contains more than one class
 
-static const size_t HTTP_BUFFER_SIZE = 4 * 8192;
-static const size_t BUFFER_SIZE = 4 * 2048;
-
-static const size_t QUEUE_COUNT = 10;
+static const size_t HTTP_BUFFER_SIZE = 16 * 8192;
+static const size_t QUEUE_COUNT = 20;
 
 
 void OutputStreamer::stop() {
@@ -68,6 +66,7 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
 
   int content_length = esp_http_client_fetch_headers(*client);
 
+  // TODO: Figure out how to handle this better! Music Assistant streams don't send a content length
   // if (content_length <= 0) {
   //   printf("Fialed to get content length");
   //   this->cleanup_connection_(client);
@@ -81,13 +80,6 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
   }
 
   std::string url_string = url;
-// return MediaFileType::FLAC;
-//   size_t found = url_string.find(".flac");
-//   if (found!=std::string::npos) {
-//     return MediaFileType::FLAC;
-//   }
-
-  printf("cleand up url: %s", url_string.c_str());
 
   if (str_endswith(url_string, ".wav")) {
     return MediaFileType::WAV;
@@ -97,14 +89,12 @@ MediaFileType HTTPStreamer::establish_connection_(esp_http_client_handle_t *clie
     return MediaFileType::FLAC;
   }
 
-  printf("couldn't determine file type: %s", url_string.c_str());
-
   return MediaFileType::NONE;
 }
 
 void HTTPStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(HTTPStreamer::read_task_, task_name.c_str(), 4096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(HTTPStreamer::read_task_, task_name.c_str(), 3072, (void *) this, priority, &this->task_handle_);
   }
 }
 

@@ -49,7 +49,7 @@ namespace nabu {
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
-static const size_t QUEUE_COUNT = 10;
+static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
 static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
@@ -177,7 +177,7 @@ void NabuMediaPlayer::setup() {
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
-  this->media_control_command_queue_ = xQueueCreate(1, sizeof(MediaCallCommand));
+  this->media_control_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(MediaCallCommand));
 
   this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
@@ -190,7 +190,7 @@ void NabuMediaPlayer::setup() {
     return;
   }
 
-  xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 4096, (void *) this, 23, &this->speaker_task_handle_);
+  xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
 
   this->get_dac_volume_();
 

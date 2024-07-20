@@ -37,10 +37,6 @@ class Pipeline {
   static void transfer_task_(void *params);
   void watch_();
 
-  bool reading_{false};
-  bool decoding_{false};
-  bool resampling_{false};
-
   std::unique_ptr<HTTPStreamer> reader_;
   std::unique_ptr<DecodeStreamer> decoder_;
   std::unique_ptr<ResampleStreamer> resampler_;
@@ -53,6 +49,10 @@ class Pipeline {
 
   std::string current_uri_{};
   PipelineType pipeline_type_;
+
+  bool reading_{false};
+  bool decoding_{false};
+  bool resampling_{false};
 };
 
 }  // namespace nabu

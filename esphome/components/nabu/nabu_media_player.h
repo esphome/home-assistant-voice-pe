@@ -49,10 +49,6 @@ class NabuMediaPlayer : public Component,
   media_player::MediaPlayerTraits get_traits() override;
   bool is_muted() const override { return this->is_muted_; }
 
-  void start() {}
-  void stop() {}
-  // void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
-
   void set_ducking_ratio(float ducking_ratio) override;
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
@@ -90,9 +86,9 @@ class NabuMediaPlayer : public Component,
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
   QueueHandle_t speaker_command_queue_;
-  uint8_t dout_pin_{0};
   i2s_bits_per_sample_t bits_per_sample_;
-
+  uint8_t dout_pin_{0};
+  
   bool is_paused_{false};
   bool is_muted_{false};
 

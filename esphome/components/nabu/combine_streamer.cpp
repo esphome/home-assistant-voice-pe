@@ -11,7 +11,7 @@ namespace esphome {
 namespace nabu {
 
 static const size_t BUFFER_SIZE = 2048;
-static const size_t QUEUE_COUNT = 10;
+static const size_t QUEUE_COUNT = 20;
 
 CombineStreamer::CombineStreamer() {
   this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
@@ -49,7 +49,7 @@ size_t CombineStreamer::write_announcement(uint8_t *buffer, size_t length) {
 
 void CombineStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(CombineStreamer::combine_task_, task_name.c_str(), 4096, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(CombineStreamer::combine_task_, task_name.c_str(), 3072, (void *) this, priority, &this->task_handle_);
   }
 }
 

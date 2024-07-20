@@ -5,6 +5,7 @@
 #include <driver/i2s.h>
 
 #include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "esphome/core/ring_buffer.h"
 
@@ -254,12 +255,12 @@ size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) {
 }
 
 void I2SAudioMicrophone::read_() {
-  std::vector<int16_t> samples;
+  std::vector<int16_t, ExternalRAMAllocator<int16_t>> samples;
   samples.resize(BUFFER_SIZE);
   // TODO this probably isn't correct
   size_t bytes_read = this->read(samples.data(), BUFFER_SIZE / sizeof(int16_t));
   samples.resize(bytes_read / sizeof(int16_t));
-  this->data_callbacks_.call(samples);
+  // this->data_callbacks_.call(samples);
 }
 
 void I2SAudioMicrophone::loop() {

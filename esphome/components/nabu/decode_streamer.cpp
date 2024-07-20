@@ -13,7 +13,7 @@ namespace esphome {
 namespace nabu {
 
 static const size_t BUFFER_SIZE = 4 * 8192; // FLAC can require very large output buffers...
-static const size_t QUEUE_COUNT = 10;
+static const size_t QUEUE_COUNT = 20;
 
 DecodeStreamer::DecodeStreamer() {
   this->input_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
@@ -30,7 +30,7 @@ DecodeStreamer::DecodeStreamer() {
 
 void DecodeStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(DecodeStreamer::decode_task_, task_name.c_str(), 4092, (void *) this, priority, &this->task_handle_);
+    xTaskCreate(DecodeStreamer::decode_task_, task_name.c_str(), 3072, (void *) this, priority, &this->task_handle_);
   }
 }
 
@@ -303,11 +303,8 @@ void DecodeStreamer::decode_task_(void *params) {
             auto result = flac_decoder.read_header();
 
             if (result != flac::FLAC_DECODER_SUCCESS) {
-              printf("failed to read flac header %d\n", result);
-              printf("%.*s", 4, (char *) buffer);
+              printf("failed to read flac header. Error: %d\n", result);
               break;
-            } else {
-              printf("successfully read flac header\n");
             }
 
             flac_input_length -= flac_decoder.get_bytes_index();
@@ -344,15 +341,12 @@ void DecodeStreamer::decode_task_(void *params) {
           auto result = flac_decoder.decode_frame((int16_t *) buffer_output, &output_samples);
 
           if (result != flac::FLAC_DECODER_SUCCESS) {
-            printf("failed to read flac file %d\n", result);
-            //   printf("%.*s", 4, (char *) buffer);
             break;
           }
 
           flac_output_buffer_current = buffer_output;
           output_flac_bytes = output_samples * sizeof(int16_t);
         }
-        // }
       }
     }
 

@@ -12,11 +12,11 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 2048;
-static const size_t QUEUE_COUNT = 10;
+static const size_t BUFFER_SIZE = 4096;
+static const size_t QUEUE_COUNT = 20;
 
-static const size_t NUM_TAPS = 64;
-static const size_t NUM_FILTERS = 64;
+static const size_t NUM_TAPS = 32;
+static const size_t NUM_FILTERS = 32;
 static const bool USE_PRE_POST_FILTER = false;
 
 ResampleStreamer::ResampleStreamer() {
@@ -34,7 +34,7 @@ ResampleStreamer::ResampleStreamer() {
 
 void ResampleStreamer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    xTaskCreate(ResampleStreamer::resample_task_, task_name.c_str(), 4092, (void *) this, priority,
+    xTaskCreate(ResampleStreamer::resample_task_, task_name.c_str(), 3072, (void *) this, priority,
                 &this->task_handle_);
   }
 }
