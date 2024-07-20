@@ -33,8 +33,7 @@ namespace nabu {
 //    - Use same output buffer for mp3 and flac
 //    - Could we move ring buffer direct reading into the mp3 decoder? That would make life easier...
 //    - We can dynamically set the output buffer size for FLAC files
-//  - Apply the biquad filters in the resampler (but this may slow it down even more)
-//    - Requires better handling of the float buffer
+//  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda

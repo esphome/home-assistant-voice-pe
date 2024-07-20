@@ -17,7 +17,7 @@ static const size_t QUEUE_COUNT = 20;
 
 static const size_t NUM_TAPS = 32;
 static const size_t NUM_FILTERS = 32;
-static const bool USE_PRE_POST_FILTER = false;
+static const bool USE_PRE_POST_FILTER = true;
 
 ResampleStreamer::ResampleStreamer() {
   this->input_ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
@@ -206,6 +206,23 @@ void ResampleStreamer::resample_task_(void *params) {
       // Copy new data to the end of the of the buffer
       size_t bytes_available = this_streamer->input_ring_buffer_->available();
       size_t bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+
+      // size_t bytes_to_read = 0;
+      // if (resample) {
+      //   size_t output_bytes_free = this_streamer->output_ring_buffer_->free();
+      //   size_t input_bytes_available = bytes_available;
+
+      //   size_t required_samples_to_fill_free = resampleGetRequiredSamples(resampler, output_bytes_free, sample_ratio);
+
+      //   if (required_samples_to_fill_free > bytes_available + input_buffer_length) {
+      //     // we can't fill in the output buffer fully with what is available, so just give as many samples as we can
+      //     bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+      //   } else {
+      //     bytes_to_read = required_samples_to_fill_free - input_buffer_length;
+      //   }
+      // } else {
+      //   bytes_to_read = std::min(bytes_available, BUFFER_SIZE * sizeof(int16_t) - input_buffer_length);
+      // }
 
       if (bytes_to_read > 0) {
         int16_t *new_input_buffer_data = input_buffer + input_buffer_length / sizeof(int16_t);
