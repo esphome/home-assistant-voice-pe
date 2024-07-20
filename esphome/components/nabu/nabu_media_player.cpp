@@ -35,7 +35,6 @@ namespace nabu {
 //    - We can dynamically set the output buffer size for FLAC files
 //  - Apply the biquad filters in the resampler (but this may slow it down even more)
 //    - Requires better handling of the float buffer
-//  - Add ability to stop an announcement immediately via a media player command
 //  - Running into stuttering with high sample rate FLAC files with resampling
 //    - No resampling will probably fix this entirely
 //    - Moving mWW into tasks will avoid monopolizing an entire CPU core (since it currently is in the main loop with a
@@ -126,8 +125,9 @@ static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 //     // Check if matching task found
 //     if (k >= 0) {
 //       uint32_t task_elapsed_time = end_array[k].ulRunTimeCounter - start_array[i].ulRunTimeCounter;
-//       uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time * CONFIG_FREERTOS_NUMBER_OF_CORES);
-//       printf("| %s | %" PRIu32 " | %" PRIu32 "%%\n", start_array[i].pcTaskName, task_elapsed_time, percentage_time);
+//       uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time *
+//       CONFIG_FREERTOS_NUMBER_OF_CORES); printf("| %s | %" PRIu32 " | %" PRIu32 "%%\n", start_array[i].pcTaskName,
+//       task_elapsed_time, percentage_time);
 //     }
 //   }
 
@@ -398,8 +398,12 @@ void NabuMediaPlayer::watch_media_commands_() {
           break;
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           command_event.command = CommandEventType::STOP;
-          this->media_pipeline_->send_command(&command_event);
-          this->is_paused_ = false;
+          if (media_command.announce.has_value() && media_command.announce.value()) {
+            this->announcement_pipeline_->send_command(&command_event, (10 / portTICK_PERIOD_MS));
+          } else {
+            this->media_pipeline_->send_command(&command_event);
+            this->is_paused_ = false;
+          }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
           if (this->is_paused_) {
@@ -424,11 +428,11 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
-          this->set_volume_(std::min(1.0f, this->volume+0.05f));
+          this->set_volume_(std::min(1.0f, this->volume + 0.05f));
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN:
-          this->set_volume_(std::max(0.0f, this->volume-0.05f));
+          this->set_volume_(std::max(0.0f, this->volume - 0.05f));
           this->publish_state();
           break;
         default:
@@ -633,6 +637,9 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   }
 
   if (call.get_command().has_value()) {
+    if (call.get_announcement().has_value() && call.get_announcement().value()) {
+      media_command.announce = true;
+    }
     media_command.command = call.get_command().value();
     xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
     return;
@@ -674,7 +681,8 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
     return;
   }
 
-  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) || !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
+  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
+      !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
     ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
     return;
   }
@@ -689,7 +697,8 @@ bool NabuMediaPlayer::mute_() {
     return false;
   }
 
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) || !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) ||
+      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
     ESP_LOGE(TAG, "DAC failed to mute left and right channels");
     return false;
   }
@@ -702,7 +711,8 @@ bool NabuMediaPlayer::unmute_() {
     return false;
   }
 
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) || !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) ||
+      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
     ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
     return false;
   }
