@@ -144,9 +144,32 @@ void CombineStreamer::combine_task_(void *params) {
 
         size_t bytes_written = 0;
         if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
-          // This adds the two signals together and then shifts it by 1 bit to avoid clipping
-          // TODO: Don't shift by 1 as the announcement stream will be quieter than desired (need to clamp?)
-          dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, bytes_to_read, 1, 1, 1, 1);
+
+          size_t samples_read = bytes_to_read/sizeof(int16_t);
+          // We first test adding the two clips samples together and check for any clipping
+          // We want the announcement volume to be consistent, regardless if media is playing or not
+          // If there is clipping, we determine what factor we need to multiply that media sample by to avoid it
+          // We take the smallest factor necessary for all the samples so the media volume is consistent on this batch of samples
+          float factor_to_avoid_clipping = 1.0f;
+          for (int i = 0; i < samples_read; ++i) {
+            int32_t added_sample = static_cast<int32_t>(media_buffer[i]) + static_cast<int32_t>(announcement_buffer[i]);
+
+            if ((added_sample > INT16_MAX) || (added_sample < INT16_MIN)) {
+              float q_factor = std::abs(static_cast<float>(added_sample-announcement_buffer[i])/static_cast<float>(media_buffer[i]));
+              factor_to_avoid_clipping = std::min(factor_to_avoid_clipping, q_factor);
+            }
+          }
+
+          // Multiply all media samples by the factor to avoid clipping if necessary
+          if (factor_to_avoid_clipping < 1.0f) {
+            int16_t q15_factor_to_avoid_clipping = (int16_t) (factor_to_avoid_clipping * std::pow(2, 15));
+            dsps_mulc_s16_ae32(media_buffer, combination_buffer, samples_read, q15_factor_to_avoid_clipping, 1, 1);
+            std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
+          }
+
+          // Add together both streams, with no bitshift
+          // (input buffer 1, input buffer 2, output buffer, length, input buffer 1 step, input buffer 2 step, output buffer step, bitshift)
+          dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, samples_read, 1, 1, 1, 0);
           bytes_written = this_combiner->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
         } else if (media_bytes_read > 0) {
           bytes_written = this_combiner->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);

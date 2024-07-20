@@ -41,8 +41,7 @@ namespace nabu {
 //    - Moving mWW into tasks will avoid monopolizing an entire CPU core (since it currently is in the main loop with a
 //      high frequency looper), this should also help
 //    - Increasing the task priority may also be necessary for the audio streaming components
-//  - Ducking algorithm results in quiter TTS messages when mixed with media vs standalone TTS messages
-//    - Probably will need to compute the RMS of each stream... or carefully clamp values or both...
+//  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 
