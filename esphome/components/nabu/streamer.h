@@ -55,6 +55,8 @@ enum class CommandEventType : uint8_t {
   DUCK,
   PAUSE_MEDIA,
   RESUME_MEDIA,
+  CLEAR_MEDIA,
+  CLEAR_ANNOUNCEMENT,
 };
 
 enum class PipelineType : uint8_t {

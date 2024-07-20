@@ -246,6 +246,13 @@ void Pipeline::watch_() {
       case EventType::STOPPED:
         this->resampling_ = false;
         this->resampler_->stop();
+        if (this->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
+          command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
+          this->mixer_->send_command(&command_event);
+        } else if (this->pipeline_type_ == PipelineType::MEDIA){
+          command_event.command = CommandEventType::CLEAR_MEDIA;
+          this->mixer_->send_command(&command_event);
+        }
         break;
       case EventType::WARNING:
         this->resampling_ = false;

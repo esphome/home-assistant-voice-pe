@@ -106,6 +106,10 @@ void CombineStreamer::combine_task_(void *params) {
         transfer_media = false;
       } else if (command_event.command == CommandEventType::RESUME_MEDIA) {
         transfer_media = true;
+      } else if (command_event.command == CommandEventType::CLEAR_MEDIA) {
+        this_combiner->media_ring_buffer_->reset();
+      } else if (command_event.command == CommandEventType::CLEAR_ANNOUNCEMENT) {
+        this_combiner->announcement_ring_buffer_->reset();
       }
     }
 
