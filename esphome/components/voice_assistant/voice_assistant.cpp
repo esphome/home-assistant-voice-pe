@@ -215,7 +215,7 @@ void VoiceAssistant::loop() {
           this->set_state_(State::START_MICROPHONE, State::START_PIPELINE);
         }
       } else {
-        this->high_freq_.stop();
+        // this->high_freq_.stop();
       }
       break;
     }
@@ -231,7 +231,7 @@ void VoiceAssistant::loop() {
       this->clear_buffers_();
 
       this->mic_->start();
-      this->high_freq_.start();
+      // this->high_freq_.start();
       this->set_state_(State::STARTING_MICROPHONE);
       break;
     }
