@@ -92,6 +92,10 @@ void DecodeStreamer::decode_task_(void *params) {
   int mp3_output_bytes_left = 0;
   uint8_t *mp3_output_buffer_current = buffer_output;
 
+  size_t wav_header_bytes_to_read = 4 * 5;  // enough to get fmt size
+  size_t wav_header_bytes_read = 0;
+  bool wav_have_fmt_size = false;
+
   bool stopping = false;
   bool header_parsed = false;
 
@@ -118,6 +122,10 @@ void DecodeStreamer::decode_task_(void *params) {
 
         mp3_output_bytes_left = 0;
         mp3_output_buffer_current = buffer_output;
+
+        wav_header_bytes_to_read = 4 * 5;
+        wav_header_bytes_read  = 0;
+        wav_have_fmt_size = false;
 
         stopping = false;
         header_parsed = false;
@@ -155,23 +163,79 @@ void DecodeStreamer::decode_task_(void *params) {
     // sample rate, bits per sample
     if (media_file_type == MediaFileType::WAV) {
       if (!header_parsed) {
-        header_parsed = true;
-        bytes_read = this_streamer->input_ring_buffer_->read((void *) buffer, 44);
+        if (max_bytes_to_read > 0)
+        {
+          bytes_read = this_streamer->input_ring_buffer_->read((void *) (buffer + wav_header_bytes_read),
+                                                               wav_header_bytes_to_read - wav_header_bytes_read);
+        }
         max_bytes_to_read -= bytes_read;
-        // TODO: Actually parse the header!
+        wav_header_bytes_read += bytes_read;
 
-        StreamInfo old_stream_info = stream_info;
+        if (wav_header_bytes_read == wav_header_bytes_to_read) {
+          if (!wav_have_fmt_size) {
+            // We should have:
+            // 'RIFF' (4 bytes)
+            // chunk size (4 bytes)
+            // 'WAVE' (4 bytes)
+            // 'fmt ' (4 bytes)
+            // format size (4 bytes)
+            if (strncmp((char *)buffer, "RIFF", 4) != 0) {
+              printf("Missing RIFF header: %.*s\n", 4, (char *)buffer);
+              break;
+            }
 
-        stream_info.channels = 1;
-        stream_info.sample_rate = 16000;
+            if (strncmp((char *)(buffer + 8), "WAVE", 4) != 0) {
+              printf("Missing WAVE header: %.*s\n", 4, (char *)(buffer + 8));
+              break;
+            }
 
-        if (stream_info != old_stream_info) {
-          this_streamer->output_ring_buffer_->reset();
+            if (strncmp((char *)(buffer + 12), "fmt ", 4) != 0) {
+              printf("Missing fmt header: %.*s\n", 4, (char *)(buffer + 12));
+              break;
+            }
 
-          event.type = EventType::STARTED;
-          event.media_file_type = media_file_type;
-          event.stream_info = stream_info;
-          xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+            // Should be 16, but can vary
+            uint32_t fmt_size = *((uint32_t *)(buffer + 16));
+
+            // Read rest of fmt chunk + 'data' + data size
+            wav_header_bytes_to_read = fmt_size + 4 + 4;
+            wav_header_bytes_read = 0;
+            wav_have_fmt_size = true;
+          } else {
+            // We are just past the fmt chunk size in the header now.
+            // Next up is:
+            // audio format (2 bytes, PCM = 1)
+            // channels (2 bytes)
+            // sample rate (4 bytes)
+            // bytes per second (4 bytes)
+            // block align (2 bytes)
+            // bits per sample (2 bytes)
+            // 'data' (4 bytes)
+            // data size (4 bytes)
+            header_parsed = true;
+            StreamInfo old_stream_info = stream_info;
+
+            // Assume PCM and 16-bits per sample
+            stream_info.channels = *((uint16_t*)(buffer + 2));
+            stream_info.sample_rate = *((uint32_t*)(buffer + 4));
+
+            printf("sample channels: %d\n", stream_info.channels);
+            printf("sample rate: %d\n", stream_info.sample_rate);
+
+            if (stream_info != old_stream_info) {
+              this_streamer->output_ring_buffer_->reset();
+
+              event.type = EventType::STARTED;
+              event.media_file_type = media_file_type;
+              event.stream_info = stream_info;
+              xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+            }
+          }
+        }
+
+        if (!header_parsed) {
+          // Need more data to parse header
+          continue;
         }
       }
       size_t bytes_written = 0;
