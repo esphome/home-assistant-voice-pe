@@ -22,8 +22,6 @@ namespace nabu {
 //      - This showed up when I removed the "IDLE" and "RUNNING" task messages, caused WDT
 //    - Probably best to delay at the reading ring buffer stages... but this could also prevent necessary yielding
 //      while streaming
-//  - Starting playback of an encoded file while currently playing typically won't work
-//    - Fully stop all the streamer tasks before starting up again (perform this in the pipeline class)
 //  - Ensure buffers are fuller before starting to stream media (especially with the resampler active) to avoid
 //    initial stuttering
 //  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
@@ -350,17 +348,45 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->announcement_pipeline_ =
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
-        this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
+
+        if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+          command_event.command = CommandEventType::STOP;
+          this->announcement_pipeline_->send_command(&command_event);
+        }
+
+        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
+          return RetryResult::DONE;
+        });
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
-        this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
-        if (this->is_paused_) {
-          command_event.command = CommandEventType::RESUME_MEDIA;
-          this->combine_streamer_->send_command(&command_event);
+
+        if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+          command_event.command = CommandEventType::STOP;
+          this->media_pipeline_->send_command(&command_event);
         }
-        this->is_paused_ = false;
+
+        this->cancel_retry("media_start");
+        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
+          if (this->is_paused_) {
+            CommandEvent command_event;
+            command_event.command = CommandEventType::RESUME_MEDIA;
+            this->combine_streamer_->send_command(&command_event);
+          }
+          this->is_paused_ = false;
+          return RetryResult::DONE;
+        });
       }
     }
 
@@ -532,9 +558,8 @@ void NabuMediaPlayer::watch_() {
           ESP_LOGD(TAG, "Stopping Media Playback");
           break;
         case EventType::STOPPED:
-          this->media_pipeline_state_ = PipelineState::STOPPED;
           this->media_pipeline_->stop();
-
+          this->media_pipeline_state_ = PipelineState::STOPPED;
           ESP_LOGD(TAG, "Stopped Media Playback");
           break;
         case EventType::WARNING:

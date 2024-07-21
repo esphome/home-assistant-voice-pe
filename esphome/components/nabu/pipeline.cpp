@@ -87,7 +87,7 @@ void Pipeline::transfer_task_(void *params) {
   event.type = EventType::STARTED;
   xQueueSend(this_pipeline->event_queue_, &event, portMAX_DELAY);
 
-  bool stopping = false;
+  bool stopping_gracefully = true;
 
   this_pipeline->reading_ = true;
   this_pipeline->decoding_ = true;
@@ -101,11 +101,10 @@ void Pipeline::transfer_task_(void *params) {
         this_pipeline->reader_->send_command(&command_event);
         this_pipeline->decoder_->send_command(&command_event);
         this_pipeline->resampler_->send_command(&command_event);
-        stopping = true;
-      }
-      if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
+        stopping_gracefully = false;
+      } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
         this_pipeline->reader_->send_command(&command_event);
-        stopping = true;
+        stopping_gracefully = true;
       }
     }
 
@@ -134,7 +133,7 @@ void Pipeline::transfer_task_(void *params) {
     bytes_read = this_pipeline->reader_->read(transfer_buffer, bytes_to_read);
     bytes_written = this_pipeline->decoder_->write(transfer_buffer, bytes_read);
 
-    this_pipeline->watch_();
+    this_pipeline->watch_(stopping_gracefully);
 
     if (!this_pipeline->reading_ && !this_pipeline->decoding_ && !this_pipeline->resampling_) {
       break;
@@ -154,7 +153,7 @@ void Pipeline::transfer_task_(void *params) {
   }
 }
 
-void Pipeline::watch_() {
+void Pipeline::watch_(bool stopping_gracefully) {
   TaskEvent event;
   CommandEvent command_event;
 
@@ -176,13 +175,15 @@ void Pipeline::watch_() {
         this->reading_ = true;
         break;
       case EventType::STOPPING:
-        this->reading_ = false;
+        this->reading_ = true;
         break;
       case EventType::STOPPED: {
-        this->reading_ = false;
+        if (stopping_gracefully) {
+          command_event.command = CommandEventType::STOP_GRACEFULLY;
+          this->decoder_->send_command(&command_event);
+        }
         this->reader_->stop();
-        command_event.command = CommandEventType::STOP_GRACEFULLY;
-        this->decoder_->send_command(&command_event);
+        this->reading_ = false;
         break;
       }
       case EventType::WARNING:
@@ -211,13 +212,15 @@ void Pipeline::watch_() {
         this->decoding_ = true;
         break;
       case EventType::STOPPING:
-        this->decoding_ = false;
+        this->decoding_ = true;
         break;
       case EventType::STOPPED:
-        this->decoding_ = false;
+        if (stopping_gracefully) {
+          command_event.command = CommandEventType::STOP_GRACEFULLY;
+          this->resampler_->send_command(&command_event);
+        }
         this->decoder_->stop();
-        command_event.command = CommandEventType::STOP_GRACEFULLY;
-        this->resampler_->send_command(&command_event);
+        this->decoding_ = false;
         break;
       case EventType::WARNING:
         this->decoding_ = false;
@@ -225,7 +228,7 @@ void Pipeline::watch_() {
         break;
     }
   }
-  
+
   while (this->resampler_->read_event(&event)) {
     switch (event.type) {
       case EventType::STARTING:
@@ -241,18 +244,18 @@ void Pipeline::watch_() {
         this->resampling_ = true;
         break;
       case EventType::STOPPING:
-        this->resampling_ = false;
+        this->resampling_ = true;
         break;
       case EventType::STOPPED:
-        this->resampling_ = false;
-        this->resampler_->stop();
         if (this->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
           command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
           this->mixer_->send_command(&command_event);
-        } else if (this->pipeline_type_ == PipelineType::MEDIA){
+        } else if (this->pipeline_type_ == PipelineType::MEDIA) {
           command_event.command = CommandEventType::CLEAR_MEDIA;
           this->mixer_->send_command(&command_event);
         }
+        this->resampler_->stop();
+        this->resampling_ = false;
         break;
       case EventType::WARNING:
         this->resampling_ = false;

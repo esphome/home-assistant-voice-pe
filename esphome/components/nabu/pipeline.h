@@ -35,7 +35,7 @@ class Pipeline {
 
  protected:
   static void transfer_task_(void *params);
-  void watch_();
+  void watch_(bool stopping_gracefully);
 
   std::unique_ptr<HTTPStreamer> reader_;
   std::unique_ptr<DecodeStreamer> decoder_;

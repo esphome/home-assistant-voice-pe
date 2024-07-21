@@ -174,6 +174,8 @@ void ResampleStreamer::resample_task_(void *params) {
         output_buffer_current = output_buffer;
         input_buffer_length = 0;   // measured in bytes
         output_buffer_length = 0;  // measured in bytes
+
+        stopping = false;
       } else if (command_event.command == CommandEventType::STOP) {
         break;
       } else if (command_event.command == CommandEventType::STOP_GRACEFULLY) {
