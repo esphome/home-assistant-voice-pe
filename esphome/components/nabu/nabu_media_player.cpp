@@ -662,24 +662,22 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   }
 }
 
-// pausing is only supported if destroy_pipeline_on_stop is disabled
 media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   auto traits = media_player::MediaPlayerTraits();
   traits.set_supports_pause(true);
   return traits;
 };
 
-// TODO: Better handle error reading... use std::optional?
-float NabuMediaPlayer::get_dac_volume_(bool publish) {
-  if (!this->write_byte(0x00, 0x00)) {
-    // switch to page 1
+optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
     ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
-    return 0.0f;
+    return {};
   }
+
   uint8_t dac_volume = 0;
-  if (!this->read_byte(0x41, &dac_volume)) {
+  if (!this->read_byte(DAC_LEFT_VOLUME_REGISTER, &dac_volume)) {
     ESP_LOGE(TAG, "Failed to read the volume from the DAC");
-    return 0.0f;
+    return {};
   }
 
   float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
@@ -690,21 +688,23 @@ float NabuMediaPlayer::get_dac_volume_(bool publish) {
   return volume;
 }
 
-void NabuMediaPlayer::set_volume_(float volume, bool publish) {
+bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
   int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
-    return;
+    return false;
   }
 
   if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
       !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
     ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
-    return;
+    return false;
   }
 
   if (publish)
     this->volume = volume;
+
+  return true;
 }
 
 bool NabuMediaPlayer::mute_() {
@@ -721,6 +721,7 @@ bool NabuMediaPlayer::mute_() {
 
   return true;
 }
+
 bool NabuMediaPlayer::unmute_() {
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to mute page registers");

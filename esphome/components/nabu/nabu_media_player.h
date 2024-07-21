@@ -71,10 +71,16 @@ class NabuMediaPlayer : public Component,
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  float get_dac_volume_(bool publish = true);
-  void set_volume_(float volume, bool publish = true);
+  /// @return volume read from DAC between 0.0 and 1.0, if successful
+  optional<float> get_dac_volume_(bool publish = true);
 
+  /// @return true if I2C writes were successful
+  bool set_volume_(float volume, bool publish = true);
+
+  /// @return true if I2C writes were successful
   bool mute_();
+
+  /// @return true if I2C writes were successful
   bool unmute_();
 
   optional<std::string> media_url_{};         // only modified by control function
@@ -98,16 +104,15 @@ class NabuMediaPlayer : public Component,
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
   QueueHandle_t speaker_command_queue_;
+  
   i2s_bits_per_sample_t bits_per_sample_;
   uint8_t dout_pin_{0};
-  
+
   bool is_paused_{false};
   bool is_muted_{false};
 
+  // We mute the DAC whenever there is no audio playback to avoid speaker hiss
   bool is_idle_muted_{false};
-
-  // speaker::StreamInfo stream_info_{
-  //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
 };
 
 }  // namespace nabu
