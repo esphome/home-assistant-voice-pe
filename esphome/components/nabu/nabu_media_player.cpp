@@ -29,10 +29,7 @@ namespace nabu {
 //    initial stuttering
 //  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
 //    unnecessary parts (look at the mp3 decoder in particular)
-//  - The decoder streaming class is messy with the various input/output buffers being inconsistently named
-//    - Use same output buffer for mp3 and flac
-//    - Could we move ring buffer direct reading into the mp3 decoder? That would make life easier...
-//    - We can dynamically set the output buffer size for FLAC files
+//  - Explore dynamically setting the buffer sizes in general - in particular, output buffer size for FLAC files
 //  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
