@@ -6,7 +6,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 2 * 2048;
+static const size_t BUFFER_SIZE = 32768 * sizeof(int16_t);  // Audio samples
 
 static const size_t QUEUE_COUNT = 10;
 
@@ -247,12 +247,14 @@ void Pipeline::watch_(bool stopping_gracefully) {
         this->resampling_ = true;
         break;
       case EventType::STOPPED:
-        if (this->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
-          command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
-          this->mixer_->send_command(&command_event);
-        } else if (this->pipeline_type_ == PipelineType::MEDIA) {
-          command_event.command = CommandEventType::CLEAR_MEDIA;
-          this->mixer_->send_command(&command_event);
+        if (!stopping_gracefully) {
+          if (this->pipeline_type_ == PipelineType::ANNOUNCEMENT) {
+            command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
+            this->mixer_->send_command(&command_event);
+          } else if (this->pipeline_type_ == PipelineType::MEDIA) {
+            command_event.command = CommandEventType::CLEAR_MEDIA;
+            this->mixer_->send_command(&command_event);
+          }
         }
         this->resampler_->stop();
         this->resampling_ = false;

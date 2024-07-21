@@ -151,7 +151,6 @@ void HTTPStreamer::read_task_(void *params) {
           this_streamer->cleanup_connection_(&client);
           break;
         } else {
-          this_streamer->reset_ring_buffers();
           event.type = EventType::STARTED;
           event.media_file_type = file_type;
           xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);

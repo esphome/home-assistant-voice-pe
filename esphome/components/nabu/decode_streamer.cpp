@@ -12,7 +12,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 4 * 8192;  // FLAC can require very large output buffers...
+static const size_t BUFFER_SIZE = 32768;  // Audio samples
 static const size_t QUEUE_COUNT = 20;
 
 DecodeStreamer::DecodeStreamer() {
@@ -110,7 +110,6 @@ void DecodeStreamer::decode_task_(void *params) {
         stream_info.channels = 0;
 
         // Reset state of everything
-        this_streamer->reset_ring_buffers();
         memset((void *) input_buffer, 0, BUFFER_SIZE);
         memset((void *) output_buffer, 0, BUFFER_SIZE);
 
@@ -369,7 +368,8 @@ void DecodeStreamer::decode_task_(void *params) {
       }
     }
 
-    if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available()) {
+    if (this_streamer->input_ring_buffer_->available() || this_streamer->output_ring_buffer_->available() ||
+        (output_buffer_length > 0) || (input_buffer_length > 0)) {
       event.type = EventType::RUNNING;
       xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
     } else {
@@ -378,7 +378,8 @@ void DecodeStreamer::decode_task_(void *params) {
     }
 
     if (stopping && (this_streamer->input_ring_buffer_->available() == 0) &&
-        (this_streamer->output_ring_buffer_->available() == 0)) {
+        (this_streamer->output_ring_buffer_->available() == 0) && (output_buffer_length == 0) &&
+        (input_buffer_length == 0)) {
       break;
     }
   }

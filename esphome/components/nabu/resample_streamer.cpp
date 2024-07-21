@@ -12,7 +12,7 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t BUFFER_SIZE = 4096;
+static const size_t BUFFER_SIZE = 32768;  // Audio samples
 static const size_t QUEUE_COUNT = 20;
 
 static const size_t NUM_TAPS = 32;
@@ -99,7 +99,6 @@ void ResampleStreamer::resample_task_(void *params) {
   Biquad lowpass[2][2];
   BiquadCoefficients lowpass_coeff;
 
-
   bool pre_filter = false;
   bool post_filter = false;
 
@@ -168,8 +167,6 @@ void ResampleStreamer::resample_task_(void *params) {
           resample = false;
         }
 
-        this_streamer->reset_ring_buffers();
-
         input_buffer_current = input_buffer;
         output_buffer_current = output_buffer;
         input_buffer_length = 0;   // measured in bytes
@@ -214,7 +211,8 @@ void ResampleStreamer::resample_task_(void *params) {
       //   size_t output_bytes_free = this_streamer->output_ring_buffer_->free();
       //   size_t input_bytes_available = bytes_available;
 
-      //   size_t required_samples_to_fill_free = resampleGetRequiredSamples(resampler, output_bytes_free, sample_ratio);
+      //   size_t required_samples_to_fill_free = resampleGetRequiredSamples(resampler, output_bytes_free,
+      //   sample_ratio);
 
       //   if (required_samples_to_fill_free > bytes_available + input_buffer_length) {
       //     // we can't fill in the output buffer fully with what is available, so just give as many samples as we can
@@ -257,7 +255,8 @@ void ResampleStreamer::resample_task_(void *params) {
 
           size_t frames_read = samples_read / stream_info.channels;
 
-          // The low pass filter seems to be causing glitches... probably because samples are repeated due to the above ineffeciency!
+          // The low pass filter seems to be causing glitches... probably because samples are repeated due to the above
+          // ineffeciency!
           if (pre_filter) {
             for (int i = 0; i < stream_info.channels; ++i) {
               biquad_apply_buffer(&lowpass[i][0], float_input_buffer + i, frames_read, stream_info.channels);

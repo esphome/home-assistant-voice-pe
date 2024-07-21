@@ -14,7 +14,7 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
+//  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - The various tasks are not uniform in their running/idle states meaning. Be consistent!
 //  - Determine the best place to yield in each task... it's inconsistent
 //    - Be careful of different task priorities... for example, the speaker task had issues yielding unless the delay
@@ -26,7 +26,6 @@ namespace nabu {
 //    initial stuttering
 //  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
 //    unnecessary parts (look at the mp3 decoder in particular)
-//  - Explore dynamically setting the buffer sizes in general - in particular, output buffer size for FLAC files
 //  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
