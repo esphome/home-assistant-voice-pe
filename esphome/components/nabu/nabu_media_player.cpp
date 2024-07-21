@@ -14,7 +14,6 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Handle reading wav headers... -> avoids pops at start of TTS playback
 //  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
 //  - The various tasks are not uniform in their running/idle states meaning. Be consistent!
 //  - Determine the best place to yield in each task... it's inconsistent
