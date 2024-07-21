@@ -32,7 +32,6 @@ namespace nabu {
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Verify ring buffers are reset in a safe way (only tasks that read should reset it?)
-//  - Make announcement flag in media command more effecient code wise (its checked in multiple spots)
 
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 20;
@@ -630,17 +629,20 @@ void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio) {
 void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   MediaCallCommand media_command;
 
+  if (call.get_announcement().has_value() && call.get_announcement().value()) {
+    media_command.announce = true;
+  } else {
+    media_command.announce = false;
+  }
+
   if (call.get_media_url().has_value()) {
     std::string new_uri = call.get_media_url().value();
 
+    media_command.new_url = true;
     if (call.get_announcement().has_value() && call.get_announcement().value()) {
       this->announcement_url_ = new_uri;
-      media_command.new_url = true;
-      media_command.announce = true;
     } else {
       this->media_url_ = new_uri;
-      media_command.new_url = true;
-      media_command.announce = false;
     }
     xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
     return;
@@ -653,9 +655,6 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   }
 
   if (call.get_command().has_value()) {
-    if (call.get_announcement().has_value() && call.get_announcement().value()) {
-      media_command.announce = true;
-    }
     media_command.command = call.get_command().value();
     xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
     return;
