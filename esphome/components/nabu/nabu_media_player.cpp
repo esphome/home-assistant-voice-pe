@@ -357,7 +357,7 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->announcement_pipeline_->send_command(&command_event);
         }
 
-        this->cnacel_retry("ann_start");
+        this->cancel_retry("ann_start");
         this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
           if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
             return RetryResult::RETRY;
