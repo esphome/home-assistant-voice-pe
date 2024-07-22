@@ -1,6 +1,6 @@
-#include "nabu_media_player.h"
-
 #ifdef USE_ESP_IDF
+
+#include "nabu_media_player.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -13,140 +13,150 @@
 namespace esphome {
 namespace nabu {
 
+// TODO:
+//  - Tune task memory requirements and potentially buffer sizes if issues appear
+//  - The various tasks are not uniform in their running/idle states meaning. Be consistent!
+//  - Determine the best place to yield in each task... it's inconsistent
+//    - Be careful of different task priorities... for example, the speaker task had issues yielding unless the delay
+//      was in the command queue receiving part
+//      - This showed up when I removed the "IDLE" and "RUNNING" task messages, caused WDT
+//    - Probably best to delay at the reading ring buffer stages... but this could also prevent necessary yielding
+//      while streaming
+//  - Ensure buffers are fuller before starting to stream media (especially with the resampler active) to avoid
+//    initial stuttering
+//  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
+//    unnecessary parts (look at the mp3 decoder in particular)
+//  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
+//  - Ducking improvements
+//    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
+//    - Add a YAML action for setting the ducking level instead of requiring a lambda
+//  - Verify ring buffers are reset in a safe way (only tasks that read should reset it?)
+//  - Eliminate code redundancy for start of media playback (url and file based)
+//  - Clean up process around playing back local media files
+//    - Create a registry of media files in Python
+//    - Add a yaml action to play a specific media file
+
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
-static const size_t QUEUE_COUNT = 10;
+static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
 static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 
-// #define STATS_TASK_PRIO 3
-// #define STATS_TICKS pdMS_TO_TICKS(5000)
-// #define ARRAY_SIZE_OFFSET 5  // Increase this if print_real_time_stats returns ESP_ERR_INVALID_SIZE
-// #define configRUN_TIME_COUNTER_TYPE uint32_t
-// #define CONFIG_FREERTOS_NUMBER_OF_CORES 2
-// static esp_err_t print_real_time_stats(TickType_t xTicksToWait) {
-//   TaskStatus_t *start_array = NULL, *end_array = NULL;
-//   UBaseType_t start_array_size, end_array_size;
-//   configRUN_TIME_COUNTER_TYPE start_run_time, end_run_time;
-//   esp_err_t ret;
+#define STATS_TASK_PRIO 3
+#define STATS_TICKS pdMS_TO_TICKS(5000)
+#define ARRAY_SIZE_OFFSET 5  // Increase this if print_real_time_stats returns ESP_ERR_INVALID_SIZE
+#define configRUN_TIME_COUNTER_TYPE uint32_t
+#define CONFIG_FREERTOS_NUMBER_OF_CORES 2
+static esp_err_t print_real_time_stats(TickType_t xTicksToWait) {
+  TaskStatus_t *start_array = NULL, *end_array = NULL;
+  UBaseType_t start_array_size, end_array_size;
+  configRUN_TIME_COUNTER_TYPE start_run_time, end_run_time;
+  esp_err_t ret;
 
-//   // Allocate array to store current task states
-//   start_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
-//   size_t size = start_array_size * sizeof(TaskStatus_t);
-//   start_array = static_cast<TaskStatus_t *>(malloc(size));
-//   if (start_array == NULL) {
-//     ret = ESP_ERR_NO_MEM;
-//     free(start_array);
-//     free(end_array);
-//     return ret;
-//   }
-//   // Get current task states
-//   start_array_size = uxTaskGetSystemState(start_array, start_array_size, &start_run_time);
-//   if (start_array_size == 0) {
-//     ret = ESP_ERR_INVALID_SIZE;
-//     free(start_array);
-//     free(end_array);
-//     return ret;
-//   }
+  // Allocate array to store current task states
+  start_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
+  size_t size = start_array_size * sizeof(TaskStatus_t);
+  start_array = static_cast<TaskStatus_t *>(malloc(size));
+  if (start_array == NULL) {
+    ret = ESP_ERR_NO_MEM;
+    free(start_array);
+    free(end_array);
+    return ret;
+  }
+  // Get current task states
+  start_array_size = uxTaskGetSystemState(start_array, start_array_size, &start_run_time);
+  if (start_array_size == 0) {
+    ret = ESP_ERR_INVALID_SIZE;
+    free(start_array);
+    free(end_array);
+    return ret;
+  }
 
-//   vTaskDelay(xTicksToWait);
+  vTaskDelay(xTicksToWait);
 
-//   // Allocate array to store tasks states post delay
-//   end_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
-//   end_array = static_cast<TaskStatus_t *>(malloc(sizeof(TaskStatus_t) * end_array_size));
-//   if (end_array == NULL) {
-//     ret = ESP_ERR_NO_MEM;
-//     free(start_array);
-//     free(end_array);
-//     return ret;
-//   }
-//   // Get post delay task states
-//   end_array_size = uxTaskGetSystemState(end_array, end_array_size, &end_run_time);
-//   if (end_array_size == 0) {
-//     ret = ESP_ERR_INVALID_SIZE;
-//     free(start_array);
-//     free(end_array);
-//     return ret;
-//   }
+  // Allocate array to store tasks states post delay
+  end_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
+  end_array = static_cast<TaskStatus_t *>(malloc(sizeof(TaskStatus_t) * end_array_size));
+  if (end_array == NULL) {
+    ret = ESP_ERR_NO_MEM;
+    free(start_array);
+    free(end_array);
+    return ret;
+  }
+  // Get post delay task states
+  end_array_size = uxTaskGetSystemState(end_array, end_array_size, &end_run_time);
+  if (end_array_size == 0) {
+    ret = ESP_ERR_INVALID_SIZE;
+    free(start_array);
+    free(end_array);
+    return ret;
+  }
 
-//   // Calculate total_elapsed_time in units of run time stats clock period.
-//   uint32_t total_elapsed_time = (end_run_time - start_run_time);
-//   if (total_elapsed_time == 0) {
-//     ret = ESP_ERR_INVALID_STATE;
-//     free(start_array);
-//     free(end_array);
-//     return ret;
-//   }
+  // Calculate total_elapsed_time in units of run time stats clock period.
+  uint32_t total_elapsed_time = (end_run_time - start_run_time);
+  if (total_elapsed_time == 0) {
+    ret = ESP_ERR_INVALID_STATE;
+    free(start_array);
+    free(end_array);
+    return ret;
+  }
 
-//   printf("| Task | Run Time | Percentage\n");
-//   // Match each task in start_array to those in the end_array
-//   for (int i = 0; i < start_array_size; i++) {
-//     int k = -1;
-//     for (int j = 0; j < end_array_size; j++) {
-//       if (start_array[i].xHandle == end_array[j].xHandle) {
-//         k = j;
-//         // Mark that task have been matched by overwriting their handles
-//         start_array[i].xHandle = NULL;
-//         end_array[j].xHandle = NULL;
-//         break;
-//       }
-//     }
-//     // Check if matching task found
-//     if (k >= 0) {
-//       uint32_t task_elapsed_time = end_array[k].ulRunTimeCounter - start_array[i].ulRunTimeCounter;
-//       uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time * CONFIG_FREERTOS_NUMBER_OF_CORES);
-//       printf("| %s | %" PRIu32 " | %" PRIu32 "%%\n", start_array[i].pcTaskName, task_elapsed_time, percentage_time);
-//     }
-//   }
+  printf("| Task | Run Time | Percentage\n");
+  // Match each task in start_array to those in the end_array
+  for (int i = 0; i < start_array_size; i++) {
+    int k = -1;
+    for (int j = 0; j < end_array_size; j++) {
+      if (start_array[i].xHandle == end_array[j].xHandle) {
+        k = j;
+        // Mark that task have been matched by overwriting their handles
+        start_array[i].xHandle = NULL;
+        end_array[j].xHandle = NULL;
+        break;
+      }
+    }
+    // Check if matching task found
+    if (k >= 0) {
+      uint32_t task_elapsed_time = end_array[k].ulRunTimeCounter - start_array[i].ulRunTimeCounter;
+      uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time * CONFIG_FREERTOS_NUMBER_OF_CORES);
+      printf("| %s | %" PRIu32 " | %" PRIu32 "%%\n", start_array[i].pcTaskName, task_elapsed_time, percentage_time);
+    }
+  }
 
-//   // Print unmatched tasks
-//   for (int i = 0; i < start_array_size; i++) {
-//     if (start_array[i].xHandle != NULL) {
-//       printf("| %s | Deleted\n", start_array[i].pcTaskName);
-//     }
-//   }
-//   for (int i = 0; i < end_array_size; i++) {
-//     if (end_array[i].xHandle != NULL) {
-//       printf("| %s | Created\n", end_array[i].pcTaskName);
-//     }
-//   }
-//   ret = ESP_OK;
+  // Print unmatched tasks
+  for (int i = 0; i < start_array_size; i++) {
+    if (start_array[i].xHandle != NULL) {
+      printf("| %s | Deleted\n", start_array[i].pcTaskName);
+    }
+  }
+  for (int i = 0; i < end_array_size; i++) {
+    if (end_array[i].xHandle != NULL) {
+      printf("| %s | Created\n", end_array[i].pcTaskName);
+    }
+  }
+  ret = ESP_OK;
 
-//   // exit:  // Common return path
-//   free(start_array);
-//   free(end_array);
-//   return ret;
-// }
+  // exit:  // Common return path
+  free(start_array);
+  free(end_array);
+  return ret;
+}
 
-// static void stats_task(void *arg) {
-//   // xSemaphoreTake(sync_stats_task, portMAX_DELAY);
+static void stats_task(void *arg) {
+  // xSemaphoreTake(sync_stats_task, portMAX_DELAY);
 
-//   // Print real time stats periodically
-//   while (1) {
-//     printf("\n\nGetting real time stats over %" PRIu32 " ticks\n", STATS_TICKS);
-//     esp_err_t err = print_real_time_stats(STATS_TICKS);
-//     if (err == ESP_OK) {
-//       printf("Real time stats obtained\n");
-//     } else {
-//       printf("Error getting real time stats\n");
-//       printf("Error: %s", esp_err_to_name(err));
-//     }
-//     // vTaskDelay(STATS_TICKS);
-//   }
-// }
-
-// Major TODOs:
-//  - Handle reading wav headers... the function exists (but needs to be more robust) -> avoids pops at start of
-//  playback
-//  - Handle stereo streams
-//    - Careful if media stream and announcement stream have different number of channels
-//    - Eventually I want the speaker component to accept stereo audio by default
-//    - PCM streams should send the essential details to each step in this process to automatically handle different
-//      streaming characteristics
-//  - Implement a resampler... we probably won't be able to change on-the-fly the sample rate before feeding into the
-//    XMOS chip
-//    - only 16 bit mono channel 16 kHz audio is supported at the momemnt!
-//  - Buffer sizes/task memory usage is not optimized... at all! These need to be tuned...
+  // Print real time stats periodically
+  while (1) {
+    printf("\n\nGetting real time stats over %" PRIu32 " ticks\n", STATS_TICKS);
+    esp_err_t err = print_real_time_stats(STATS_TICKS);
+    if (err == ESP_OK) {
+      printf("Real time stats obtained\n");
+    } else {
+      printf("Error getting real time stats\n");
+      printf("Error: %s", esp_err_to_name(err));
+    }
+    // vTaskDelay(STATS_TICKS);
+  }
+}
 
 static const char *const TAG = "nabu_media_player";
 
@@ -155,7 +165,7 @@ void NabuMediaPlayer::setup() {
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
-  this->media_control_command_queue_ = xQueueCreate(1, sizeof(MediaCallCommand));
+  this->media_control_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(MediaCallCommand));
 
   this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
@@ -168,7 +178,9 @@ void NabuMediaPlayer::setup() {
     return;
   }
 
-  xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 4096, (void *) this, 23, &this->speaker_task_handle_);
+  xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
+
+  this->get_dac_volume_();
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }
@@ -267,7 +279,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
   xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
   while (true) {
-    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
+    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
         // Stop signal from main thread
         break;
@@ -275,7 +287,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
     }
 
     size_t delay_ms = 10;
-    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t);
+    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * 2;  // *2 for stereo
     // if (event.type != TaskEventType::RUNNING) {
     //   // Fill the entire DMA buffer if there is audio being outputed
     //   bytes_to_read = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE*sizeof(int16_t);
@@ -287,32 +299,23 @@ void NabuMediaPlayer::speaker_task(void *params) {
         this_speaker->combine_streamer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
 
     if (bytes_read > 0) {
-      // its too loud for constant testing! this does lower the quality quite a bit though...
-      // int16_t volume_reduction = (int16_t) (0.5f * std::pow(2, 15));
-      // dsps_mulc_s16_ae32(buffer, temp_buffer,bytes_read/sizeof(int16_t), volume_reduction, 1, 1);
-      // std::memcpy((void *) buffer, (void *) temp_buffer, bytes_read/sizeof(int16_t));
-
-      // Copy mono audio samples into both channels
-      for (int i = bytes_read / 2 - 1; i >= 0; --i) {
-        buffer[2 * i] = buffer[i];
-        buffer[2 * i + 1] = buffer[i];
-      }
-
       size_t bytes_written;
       if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-        i2s_write(this_speaker->parent_->get_port(), buffer, 2 * bytes_read, &bytes_written, portMAX_DELAY);
+        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
       } else {
-        i2s_write_expand(this_speaker->parent_->get_port(), buffer, 2 * bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
                          this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
       }
 
-      if (bytes_written != 2 * bytes_read) {
+      if (bytes_written != bytes_read) {
         event.type = EventType::WARNING;
-        event.err = ESP_ERR_TIMEOUT;  // TODO: probably not the correct error...
+        event.err = ESP_ERR_TIMEOUT;  // TODO: not the correct error...
+        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+      } else {
+        event.type = EventType::RUNNING;
         xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
       }
-      event.type = EventType::RUNNING;
-      xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
     } else {
       i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
@@ -347,18 +350,107 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->announcement_pipeline_ =
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
-        this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
+
+        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->announcement_pipeline_->send_command(&command_event);
+        }
+
+        this->cancel_retry("ann_start");
+        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
+          return RetryResult::DONE;
+        });
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
-        this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
-        if (this->is_paused_) {
-          command_event.command = CommandEventType::RESUME_MEDIA;
-          this->combine_streamer_->send_command(&command_event);
+
+        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->media_pipeline_->send_command(&command_event);
         }
-        this->is_paused_ = false;
+
+        this->cancel_retry("media_start");
+        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
+          if (this->is_paused_) {
+            CommandEvent command_event;
+            command_event.command = CommandEventType::RESUME_MEDIA;
+            this->combine_streamer_->send_command(&command_event);
+          }
+          this->is_paused_ = false;
+          return RetryResult::DONE;
+        });
       }
+    }
+
+    if (media_command.new_file.has_value() && media_command.new_file.value()) {
+      if (media_command.announce.has_value() && media_command.announce.value()) {
+        if (this->announcement_pipeline_ == nullptr) {
+          this->announcement_pipeline_ =
+              make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
+        }
+
+        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->announcement_pipeline_->send_command(&command_event);
+        }
+
+        this->cancel_retry("ann_start");
+        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->announcement_pipeline_->start(this->announcement_file_.value(), "ann_pipe");
+          return RetryResult::DONE;
+        });
+      } else {
+        if (this->media_pipeline_ == nullptr) {
+          this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
+        }
+
+        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->media_pipeline_->send_command(&command_event);
+        }
+
+        this->cancel_retry("media_start");
+        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->media_pipeline_->start(this->media_file_.value(), "med_pipe");
+          if (this->is_paused_) {
+            CommandEvent command_event;
+            command_event.command = CommandEventType::RESUME_MEDIA;
+            this->combine_streamer_->send_command(&command_event);
+          }
+          this->is_paused_ = false;
+          return RetryResult::DONE;
+        });
+      }
+    }
+
+    if (media_command.volume.has_value()) {
+      this->set_volume_(media_command.volume.value());
+      this->unmute_();
+      this->is_muted_ = false;
+      this->publish_state();
     }
 
     if (media_command.command.has_value()) {
@@ -379,8 +471,12 @@ void NabuMediaPlayer::watch_media_commands_() {
           break;
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           command_event.command = CommandEventType::STOP;
-          this->media_pipeline_->send_command(&command_event);
-          this->is_paused_ = false;
+          if (media_command.announce.has_value() && media_command.announce.value()) {
+            this->announcement_pipeline_->send_command(&command_event, (10 / portTICK_PERIOD_MS));
+          } else {
+            this->media_pipeline_->send_command(&command_event);
+            this->is_paused_ = false;
+          }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
           if (this->is_paused_) {
@@ -392,6 +488,25 @@ void NabuMediaPlayer::watch_media_commands_() {
             this->combine_streamer_->send_command(&command_event);
             this->is_paused_ = true;
           }
+          break;
+        case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
+          this->mute_();
+          this->is_muted_ = true;
+          this->publish_state();
+          break;
+        }
+        case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
+          this->unmute_();
+          this->is_muted_ = false;
+          this->publish_state();
+          break;
+        case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
+          this->set_volume_(std::min(1.0f, this->volume + 0.05f));
+          this->publish_state();
+          break;
+        case media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN:
+          this->set_volume_(std::max(0.0f, this->volume - 0.05f));
+          this->publish_state();
           break;
         default:
           break;
@@ -477,7 +592,6 @@ void NabuMediaPlayer::watch_() {
 
   if (this->media_pipeline_ != nullptr) {
     while (this->media_pipeline_->read_event(&event)) {
-      // if (this->media_pipeline_->read_event(&event)) {
       switch (event.type) {
         case EventType::STARTING:
           ESP_LOGD(TAG, "Starting Media Playback");
@@ -499,9 +613,8 @@ void NabuMediaPlayer::watch_() {
           ESP_LOGD(TAG, "Stopping Media Playback");
           break;
         case EventType::STOPPED:
-          this->media_pipeline_state_ = PipelineState::STOPPED;
           this->media_pipeline_->stop();
-
+          this->media_pipeline_state_ = PipelineState::STOPPED;
           ESP_LOGD(TAG, "Stopped Media Playback");
           break;
         case EventType::WARNING:
@@ -518,8 +631,6 @@ void NabuMediaPlayer::watch_() {
 }
 
 void NabuMediaPlayer::loop() {
-  size_t bytes_read = 0;
-
   this->watch_media_commands_();
   this->watch_();
   this->watch_speaker_();
@@ -530,14 +641,30 @@ void NabuMediaPlayer::loop() {
   if ((this->announcement_pipeline_state_ != PipelineState::STOPPING) &&
       (this->announcement_pipeline_state_ != PipelineState::STOPPED)) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+    if (this->is_idle_muted_ && !this->is_muted_) {
+      this->unmute_();
+      this->is_idle_muted_ = false;
+    }
   } else {
     if (this->is_paused_) {
       this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
+      if (!this->is_idle_muted_) {
+        this->mute_();
+        this->is_idle_muted_ = true;
+      }
     } else if ((this->media_pipeline_state_ == PipelineState::STOPPING) ||
                (this->media_pipeline_state_ == PipelineState::STOPPED)) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
+      if (!this->is_idle_muted_) {
+        this->mute_();
+        this->is_idle_muted_ = true;
+      }
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
+      if (this->is_idle_muted_ && !this->is_muted_) {
+        this->unmute_();
+        this->is_idle_muted_ = false;
+      }
     }
   }
 
@@ -558,18 +685,32 @@ void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio) {
 void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   MediaCallCommand media_command;
 
+  if (call.get_announcement().has_value() && call.get_announcement().value()) {
+    media_command.announce = true;
+  } else {
+    media_command.announce = false;
+  }
+
   if (call.get_media_url().has_value()) {
     std::string new_uri = call.get_media_url().value();
 
+    media_command.new_url = true;
     if (call.get_announcement().has_value() && call.get_announcement().value()) {
       this->announcement_url_ = new_uri;
-      media_command.new_url = true;
-      media_command.announce = true;
     } else {
       this->media_url_ = new_uri;
-      media_command.new_url = true;
-      media_command.announce = false;
     }
+    xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
+    return;
+  }
+
+  if (call.get_local_media_file().has_value()) {
+    if (call.get_announcement().has_value() && call.get_announcement().value()) {
+      this->announcement_file_ = call.get_local_media_file().value();
+    } else {
+      this->media_file_ = call.get_local_media_file().value();
+    }
+    media_command.new_file = true;
     xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
     return;
   }
@@ -587,12 +728,80 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   }
 }
 
-// pausing is only supported if destroy_pipeline_on_stop is disabled
 media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   auto traits = media_player::MediaPlayerTraits();
   traits.set_supports_pause(true);
   return traits;
 };
+
+optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
+    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
+    return {};
+  }
+
+  uint8_t dac_volume = 0;
+  if (!this->read_byte(DAC_LEFT_VOLUME_REGISTER, &dac_volume)) {
+    ESP_LOGE(TAG, "Failed to read the volume from the DAC");
+    return {};
+  }
+
+  float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
+  if (publish) {
+    this->volume = volume;
+  }
+
+  return volume;
+}
+
+bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
+  int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
+    return false;
+  }
+
+  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
+      !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
+    ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
+    return false;
+  }
+
+  if (publish)
+    this->volume = volume;
+
+  return true;
+}
+
+bool NabuMediaPlayer::mute_() {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
+    return false;
+  }
+
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) ||
+      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
+    ESP_LOGE(TAG, "DAC failed to mute left and right channels");
+    return false;
+  }
+
+  return true;
+}
+
+bool NabuMediaPlayer::unmute_() {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
+    return false;
+  }
+
+  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) ||
+      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
+    ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
+    return false;
+  }
+
+  return true;
+}
 
 }  // namespace nabu
 }  // namespace esphome

@@ -7,9 +7,6 @@
 #include "esphome/core/component.h"
 #include "esphome/core/ring_buffer.h"
 
-// #include "mp3_decoder.h"
-// #include "flac_decoder.h"
-
 #include "streamer.h"
 #include "pipeline.h"
 
@@ -18,8 +15,22 @@
 
 #include <esp_http_client.h>
 
+#include "esphome/components/i2c/i2c.h"
+
 namespace esphome {
 namespace nabu {
+
+static const uint8_t DAC_PAGE_SELECTION_REGISTER = 0x00;
+static const uint8_t DAC_LEFT_MUTE_REGISTER = 0x12;
+static const uint8_t DAC_RIGHT_MUTE_REGISTER = 0x13;
+static const uint8_t DAC_LEFT_VOLUME_REGISTER = 0x41;
+static const uint8_t DAC_RIGHT_VOLUME_REGISTER = 0x42;
+
+static const uint8_t DAC_VOLUME_PAGE = 0x00;
+static const uint8_t DAC_MUTE_PAGE = 0x01;
+
+static const uint8_t DAC_MUTE_COMMAND = 0x40;
+static const uint8_t DAC_UNMUTE_COMMAND = 0x00;
 
 enum class PipelineState : uint8_t {
   STARTING,
@@ -35,21 +46,26 @@ struct MediaCallCommand {
   optional<float> volume;
   optional<bool> announce;
   optional<bool> new_url;
+  optional<bool> new_file;
 };
 
-class NabuMediaPlayer : public Component, public media_player::MediaPlayer, public i2s_audio::I2SAudioOut {
+// struct MediaFile {
+//   const uint8_t *data;
+//   MediaFileType file_type;
+// };
+
+class NabuMediaPlayer : public Component,
+                        public media_player::MediaPlayer,
+                        public i2s_audio::I2SAudioOut,
+                        public i2c::I2CDevice {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
   void setup() override;
   void loop() override;
 
   // MediaPlayer implementations
-  bool is_muted() const override { return this->is_muted_; }
   media_player::MediaPlayerTraits get_traits() override;
-
-  void start() {}
-  void stop() {}
-  // void set_speaker(i2s_audio::I2SAudioSpeaker *speaker) { this->speaker_ = speaker; }
+  bool is_muted() const override { return this->is_muted_; }
 
   void set_ducking_ratio(float ducking_ratio) override;
 
@@ -60,8 +76,23 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
-  optional<std::string> media_url_{};         // only modified by control function
-  optional<std::string> announcement_url_{};  // only modified by control function
+
+  /// @return volume read from DAC between 0.0 and 1.0, if successful
+  optional<float> get_dac_volume_(bool publish = true);
+
+  /// @return true if I2C writes were successful
+  bool set_volume_(float volume, bool publish = true);
+
+  /// @return true if I2C writes were successful
+  bool mute_();
+
+  /// @return true if I2C writes were successful
+  bool unmute_();
+
+  optional<std::string> media_url_{};                        // only modified by control function
+  optional<std::string> announcement_url_{};                 // only modified by control function
+  optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
+  optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
   QueueHandle_t media_control_command_queue_;
 
   // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline
@@ -81,14 +112,15 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
   QueueHandle_t speaker_command_queue_;
-  uint8_t dout_pin_{0};
+
   i2s_bits_per_sample_t bits_per_sample_;
+  uint8_t dout_pin_{0};
 
   bool is_paused_{false};
   bool is_muted_{false};
 
-  // speaker::StreamInfo stream_info_{
-  //         .channels = speaker::CHANNELS_MONO, .bits_per_sample = speaker::SAMPLE_BITS_16, .sample_rate = 16000};
+  // We mute the DAC whenever there is no audio playback to avoid speaker hiss
+  bool is_idle_muted_{false};
 };
 
 }  // namespace nabu

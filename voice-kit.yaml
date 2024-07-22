@@ -85,6 +85,10 @@ improv_serial:
 esp32_improv:
   authorizer: center_button
 
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+
 psram:
   mode: octal
   speed: 80MHz
@@ -176,16 +180,6 @@ binary_sensor:
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
-
-number:
-  - platform: template
-    id: fake_volume
-    internal: true
-    optimistic: true
-    min_value: 0
-    max_value: 12
-    initial_value: 12
-    step: 1
 
 light:
   - platform: esp32_rmt_led_strip
@@ -341,7 +335,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            auto nb_leds_on = id(fake_volume).state;
+            auto nb_leds_on = id(nabu_media_player).volume/12.0f;
             for (int i = 0; i < 12; i++) {
               if (i < nb_leds_on) {
                 it[i] = color;
@@ -589,9 +583,7 @@ script:
   - id: increase_volume
     mode: restart
     then:
-      - number.increment:
-          id: fake_volume
-          cycle: false
+      - media_player.volume_up:
       - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
@@ -600,9 +592,7 @@ script:
   - id: decrease_volume
     mode: restart
     then:
-      - number.decrement:
-          id: fake_volume
-          cycle: false
+      - media_player.volume_down:
       - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
@@ -656,7 +646,7 @@ microphone:
     adc_type: external
     pdm: false
     bits_per_sample: 32bit
-    channel: right
+    channel: left
     i2s_audio_id: i2s_input
 
 media_player:
@@ -667,10 +657,9 @@ media_player:
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
-
-file:
-  - id: timer_finished_wave_file
-    file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
+    files:
+      - id: timer_finished_wave_file
+        file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
 
 external_components:
   - source: github://jesserockz/esphome-components
@@ -679,14 +668,25 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: kahrendt-2024-2
     components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
+    refresh: 0s
 
 micro_wake_word:
   models:
     - model: okay_nabu
   vad:
   on_wake_word_detected:
+    - if: 
+        condition:
+          lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+        then:
+          lambda: |-
+            id(nabu_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+              .set_announcement(true)
+              .perform(); 
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
 
@@ -748,5 +748,14 @@ button:
     name: "Restart"
   - platform: factory_reset
     name: "Factory Reset"
+  - platform: template
+    name: "timer beep"
+    on_press:
+      - lambda: |-
+          id(nabu_media_player)
+            ->make_call()
+            .set_announcement(true)
+            .set_local_media_file(id(timer_finished_wave_file))
+            .perform();
 debug:
   update_interval: 5s

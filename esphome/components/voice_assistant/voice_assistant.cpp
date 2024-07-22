@@ -215,7 +215,7 @@ void VoiceAssistant::loop() {
           this->set_state_(State::START_MICROPHONE, State::START_PIPELINE);
         }
       } else {
-        this->high_freq_.stop();
+        // this->high_freq_.stop();
       }
       break;
     }
@@ -231,7 +231,7 @@ void VoiceAssistant::loop() {
       this->clear_buffers_();
 
       this->mic_->start();
-      this->high_freq_.start();
+      // this->high_freq_.start();
       this->set_state_(State::STARTING_MICROPHONE);
       break;
     }
@@ -390,7 +390,7 @@ void VoiceAssistant::loop() {
       }
 #endif
       if (playing) {
-        this->set_timeout("playing", 2000, [this]() {
+        this->set_timeout("playing", 50, [this]() {
           this->cancel_timeout("speaker-timeout");
           this->set_state_(State::IDLE, State::IDLE);
         });

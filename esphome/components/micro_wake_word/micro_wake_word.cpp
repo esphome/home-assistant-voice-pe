@@ -30,7 +30,7 @@ static const char *const TAG = "micro_wake_word";
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t BUFFER_LENGTH = 64;      // 0.064 seconds
 static const size_t BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * BUFFER_LENGTH;
-static const size_t INPUT_BUFFER_SIZE = 16 * SAMPLE_RATE_HZ / 1000;  // 16ms * 16kHz / 1000ms
+static const size_t INPUT_BUFFER_SIZE = 32 * SAMPLE_RATE_HZ / 1000;  // 16ms * 16kHz / 1000ms
 
 float MicroWakeWord::get_setup_priority() const { return setup_priority::AFTER_CONNECTION; }
 
@@ -113,7 +113,7 @@ void MicroWakeWord::loop() {
       ESP_LOGD(TAG, "Starting Microphone");
       this->microphone_->start();
       this->set_state_(State::STARTING_MICROPHONE);
-      this->high_freq_.start();
+      // this->high_freq_.start();
       break;
     case State::STARTING_MICROPHONE:
       if (this->microphone_->is_running()) {
@@ -135,7 +135,7 @@ void MicroWakeWord::loop() {
       ESP_LOGD(TAG, "Stopping Microphone");
       // this->microphone_->stop();
       this->set_state_(State::STOPPING_MICROPHONE);
-      this->high_freq_.stop();
+      // this->high_freq_.stop();
       this->unload_models_();
       this->deallocate_buffers_();
       break;
@@ -299,31 +299,33 @@ void MicroWakeWord::unload_models_() {
 void MicroWakeWord::update_model_probabilities_() {
   int8_t audio_features[PREPROCESSOR_FEATURE_SIZE];
 
-  if (!this->generate_features_for_window_(audio_features)) {
-    return;
-  }
-
-  // Increase the counter since the last positive detection
-  this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
-
-  // static size_t total_inference_time = 0;
-  // static size_t inference_count = 0;
-
-  // size_t start_time = millis();
-  for (auto &model : this->wake_word_models_) {
-    // Perform inference
-    model.perform_streaming_inference(audio_features);
-  }
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  this->vad_model_->perform_streaming_inference(audio_features);
-#endif
-  // total_inference_time += (millis() - start_time);
-  // ++inference_count;
-  // if (inference_count > 500) {
-  //   ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
-  //   total_inference_time = 0;
-  //   inference_count = 0;
+  // if (!this->generate_features_for_window_(audio_features)) {
+  //   return;
   // }
+
+  while (this->generate_features_for_window_(audio_features)) {
+    // Increase the counter since the last positive detection
+    this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
+
+    // static size_t total_inference_time = 0;
+    // static size_t inference_count = 0;
+
+    // size_t start_time = millis();
+    for (auto &model : this->wake_word_models_) {
+      // Perform inference
+      model.perform_streaming_inference(audio_features);
+    }
+#ifdef USE_MICRO_WAKE_WORD_VAD
+    this->vad_model_->perform_streaming_inference(audio_features);
+#endif
+    // total_inference_time += (millis() - start_time);
+    // ++inference_count;
+    // if (inference_count > 500) {
+    //   ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
+    //   total_inference_time = 0;
+    //   inference_count = 0;
+    // }
+  }
 }
 
 bool MicroWakeWord::detect_wake_words_() {

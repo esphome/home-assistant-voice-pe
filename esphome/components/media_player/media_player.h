@@ -27,6 +27,20 @@ enum MediaPlayerCommand : uint8_t {
 };
 const char *media_player_command_to_string(MediaPlayerCommand command);
 
+enum class MediaFileType : uint8_t {
+  NONE = 0,
+  WAV,
+  MP3,
+  FLAC,
+};
+
+struct MediaFile {
+  const uint8_t *data;
+  size_t length;
+  MediaFileType file_type;
+};
+
+
 class MediaPlayer;
 
 class MediaPlayerTraits {
@@ -50,6 +64,7 @@ class MediaPlayerCall {
   MediaPlayerCall &set_command(const std::string &command);
 
   MediaPlayerCall &set_media_url(const std::string &url);
+  MediaPlayerCall &set_local_media_file(MediaFile *media_file);
 
   MediaPlayerCall &set_volume(float volume);
   MediaPlayerCall &set_announcement(bool announce);
@@ -60,6 +75,7 @@ class MediaPlayerCall {
   const optional<std::string> &get_media_url() const { return media_url_; }
   const optional<float> &get_volume() const { return volume_; }
   const optional<bool> &get_announcement() const { return announcement_; }
+  const optional<MediaFile*> &get_local_media_file() const { return media_file_; }
 
  protected:
   void validate_();
@@ -68,6 +84,7 @@ class MediaPlayerCall {
   optional<std::string> media_url_;
   optional<float> volume_;
   optional<bool> announcement_;
+  optional<MediaFile*> media_file_;
 };
 
 class MediaPlayer : public EntityBase {
