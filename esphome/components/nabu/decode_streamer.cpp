@@ -4,6 +4,7 @@
 
 #include "flac_decoder.h"
 #include "mp3_decoder.h"
+#include "wav_decoder.h"
 #include "streamer.h"
 
 #include "esphome/components/media_player/media_player.h"
@@ -82,9 +83,11 @@ void DecodeStreamer::decode_task_(void *params) {
 
   media_player::MediaFileType media_file_type = media_player::MediaFileType::NONE;
 
-  size_t wav_header_bytes_to_read = 4 * 5;  // enough to get fmt size
-  size_t wav_header_bytes_read = 0;
-  bool wav_have_fmt_size = false;
+  wav_decoder::WAVDecoder wav_decoder(input_buffer);
+  size_t wav_header_bytes_to_read = wav_decoder.bytes_needed();
+  size_t wav_buffer_offset = 0;
+  size_t wav_bytes_to_skip = wav_decoder.bytes_to_skip();
+  size_t wav_sample_bytes_to_read  = 0;
 
   // TODO: only initialize if needed
   HMP3Decoder mp3_decoder = MP3InitDecoder();
@@ -123,9 +126,11 @@ void DecodeStreamer::decode_task_(void *params) {
         stopping = false;
         header_parsed = false;
 
-        wav_header_bytes_to_read = 4 * 5;
-        wav_header_bytes_read = 0;
-        wav_have_fmt_size = false;
+        wav_decoder.reset();
+        wav_header_bytes_to_read = wav_decoder.bytes_needed();
+        wav_buffer_offset = 0;
+        wav_bytes_to_skip = wav_decoder.bytes_to_skip();
+        wav_sample_bytes_to_read  = 0;
 
         if (media_file_type == media_player::MediaFileType::MP3) {
           mp3_decoder = MP3InitDecoder();
@@ -163,88 +168,68 @@ void DecodeStreamer::decode_task_(void *params) {
 
         size_t bytes_read = 0;
 
-        if (!header_parsed) {
-          if (max_bytes_to_read > 0) {
-            bytes_read = this_streamer->input_ring_buffer_->read((void *) (input_buffer + wav_header_bytes_read),
-                                                                 wav_header_bytes_to_read - wav_header_bytes_read);
-          }
-          max_bytes_to_read -= bytes_read;
-          wav_header_bytes_read += bytes_read;
+        if (!header_parsed && (bytes_available > 0)) {
+          if (wav_bytes_to_skip > 0) {
+            // Skip unneeded data
+            bytes_read = this_streamer->input_ring_buffer_->read((void *) input_buffer,
+                                                                 std::min(wav_bytes_to_skip, max_bytes_to_read));
+            wav_bytes_to_skip -= bytes_read;
+          } else if (wav_header_bytes_to_read > 0) {
+            // Read needed header data
+            bytes_read = this_streamer->input_ring_buffer_->read((void *) (input_buffer + wav_buffer_offset),
+                                                                 wav_header_bytes_to_read);
+            wav_header_bytes_to_read -= bytes_read;
+            wav_buffer_offset += bytes_read;
 
-          if (wav_header_bytes_read == wav_header_bytes_to_read) {
-            if (!wav_have_fmt_size) {
-              // We should have:
-              // 'RIFF' (4 bytes)
-              // chunk size (4 bytes)
-              // 'WAVE' (4 bytes)
-              // 'fmt ' (4 bytes)
-              // format size (4 bytes)
-              if (strncmp((char *) input_buffer, "RIFF", 4) != 0) {
-                printf("Missing RIFF header: %.*s\n", 4, (char *) input_buffer);
+            if (wav_header_bytes_to_read == 0) {
+              // Process header data in buffer
+              wav_decoder::WAVDecoderResult result = wav_decoder.next();
+              if (result == wav_decoder::WAV_DECODER_SUCCESS_IN_DATA) {
+                // Header parsing is complete
+                header_parsed = true;
+                wav_sample_bytes_to_read = wav_decoder.chunk_bytes_left();
+
+                StreamInfo old_stream_info = stream_info;
+
+                // Assume PCM and 16-bits per sample
+                stream_info.channels = wav_decoder.num_channels();
+                stream_info.sample_rate = wav_decoder.sample_rate();
+
+                printf("sample channels: %d\n", stream_info.channels);
+                printf("sample rate: %d\n", stream_info.sample_rate);
+                printf("number of samples: %d\n", wav_sample_bytes_to_read /
+                       (wav_decoder.num_channels() * (wav_decoder.bits_per_sample() / 8)));
+
+                if (stream_info != old_stream_info) {
+                  this_streamer->output_ring_buffer_->reset();
+
+                  event.type = EventType::STARTED;
+                  event.media_file_type = media_file_type;
+                  event.stream_info = stream_info;
+                  xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
+                }
+              } else if (result == wav_decoder::WAV_DECODER_SUCCESS_NEXT) {
+                // Continue parsing header
+                wav_bytes_to_skip = wav_decoder.bytes_to_skip();
+                wav_header_bytes_to_read = wav_decoder.bytes_needed();
+                wav_buffer_offset = 0;
+              } else {
+                printf("Unexpected error while parsing WAV header: %d\n", result);
                 break;
-              }
+              }  // parsing state
+            }  // if header bytes available
+          }  // if header bytes needed
+        }  // if header parsed
 
-              if (strncmp((char *) (input_buffer + 8), "WAVE", 4) != 0) {
-                printf("Missing WAVE header: %.*s\n", 4, (char *) (input_buffer + 8));
-                break;
-              }
-
-              if (strncmp((char *) (input_buffer + 12), "fmt ", 4) != 0) {
-                printf("Missing fmt header: %.*s\n", 4, (char *) (input_buffer + 12));
-                break;
-              }
-
-              // Should be 16, but can vary
-              uint32_t fmt_size = *((uint32_t *) (input_buffer + 16));
-
-              // Read rest of fmt chunk + 'data' + data size
-              wav_header_bytes_to_read = fmt_size + 4 + 4;
-              wav_header_bytes_read = 0;
-              wav_have_fmt_size = true;
-            } else {
-              // We are just past the fmt chunk size in the header now.
-              // Next up is:
-              // audio format (2 bytes, PCM = 1)
-              // channels (2 bytes)
-              // sample rate (4 bytes)
-              // bytes per second (4 bytes)
-              // block align (2 bytes)
-              // bits per sample (2 bytes)
-              // 'data' (4 bytes)
-              // data size (4 bytes)
-              header_parsed = true;
-              StreamInfo old_stream_info = stream_info;
-
-              // Assume PCM and 16-bits per sample
-              stream_info.channels = *((uint16_t *) (input_buffer + 2));
-              stream_info.sample_rate = *((uint32_t *) (input_buffer + 4));
-
-              printf("sample channels: %d\n", stream_info.channels);
-              printf("sample rate: %d\n", stream_info.sample_rate);
-
-              if (stream_info != old_stream_info) {
-                this_streamer->output_ring_buffer_->reset();
-
-                event.type = EventType::STARTED;
-                event.media_file_type = media_file_type;
-                event.stream_info = stream_info;
-                xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
-              }
-            }
-          }
-
-          if (!header_parsed) {
-            // Need more data to parse header
-            continue;
-          }
-        }
-
-        size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
-        if (bytes_to_read > 0) {
-          bytes_read =
+        if (header_parsed && (wav_sample_bytes_to_read > 0)) {
+          size_t bytes_to_read = std::min(max_bytes_to_read, BUFFER_SIZE);
+          if (bytes_to_read > 0) {
+            bytes_read =
               this_streamer->input_ring_buffer_->read((void *) output_buffer, bytes_to_read, (10 / portTICK_PERIOD_MS));
-          output_buffer_current = output_buffer;
-          output_buffer_length += bytes_read;
+            output_buffer_current = output_buffer;
+            output_buffer_length += bytes_read;
+            wav_sample_bytes_to_read -= bytes_read;
+          }
         }
       } else if (media_file_type == media_player::MediaFileType::MP3) {
         // Shift unread data in buffer to start
