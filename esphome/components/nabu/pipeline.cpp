@@ -40,6 +40,14 @@ void Pipeline::start(const std::string &uri, const std::string &task_name, UBase
   }
 }
 
+void Pipeline::start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority) {
+  this->reader_->start(media_file, task_name + "_reader");
+  this->decoder_->start(task_name + "_decoder");
+  this->resampler_->start(task_name + "_resampler");
+  if (this->task_handle_ == nullptr) {
+    xTaskCreate(Pipeline::transfer_task_, task_name.c_str(), 8096, (void *) this, priority, &this->task_handle_);
+  }
+}
 void Pipeline::stop() {
   vTaskDelete(this->task_handle_);
   this->task_handle_ = nullptr;

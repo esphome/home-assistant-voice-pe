@@ -31,6 +31,10 @@ namespace nabu {
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Verify ring buffers are reset in a safe way (only tasks that read should reset it?)
+//  - Eliminate code redundancy for start of media playback (url and file based)
+//  - Clean up process around playing back local media files
+//    - Create a registry of media files in Python
+//    - Add a yaml action to play a specific media file
 
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 20;
@@ -347,11 +351,13 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
 
-        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) && (this->announcement_pipeline_state_ != PipelineState::STOPPING)){
+        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
           command_event.command = CommandEventType::STOP;
           this->announcement_pipeline_->send_command(&command_event);
         }
 
+        this->cnacel_retry("ann_start");
         this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
           if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
             return RetryResult::RETRY;
@@ -365,7 +371,8 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
 
-        if ((this->media_pipeline_state_ != PipelineState::STOPPED) && (this->media_pipeline_state_ != PipelineState::STOPPING)) {
+        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
           command_event.command = CommandEventType::STOP;
           this->media_pipeline_->send_command(&command_event);
         }
@@ -377,6 +384,57 @@ void NabuMediaPlayer::watch_media_commands_() {
           }
 
           this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
+          if (this->is_paused_) {
+            CommandEvent command_event;
+            command_event.command = CommandEventType::RESUME_MEDIA;
+            this->combine_streamer_->send_command(&command_event);
+          }
+          this->is_paused_ = false;
+          return RetryResult::DONE;
+        });
+      }
+    }
+
+    if (media_command.new_file.has_value() && media_command.new_file.value()) {
+      if (media_command.announce.has_value() && media_command.announce.value()) {
+        if (this->announcement_pipeline_ == nullptr) {
+          this->announcement_pipeline_ =
+              make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
+        }
+
+        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->announcement_pipeline_->send_command(&command_event);
+        }
+
+        this->cancel_retry("ann_start");
+        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->announcement_pipeline_->start(this->announcement_file_.value(), "ann_pipe");
+          return RetryResult::DONE;
+        });
+      } else {
+        if (this->media_pipeline_ == nullptr) {
+          this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
+        }
+
+        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
+            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
+          command_event.command = CommandEventType::STOP;
+          this->media_pipeline_->send_command(&command_event);
+        }
+
+        this->cancel_retry("media_start");
+        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
+          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+            return RetryResult::RETRY;
+          }
+
+          this->media_pipeline_->start(this->media_file_.value(), "med_pipe");
           if (this->is_paused_) {
             CommandEvent command_event;
             command_event.command = CommandEventType::RESUME_MEDIA;
@@ -642,6 +700,17 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
     } else {
       this->media_url_ = new_uri;
     }
+    xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
+    return;
+  }
+
+  if (call.get_local_media_file().has_value()) {
+    if (call.get_announcement().has_value() && call.get_announcement().value()) {
+      this->announcement_file_ = call.get_local_media_file().value();
+    } else {
+      this->media_file_ = call.get_local_media_file().value();
+    }
+    media_command.new_file = true;
     xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
     return;
   }

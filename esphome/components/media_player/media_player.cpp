@@ -108,6 +108,11 @@ MediaPlayerCall &MediaPlayerCall::set_media_url(const std::string &media_url) {
   return *this;
 }
 
+MediaPlayerCall &MediaPlayerCall::set_local_media_file(MediaFile *media_file) {
+  this->media_file_ = media_file;
+  return *this;
+}
+
 MediaPlayerCall &MediaPlayerCall::set_volume(float volume) {
   this->volume_ = volume;
   return *this;

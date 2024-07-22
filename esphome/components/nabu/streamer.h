@@ -2,6 +2,8 @@
 
 #ifdef USE_ESP_IDF
 
+#include "esphome/components/media_player/media_player.h"
+
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
@@ -34,17 +36,17 @@ enum class EventType : uint8_t {
   WARNING = 255,
 };
 
-enum class MediaFileType : uint8_t {
-  NONE = 0,
-  WAV,
-  MP3,
-  FLAC,
-};
+// enum class MediaFileType : uint8_t {
+//   NONE = 0,
+//   WAV,
+//   MP3,
+//   FLAC,
+// };
 
 struct TaskEvent {
   EventType type;
   esp_err_t err;
-  MediaFileType media_file_type;
+  media_player::MediaFileType media_file_type;
   StreamInfo stream_info;
 };
 
@@ -67,7 +69,7 @@ enum class PipelineType : uint8_t {
 struct CommandEvent {
   CommandEventType command;
   float ducking_ratio = 0.0;
-  MediaFileType media_file_type = MediaFileType::NONE;
+  media_player::MediaFileType media_file_type = media_player::MediaFileType::NONE;
   StreamInfo stream_info;
 };
 
@@ -114,14 +116,19 @@ class HTTPStreamer : public OutputStreamer {
   HTTPStreamer();
 
   void start(const std::string &task_name, UBaseType_t priority = 1) override;
+  void start_http(const std::string &task_name, UBaseType_t priority = 1);
+  void start_file(const std::string &task_name, UBaseType_t priority = 1);
   void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
+  void start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority = 1);
 
  protected:
   static void read_task_(void *params);
+  static void file_read_task_(void *params);
 
-  MediaFileType establish_connection_(esp_http_client_handle_t *client);
+  media_player::MediaFileType establish_connection_(esp_http_client_handle_t *client);
   void cleanup_connection_(esp_http_client_handle_t *client);
 
+  media_player::MediaFile *current_media_file_{};
   std::string current_uri_{};
 };
 

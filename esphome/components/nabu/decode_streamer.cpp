@@ -6,6 +6,8 @@
 #include "mp3_decoder.h"
 #include "streamer.h"
 
+#include "esphome/components/media_player/media_player.h"
+
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 
@@ -78,7 +80,7 @@ void DecodeStreamer::decode_task_(void *params) {
   // event.type = EventType::STARTED;
   // xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
-  MediaFileType media_file_type = MediaFileType::NONE;
+  media_player::MediaFileType media_file_type = media_player::MediaFileType::NONE;
 
   size_t wav_header_bytes_to_read = 4 * 5;  // enough to get fmt size
   size_t wav_header_bytes_read = 0;
@@ -100,7 +102,7 @@ void DecodeStreamer::decode_task_(void *params) {
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
-        if ((media_file_type == MediaFileType::NONE) || (media_file_type == MediaFileType::MP3)) {
+        if ((media_file_type == media_player::MediaFileType::NONE) || (media_file_type == media_player::MediaFileType::MP3)) {
           MP3FreeDecoder(mp3_decoder);
         }
 
@@ -125,7 +127,7 @@ void DecodeStreamer::decode_task_(void *params) {
         wav_header_bytes_read = 0;
         wav_have_fmt_size = false;
 
-        if (media_file_type == MediaFileType::MP3) {
+        if (media_file_type == media_player::MediaFileType::MP3) {
           mp3_decoder = MP3InitDecoder();
         }
 
@@ -137,7 +139,7 @@ void DecodeStreamer::decode_task_(void *params) {
       }
     }
 
-    if (media_file_type == MediaFileType::NONE) {
+    if (media_file_type == media_player::MediaFileType::NONE) {
       vTaskDelay(10 / portTICK_PERIOD_MS);
       continue;
     }
@@ -154,7 +156,7 @@ void DecodeStreamer::decode_task_(void *params) {
         output_buffer_current += bytes_written;
       }
     } else {
-      if (media_file_type == MediaFileType::WAV) {
+      if (media_file_type == media_player::MediaFileType::WAV) {
         size_t bytes_available = this_streamer->input_ring_buffer_->available();
         size_t bytes_free = this_streamer->output_ring_buffer_->free();
         size_t max_bytes_to_read = std::min(bytes_free, bytes_available);
@@ -244,7 +246,7 @@ void DecodeStreamer::decode_task_(void *params) {
           output_buffer_current = output_buffer;
           output_buffer_length += bytes_read;
         }
-      } else if (media_file_type == MediaFileType::MP3) {
+      } else if (media_file_type == media_player::MediaFileType::MP3) {
         // Shift unread data in buffer to start
         if ((input_buffer_length > 0) && (input_buffer_length < BUFFER_SIZE)) {
           memmove(input_buffer, input_buffer_current, input_buffer_length);
@@ -316,7 +318,7 @@ void DecodeStreamer::decode_task_(void *params) {
             }
           }
         }
-      } else if (media_file_type == MediaFileType::FLAC) {
+      } else if (media_file_type == media_player::MediaFileType::FLAC) {
         if (!header_parsed) {
           if (this_streamer->input_ring_buffer_->available() > 0) {
             auto result = flac_decoder.read_header();
@@ -387,7 +389,7 @@ void DecodeStreamer::decode_task_(void *params) {
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
   this_streamer->reset_ring_buffers();
-  if (media_file_type == MediaFileType::MP3) {
+  if (media_file_type == media_player::MediaFileType::MP3) {
     MP3FreeDecoder(mp3_decoder);
   }
   flac_decoder.free_buffers();

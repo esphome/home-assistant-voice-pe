@@ -87,7 +87,6 @@ void ResampleStreamer::resample_task_(void *params) {
   event.type = EventType::STARTED;
   xQueueSend(this_streamer->event_queue_, &event, portMAX_DELAY);
 
-  MediaFileType media_file_type = MediaFileType::NONE;
   StreamInfo stream_info;
   stream_info.channels = 0;  // will be set once we receive the start command
 
@@ -109,8 +108,6 @@ void ResampleStreamer::resample_task_(void *params) {
   while (true) {
     if (xQueueReceive(this_streamer->command_queue_, &command_event, (0 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::START) {
-        // Need to receive stream information here
-        media_file_type = command_event.media_file_type;
         stream_info = command_event.stream_info;
 
         if (stream_info.channels > 0) {

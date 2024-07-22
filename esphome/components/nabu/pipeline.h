@@ -7,6 +7,8 @@
 #include "decode_streamer.h"
 #include "resample_streamer.h"
 
+#include "esphome/components/media_player/media_player.h"
+
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
@@ -26,6 +28,7 @@ class Pipeline {
   size_t read(uint8_t *buffer, size_t length);
 
   void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
+  void start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority = 1);
 
   void stop();
 

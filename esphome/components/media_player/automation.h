@@ -37,6 +37,11 @@ template<typename... Ts> class PlayMediaAction : public Action<Ts...>, public Pa
   void play(Ts... x) override { this->parent_->make_call().set_media_url(this->media_url_.value(x...)).perform(); }
 };
 
+// template<typename... Ts> class PlayLocalMediaAction : public Action<Ts...>, public Parented<MediaPlayer> {
+//   TEMPLATABLE_VALUE(MediaFile, media_file)
+//   void play(Ts... x) override { this->parent_->make_call().set_local_media_file(this->media_file_.value(x...)).perform(); }
+// };
+
 template<typename... Ts> class VolumeSetAction : public Action<Ts...>, public Parented<MediaPlayer> {
   TEMPLATABLE_VALUE(float, volume)
   void play(Ts... x) override { this->parent_->make_call().set_volume(this->volume_.value(x...)).perform(); }

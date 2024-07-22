@@ -22,12 +22,27 @@ IS_PLATFORM_COMPONENT = True
 media_player_ns = cg.esphome_ns.namespace("media_player")
 
 MediaPlayer = media_player_ns.class_("MediaPlayer")
+MediaFile = media_player_ns.struct("MediaFile")
+MediaFileType = media_player_ns.enum("MediaFileType", is_class=True)
+MEDIA_FILE_TYPE_ENUM = {
+    "NONE": MediaFileType.NONE,
+    "WAV": MediaFileType.WAV,
+    "MP3": MediaFileType.MP3,
+    "FLAC": MediaFileType.FLAC,
+}
+
+CONF_MEDIA_FILE = "media_file"
+
+
 
 PlayAction = media_player_ns.class_(
     "PlayAction", automation.Action, cg.Parented.template(MediaPlayer)
 )
 PlayMediaAction = media_player_ns.class_(
     "PlayMediaAction", automation.Action, cg.Parented.template(MediaPlayer)
+)
+PlayLocalMediaAction = media_player_ns.class_(
+    "PlayLocalMediaAction", automation.Action, cg.Parented.template(MediaPlayer)
 )
 ToggleAction = media_player_ns.class_(
     "ToggleAction", automation.Action, cg.Parented.template(MediaPlayer)
@@ -143,6 +158,23 @@ async def media_player_play_media_action(config, action_id, template_arg, args):
     cg.add(var.set_media_url(media_url))
     return var
 
+# @automation.register_action(
+#     "media_player.play_local_media_file",
+#     PlayLocalMediaAction,
+#     cv.maybe_simple_value(
+#         {
+#             cv.GenerateID(): cv.use_id(MediaPlayer),
+#             cv.Required(CONF_MEDIA_FILE): cv.templatable(cv.string),
+#         },
+#         key=CONF_MEDIA_FILE,
+#     ),
+# )
+# async def media_player_play_media_action(config, action_id, template_arg, args):
+#     var = cg.new_Pvariable(action_id, template_arg)
+#     await cg.register_parented(var, config[CONF_ID])
+#     media_url = await cg.templatable(config[CONF_MEDIA_URL], args, cg.std_string)
+#     cg.add(var.set_media_url(media_url))
+#     return var
 
 @automation.register_action("media_player.play", PlayAction, MEDIA_PLAYER_ACTION_SCHEMA)
 @automation.register_action(

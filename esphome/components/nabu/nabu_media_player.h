@@ -46,7 +46,13 @@ struct MediaCallCommand {
   optional<float> volume;
   optional<bool> announce;
   optional<bool> new_url;
+  optional<bool> new_file;
 };
+
+// struct MediaFile {
+//   const uint8_t *data;
+//   MediaFileType file_type;
+// };
 
 class NabuMediaPlayer : public Component,
                         public media_player::MediaPlayer,
@@ -83,8 +89,10 @@ class NabuMediaPlayer : public Component,
   /// @return true if I2C writes were successful
   bool unmute_();
 
-  optional<std::string> media_url_{};         // only modified by control function
-  optional<std::string> announcement_url_{};  // only modified by control function
+  optional<std::string> media_url_{};                        // only modified by control function
+  optional<std::string> announcement_url_{};                 // only modified by control function
+  optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
+  optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
   QueueHandle_t media_control_command_queue_;
 
   // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline
@@ -104,7 +112,7 @@ class NabuMediaPlayer : public Component,
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
   QueueHandle_t speaker_command_queue_;
-  
+
   i2s_bits_per_sample_t bits_per_sample_;
   uint8_t dout_pin_{0};
 
