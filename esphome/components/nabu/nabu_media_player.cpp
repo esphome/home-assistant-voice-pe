@@ -347,7 +347,7 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
         }
 
-        if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
+        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) && (this->announcement_pipeline_state_ != PipelineState::STOPPING)){
           command_event.command = CommandEventType::STOP;
           this->announcement_pipeline_->send_command(&command_event);
         }
@@ -365,7 +365,7 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
         }
 
-        if (this->media_pipeline_state_ != PipelineState::STOPPED) {
+        if ((this->media_pipeline_state_ != PipelineState::STOPPED) && (this->media_pipeline_state_ != PipelineState::STOPPING)) {
           command_event.command = CommandEventType::STOP;
           this->media_pipeline_->send_command(&command_event);
         }
@@ -534,7 +534,6 @@ void NabuMediaPlayer::watch_() {
 
   if (this->media_pipeline_ != nullptr) {
     while (this->media_pipeline_->read_event(&event)) {
-      // if (this->media_pipeline_->read_event(&event)) {
       switch (event.type) {
         case EventType::STARTING:
           ESP_LOGD(TAG, "Starting Media Playback");
