@@ -174,7 +174,25 @@ binary_sensor:
           - light.turn_on:
               brightness: 100%
               id: voice_assistant_leds
-              effect: "Raindow"
+              effect: "Tick"
+          - lambda: |-
+              id(nabu_media_player)
+                ->make_call()
+                .set_announcement(true)
+                .set_local_media_file(id(tick_wave_file))
+                .perform();
+          - delay: 4s
+          - light.turn_off: voice_assistant_leds
+          - lambda: |-
+              id(nabu_media_player)
+                ->make_call()
+                .set_announcement(true)
+                .set_local_media_file(id(party_wave_file))
+                .perform();
+          - light.turn_on:
+              brightness: 100%
+              id: voice_assistant_leds
+              effect: "Rainbow"
   - platform: gpio
     id: mute_switch
     name: Muted
@@ -183,16 +201,6 @@ binary_sensor:
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
-
-number:
-  - platform: template
-    id: fake_volume
-    internal: true
-    optimistic: true
-    min_value: 0
-    max_value: 12
-    initial_value: 12
-    step: 1
 
 light:
   - platform: esp32_rmt_led_strip
@@ -348,7 +356,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            auto nb_leds_on = id(fake_volume).state;
+            auto nb_leds_on = 12.0f * id(nabu_media_player).volume;
             for (int i = 0; i < 12; i++) {
               if (i < nb_leds_on) {
                 it[i] = color;
@@ -358,7 +366,7 @@ light:
             }
       - addressable_lambda:
           name: "Center Button Touched"
-          update_interval: 1s
+          update_interval: 10ms
           lambda: |-
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
@@ -380,27 +388,18 @@ light:
           width: 12
       - addressable_lambda:
           name: "Tick"
-          update_interval: 10ms
+          update_interval: 333ms
           lambda: |-
+            static uint8_t index = 0;
             Color color(255, 0, 0);
             for (int i = 0; i < 12; i++) {
-              if (i == id(global_led_animation_index) % 12) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 11) % 12) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 10) % 12) {
-                it[i] = color * 128;
-              } else if (i == (id(global_led_animation_index) + 6) % 12) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 5) % 12) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 4) % 12) {
-                it[i] = color * 128;
-              } else {
+              if (i <= index ) {
                 it[i] = Color::BLACK;
+              } else {
+                it[i] = color;
               }
             }
-            id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 12;
+            index = (index + 1) % 12;
   - platform: partition
     id: led_ring
     name: LED Ring
@@ -429,6 +428,19 @@ sensor:
             binary_sensor.is_off: center_button
           then:
             - script.execute: increase_volume
+            - if:
+                condition:
+                  lambda: return(id(dial).state > 60);
+                then:
+                  - sensor.rotary_encoder.set_value:
+                      id: dial
+                      value: 0
+                  - lambda: |-
+                      id(nabu_media_player)
+                        ->make_call()
+                        .set_announcement(true)
+                        .set_local_media_file(id(rewind_wave_file))
+                        .perform();
           else:
             - script.execute: increase_hue
     on_anticlockwise:
@@ -439,6 +451,8 @@ sensor:
             - script.execute: decrease_volume
           else:
             - script.execute: decrease_hue
+
+
   - platform: debug
     free:
       name: "Heap Free"
@@ -518,7 +532,6 @@ script:
                   - script.execute: control_leds_no_ha_connection_state
           else:
             - script.execute: control_leds_init_state
-
 
   # Script executed during initialisation
   - id: control_leds_init_state
@@ -645,26 +658,28 @@ script:
   - id: increase_volume
     mode: restart
     then:
-      - number.increment:
-          id: fake_volume
-          cycle: false
+      - media_player.volume_up:
       - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
       - lambda: id(dial_touched) = false;
       - script.execute: control_leds
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
 
   - id: decrease_volume
     mode: restart
     then:
-      - number.decrement:
-          id: fake_volume
-          cycle: false
+      - media_player.volume_down:
       - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
       - lambda: id(dial_touched) = false;
       - script.execute: control_leds
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
 
   - id: increase_hue
     then:
@@ -776,6 +791,13 @@ media_player:
     files:
       - id: timer_finished_wave_file
         file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
+      - id: tick_wave_file
+        file: sounds/tick.wav
+      - id: party_wave_file
+        file: sounds/party.wav
+      - id: rewind_wave_file
+        file: sounds/rewind.wav
+
 
 external_components:
   - source: github://jesserockz/esphome-components
@@ -793,7 +815,7 @@ micro_wake_word:
     - model: okay_nabu
   vad:
   on_wake_word_detected:
-    - if: 
+    - if:
         condition:
           lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
         then:
@@ -802,7 +824,7 @@ micro_wake_word:
               ->make_call()
               .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
               .set_announcement(true)
-              .perform(); 
+              .perform();
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
 
@@ -873,6 +895,6 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
-            
+
 debug:
   update_interval: 5s
