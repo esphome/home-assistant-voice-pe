@@ -14,8 +14,6 @@ substitutions:
   voice_assist_not_ready_phase_id: '10'
   # The voice assistant encountered an error
   voice_assist_error_phase_id: '11'
-  # The voice assistant is muted and will not reply to a wake word
-  voice_assist_muted_phase_id: '12'
 
 esphome:
   name: esphome-voice-kit
@@ -114,6 +112,21 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+switch:
+  - platform: template
+    id: timer_ringing
+    optimistic: true
+    internal: true
+    restore_mode: ALWAYS_OFF
+    on_turn_off:
+      - delay: 200ms
+      - script.execute: control_leds
+    on_turn_on:
+      - script.execute: ring_timer
+      - script.execute: control_leds
+      - delay: 15min
+      - switch.turn_off: timer_ringing
+
 binary_sensor:
   - platform: gpio
     id: center_button
@@ -121,6 +134,11 @@ binary_sensor:
       number: GPIO17
       inverted: true
     on_press:
+      - if:
+          condition:
+            switch.is_on: timer_ringing
+          then:
+            - switch.turn_off: timer_ringing
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
@@ -332,7 +350,7 @@ light:
             }
       - addressable_lambda:
           name: "Muted"
-          update_interval: 1s
+          update_interval: 16ms
           lambda: |-
             static int8_t index = 0;
             Color color(255, 0, 0);
@@ -366,7 +384,7 @@ light:
             }
       - addressable_lambda:
           name: "Center Button Touched"
-          update_interval: 10ms
+          update_interval: 16ms
           lambda: |-
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
@@ -383,6 +401,31 @@ light:
           update_interval: 100ms
           min_brightness: 50%
           max_brightness: 100%
+      - addressable_lambda:
+          name: "Timer Ring"
+          update_interval: 10ms
+          lambda: |-
+            static uint8_t brightness_step = 0;
+            static bool brightness_decreasing = true;
+            static uint8_t brightness_step_number = 10;
+            if (initial_run) {
+              brightness_step = 0;
+              brightness_decreasing = true;
+            }
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            for (int i = 0; i < 12; i++) {
+              it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
+            }
+            if (brightness_decreasing) {
+              brightness_step++;
+            } else {
+              brightness_step--;
+            }
+            if (brightness_step == 0 || brightness_step == brightness_step_number) {
+              brightness_decreasing = !brightness_decreasing;
+            }
       - addressable_rainbow:
           name: "Rainbow"
           width: 12
@@ -483,49 +526,52 @@ script:
                       then:
                         - if:
                             condition:
-                              lambda: return !id(dial_touched);
+                              binary_sensor.is_off: center_button
                             then:
                               - if:
                                   condition:
-                                    binary_sensor.is_off: center_button
+                                    lambda: return !id(dial_touched);
                                   then:
                                     - if:
                                         condition:
-                                          binary_sensor.is_off: mute_switch
+                                          switch.is_off: timer_ringing
                                         then:
-                                          - lambda: |
-                                              switch(id(voice_assistant_phase)) {
-                                                case ${voice_assist_waiting_for_command_phase_id}:
-                                                  id(control_leds_voice_assist_waiting_for_command_phase).execute();
-                                                  break;
-                                                case ${voice_assist_listening_for_command_phase_id}:
-                                                  id(control_leds_voice_assist_listening_for_command_phase).execute();
-                                                  break;
-                                                case ${voice_assist_thinking_phase_id}:
-                                                  id(control_leds_voice_assist_thinking_phase).execute();
-                                                  break;
-                                                case ${voice_assist_replying_phase_id}:
-                                                  id(control_leds_voice_assist_replying_phase).execute();
-                                                  break;
-                                                case ${voice_assist_error_phase_id}:
-                                                  id(control_leds_voice_assist_error_phase).execute();
-                                                  break;
-                                                case ${voice_assist_muted_phase_id}:
-                                                  id(control_leds_voice_assist_muted_phase).execute();
-                                                  break;
-                                                case ${voice_assist_not_ready_phase_id}:
-                                                  id(control_leds_voice_assist_not_ready_phase).execute();
-                                                  break;
-                                                default:
-                                                  id(control_leds_voice_assist_idle_phase).execute();
-                                                  break;
-                                              }
+                                          - if:
+                                              condition:
+                                                binary_sensor.is_off: mute_switch
+                                              then:
+                                                - lambda: |
+                                                    switch(id(voice_assistant_phase)) {
+                                                      case ${voice_assist_waiting_for_command_phase_id}:
+                                                        id(control_leds_voice_assistant_waiting_for_command_phase).execute();
+                                                        break;
+                                                      case ${voice_assist_listening_for_command_phase_id}:
+                                                        id(control_leds_voice_assistant_listening_for_command_phase).execute();
+                                                        break;
+                                                      case ${voice_assist_thinking_phase_id}:
+                                                        id(control_leds_voice_assistant_thinking_phase).execute();
+                                                        break;
+                                                      case ${voice_assist_replying_phase_id}:
+                                                        id(control_leds_voice_assistant_replying_phase).execute();
+                                                        break;
+                                                      case ${voice_assist_error_phase_id}:
+                                                        id(control_leds_voice_assistant_error_phase).execute();
+                                                        break;
+                                                      case ${voice_assist_not_ready_phase_id}:
+                                                        id(control_leds_voice_assistant_not_ready_phase).execute();
+                                                        break;
+                                                      default:
+                                                        id(control_leds_voice_assistant_idle_phase).execute();
+                                                        break;
+                                                    }
+                                              else:
+                                                - script.execute: control_leds_muted
                                         else:
-                                          - script.execute: control_leds_voice_assist_muted_phase
+                                          - script.execute: control_leds_timer_ringing
                                   else:
-                                    - script.execute: control_leds_voice_assist_centrer_button_touched
+                                    - script.execute: control_leds_dial_touched
                             else:
-                              - script.execute: control_leds_dial_touched
+                              - script.execute: control_leds_centrer_button_touched
                       else:
                         - script.execute: control_leds_no_ha_connection_state
                 else:
@@ -568,7 +614,7 @@ script:
           effect: "Twinkle"
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
-  - id: control_leds_voice_assist_idle_phase
+  - id: control_leds_voice_assistant_idle_phase
     then:
       - light.turn_off: voice_assistant_leds
       - if:
@@ -578,7 +624,7 @@ script:
             light.turn_on: led_ring
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
-  - id: control_leds_voice_assist_waiting_for_command_phase
+  - id: control_leds_voice_assistant_waiting_for_command_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -586,7 +632,7 @@ script:
           effect: "Waiting for Command"
 
   # Script executed when the voice assistant is listenintg to a command
-  - id: control_leds_voice_assist_listening_for_command_phase
+  - id: control_leds_voice_assistant_listening_for_command_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -594,7 +640,7 @@ script:
           effect: "Listening For Command"
 
   # Script executed when the voice assistant is thinking to a command
-  - id: control_leds_voice_assist_thinking_phase
+  - id: control_leds_voice_assistant_thinking_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -602,7 +648,7 @@ script:
           effect: "Thinking"
 
   # Script executed when the voice assistant is thinking to a command
-  - id: control_leds_voice_assist_replying_phase
+  - id: control_leds_voice_assistant_replying_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -610,7 +656,7 @@ script:
           effect: "Replying"
 
   # Script executed when the voice assistant is thinking to a command (# TO BE DONE)
-  - id: control_leds_voice_assist_error_phase
+  - id: control_leds_voice_assistant_error_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -621,7 +667,7 @@ script:
           effect: "Fast Pulse"
 
   # Script executed when the voice assistant is muted
-  - id: control_leds_voice_assist_muted_phase
+  - id: control_leds_muted
     then:
       - light.turn_on:
           brightness: 50%
@@ -629,7 +675,7 @@ script:
           effect: "Muted"
 
   # Script executed when the voice assistant is not ready
-  - id: control_leds_voice_assist_not_ready_phase
+  - id: control_leds_voice_assistant_not_ready_phase
     then:
       - light.turn_on:
           brightness: 100%
@@ -648,13 +694,22 @@ script:
           effect: "Volume Display"
 
   # Script executed when the center bouton is touched
-  - id: control_leds_voice_assist_centrer_button_touched
+  - id: control_leds_centrer_button_touched
     then:
       - light.turn_on:
           brightness: 100%
           id: voice_assistant_leds
           effect: "Center Button Touched"
 
+  # Script executed when the timer is ringing, to control the LEDs
+  - id: control_leds_timer_ringing
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: voice_assistant_leds
+          effect: "Timer Ring"
+
+  # Script executed when the volume is increased from the dial
   - id: increase_volume
     mode: restart
     then:
@@ -668,6 +723,7 @@ script:
           id: dial
           value: 0
 
+  # Script executed when the volume is decreased from the dial
   - id: decrease_volume
     mode: restart
     then:
@@ -681,6 +737,7 @@ script:
           id: dial
           value: 0
 
+  # Script executed when the hue is increased from the dial
   - id: increase_hue
     then:
       - lambda: |
@@ -706,6 +763,7 @@ script:
                       new_blue);
           id(led_ring).make_call().set_rgb(new_red, new_green, new_blue).perform();
 
+  # Script executed when the hue is decreased from the dial
   - id: decrease_hue
     then:
       - lambda: |
@@ -730,6 +788,21 @@ script:
                       new_green,
                       new_blue);
           id(led_ring).make_call().set_rgb(new_red, new_green, new_blue).perform();
+
+  # Script executed when the timer is ringing, to playback sounds.
+  - id: ring_timer
+    then:
+      - while:
+          condition:
+            switch.is_on: timer_ringing
+          then:
+            - lambda: |-
+                id(nabu_media_player)
+                  ->make_call()
+                  .set_announcement(true)
+                  .set_local_media_file(id(timer_finished_wave_file))
+                  .perform();
+            - delay: 1s
 
 i2s_audio:
   - id: i2s_input
@@ -790,14 +863,13 @@ media_player:
     i2s_audio_id: i2s_output
     files:
       - id: timer_finished_wave_file
-        file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
+        file: sounds/timer_finished.wav
       - id: tick_wave_file
         file: sounds/tick.wav
       - id: party_wave_file
         file: sounds/party.wav
       - id: rewind_wave_file
         file: sounds/rewind.wav
-
 
 external_components:
   - source: github://jesserockz/esphome-components
@@ -817,16 +889,23 @@ micro_wake_word:
   on_wake_word_detected:
     - if:
         condition:
-          lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+          switch.is_on: timer_ringing
         then:
-          lambda: |-
-            id(nabu_media_player)
-              ->make_call()
-              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-              .set_announcement(true)
-              .perform();
-    - voice_assistant.start:
-        wake_word: !lambda return wake_word;
+          - switch.turn_off: timer_ringing
+          - micro_wake_word.start:
+        else:
+          - if:
+              condition:
+                lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+              then:
+                lambda: |-
+                  id(nabu_media_player)
+                    ->make_call()
+                    .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+                    .set_announcement(true)
+                    .perform();
+          - voice_assistant.start:
+              wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
@@ -880,6 +959,8 @@ voice_assistant:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+  on_timer_finished:
+    - switch.turn_on: timer_ringing
 
 button:
   - platform: restart
