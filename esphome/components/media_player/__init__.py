@@ -77,6 +77,7 @@ AnnoucementTrigger = media_player_ns.class_(
     "AnnouncementTrigger", automation.Trigger.template()
 )
 IsIdleCondition = media_player_ns.class_("IsIdleCondition", automation.Condition)
+IsPausedCondition = media_player_ns.class_("IsPausedCondition", automation.Condition)
 IsPlayingCondition = media_player_ns.class_("IsPlayingCondition", automation.Condition)
 
 
@@ -192,6 +193,9 @@ async def media_player_play_media_action(config, action_id, template_arg, args):
 )
 @automation.register_condition(
     "media_player.is_idle", IsIdleCondition, MEDIA_PLAYER_ACTION_SCHEMA
+)
+@automation.register_condition(
+    "media_player.is_paused", IsPausedCondition, MEDIA_PLAYER_ACTION_SCHEMA
 )
 @automation.register_condition(
     "media_player.is_playing", IsPlayingCondition, MEDIA_PLAYER_ACTION_SCHEMA
