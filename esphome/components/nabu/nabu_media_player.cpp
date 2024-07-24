@@ -717,13 +717,17 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
 
   if (call.get_volume().has_value()) {
     media_command.volume = call.get_volume().value();
-    xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
+    xQueueSend(this->media_control_command_queue_, &media_command, 0);    // Wait 0 ticks for queue to be free, volume sets aren't that important!
     return;
   }
 
   if (call.get_command().has_value()) {
     media_command.command = call.get_command().value();
-    xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
+    TickType_t ticks_to_wait = portMAX_DELAY;
+    if ((call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP) || (call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN)) {
+      ticks_to_wait = 0;  // Wait 0 ticks for queue to be free, volume sets aren't that important!
+    }
+    xQueueSend(this->media_control_command_queue_, &media_command, ticks_to_wait);
     return;
   }
 }

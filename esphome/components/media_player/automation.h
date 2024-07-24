@@ -69,5 +69,10 @@ template<typename... Ts> class IsPlayingCondition : public Condition<Ts...>, pub
   bool check(Ts... x) override { return this->parent_->state == MediaPlayerState::MEDIA_PLAYER_STATE_PLAYING; }
 };
 
+template<typename... Ts> class IsPausedCondition : public Condition<Ts...>, public Parented<MediaPlayer> {
+ public:
+  bool check(Ts... x) override { return this->parent_->state == MediaPlayerState::MEDIA_PLAYER_STATE_PAUSED; }
+};
+
 }  // namespace media_player
 }  // namespace esphome
