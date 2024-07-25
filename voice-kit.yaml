@@ -139,6 +139,16 @@ binary_sensor:
             switch.is_on: timer_ringing
           then:
             - switch.turn_off: timer_ringing
+      - if:
+          condition:
+            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_PLAYING;
+          then:
+            - media_player.pause:
+      - if:
+          condition:
+            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_PAUSED;
+          then:
+            - media_player.play:
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
@@ -215,6 +225,7 @@ binary_sensor:
     id: mute_switch
     name: Muted
     pin: GPIO3
+    icon: "mdi:microphone-off"
     on_press:
       - script.execute: control_leds
     on_release:
@@ -446,6 +457,8 @@ light:
   - platform: partition
     id: led_ring
     name: LED Ring
+    entity_category: config
+    icon: "mdi:circle-outline"
     default_transition_length: 0ms
     restore_mode: RESTORE_DEFAULT_OFF
     segments:
@@ -752,16 +765,19 @@ script:
                       saturation,
                       value);
           hue = (hue + 10) % 360;
-          float new_red = 0;
-          float new_green = 0;
-          float new_blue = 0;
+          if (saturation < 0.05) {
+            saturation = 1;
+          }
+          float red = 0;
+          float green = 0;
+          float blue = 0;
           hsv_to_rgb( hue,
                       saturation,
                       value,
-                      new_red,
-                      new_green,
-                      new_blue);
-          id(led_ring).make_call().set_rgb(new_red, new_green, new_blue).perform();
+                      red,
+                      green,
+                      blue);
+          id(led_ring).make_call().set_rgb(red, green, blue).perform();
 
   # Script executed when the hue is decreased from the dial
   - id: decrease_hue
@@ -778,20 +794,23 @@ script:
                       saturation,
                       value);
           hue = (hue + 350) % 360;
-          float new_red = 0;
-          float new_green = 0;
-          float new_blue = 0;
+          if (saturation < 0.05) {
+            saturation = 1;
+          }
+          float red = 0;
+          float green = 0;
+          float blue = 0;
           hsv_to_rgb( hue,
                       saturation,
                       value,
-                      new_red,
-                      new_green,
-                      new_blue);
-          id(led_ring).make_call().set_rgb(new_red, new_green, new_blue).perform();
+                      red,
+                      green,
+                      blue);
+          id(led_ring).make_call().set_rgb(red, green, blue).perform();
 
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
-    then:
+    then: 
       - while:
           condition:
             switch.is_on: timer_ringing
@@ -803,7 +822,7 @@ script:
                   .set_local_media_file(id(timer_finished_wave_file))
                   .perform();
             - delay: 1s
-
+      
 i2s_audio:
   - id: i2s_input
     i2s_lrclk_pin:
@@ -856,7 +875,7 @@ microphone:
 media_player:
   - platform: nabu
     id: nabu_media_player
-    name: nabu_media_player
+    name: Media Player
     internal: false
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
@@ -969,6 +988,7 @@ button:
     name: "Factory Reset"
   - platform: template
     name: "timer beep"
+    entity_category: diagnostic
     on_press:
       - lambda: |-
           id(nabu_media_player)
