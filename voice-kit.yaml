@@ -478,12 +478,15 @@ sensor:
     id: dial
     pin_a: GPIO16
     pin_b: GPIO18
+    resolution: 2
     on_clockwise:
       - if:
           condition:
             binary_sensor.is_off: center_button
           then:
-            - script.execute: increase_volume
+            - script.execute: 
+                id: control_volume
+                increase_volume: true
             - if:
                 condition:
                   lambda: return(id(dial).state > 60);
@@ -498,15 +501,21 @@ sensor:
                         .set_local_media_file(id(rewind_wave_file))
                         .perform();
           else:
-            - script.execute: increase_hue
+            - script.execute:
+                id: control_hue
+                increase_hue: true
     on_anticlockwise:
       - if:
           condition:
             binary_sensor.is_off: center_button
           then:
-            - script.execute: decrease_volume
+            - script.execute: 
+                id: control_volume
+                increase_volume: false
           else:
-            - script.execute: decrease_hue
+            - script.execute:
+                id: control_hue
+                increase_hue: false
 
 
   - platform: debug
@@ -722,11 +731,23 @@ script:
           id: voice_assistant_leds
           effect: "Timer Ring"
 
-  # Script executed when the volume is increased from the dial
-  - id: increase_volume
+
+
+  # Script executed when the volume is increased/decreased from the dial
+  - id: control_volume
     mode: restart
+    parameters:
+      increase_volume: bool #True: Increase volume / False: Decrease volume.
     then:
-      - media_player.volume_up:
+      - delay: 16ms
+      - if:
+          condition:
+            lambda: return increase_volume;
+          then:
+            - media_player.volume_up:
+          else: 
+            - media_player.volume_down:
+      - delay: 16ms
       - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
@@ -736,23 +757,13 @@ script:
           id: dial
           value: 0
 
-  # Script executed when the volume is decreased from the dial
-  - id: decrease_volume
+  # Script executed when the hue is increased/decreased from the dial
+  - id: control_hue
     mode: restart
+    parameters:
+      increase_hue: bool #True: Increase volume / False: Decrease volume.
     then:
-      - media_player.volume_down:
-      - lambda: id(dial_touched) = true;
-      - script.execute: control_leds
-      - delay: 2s
-      - lambda: id(dial_touched) = false;
-      - script.execute: control_leds
-      - sensor.rotary_encoder.set_value:
-          id: dial
-          value: 0
-
-  # Script executed when the hue is increased from the dial
-  - id: increase_hue
-    then:
+      - delay: 16ms
       - lambda: |
           auto light_color = id(led_ring).current_values;
           int hue = 0;
@@ -764,36 +775,11 @@ script:
                       hue,
                       saturation,
                       value);
-          hue = (hue + 10) % 360;
-          if (saturation < 0.05) {
-            saturation = 1;
+          if (increase_hue) {
+            hue = (hue + 10) % 360;
+          } else {
+            hue = (hue + 350) % 360;
           }
-          float red = 0;
-          float green = 0;
-          float blue = 0;
-          hsv_to_rgb( hue,
-                      saturation,
-                      value,
-                      red,
-                      green,
-                      blue);
-          id(led_ring).make_call().set_rgb(red, green, blue).perform();
-
-  # Script executed when the hue is decreased from the dial
-  - id: decrease_hue
-    then:
-      - lambda: |
-          auto light_color = id(led_ring).current_values;
-          int hue = 0;
-          float saturation = 0;
-          float value = 0;
-          rgb_to_hsv( light_color.get_red(),
-                      light_color.get_green(),
-                      light_color.get_blue(),
-                      hue,
-                      saturation,
-                      value);
-          hue = (hue + 350) % 360;
           if (saturation < 0.05) {
             saturation = 1;
           }
