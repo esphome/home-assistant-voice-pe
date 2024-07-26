@@ -196,7 +196,7 @@ void DecodeStreamer::decode_task_(void *params) {
                 stream_info.sample_rate = wav_decoder.sample_rate();
 
                 printf("sample channels: %d\n", stream_info.channels);
-                printf("sample rate: %d\n", stream_info.sample_rate);
+                printf("sample rate: %" PRId32 "\n", stream_info.sample_rate);
                 printf("number of samples: %d\n", wav_sample_bytes_to_read /
                        (wav_decoder.num_channels() * (wav_decoder.bits_per_sample() / 8)));
 
