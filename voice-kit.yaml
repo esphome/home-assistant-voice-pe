@@ -994,5 +994,22 @@ button:
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
 
+  # TODO: Remove before launch, added for testing/development
+
+  - platform: template
+    name: Check for update
+    entity_category: config
+    on_press:
+      - component.update: update_http_request
+  - platform: template
+    name: Perform Update
+    entity_category: config
+    on_press:
+      - update.perform:
+          id: update_http_request
+          force_update: true
+
+  # End TODO
+
 debug:
   update_interval: 5s
