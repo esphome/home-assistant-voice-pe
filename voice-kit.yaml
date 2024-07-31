@@ -25,18 +25,18 @@ esphome:
     name: esphome.voice-kit
     version: "1.0"
   on_boot:
-      priority: 600
-      then:
-        # Run the script to refresh the LED status
-        - script.execute: control_leds
-        # If after 30 second, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
-        - delay: 10min
-        - if:
-            condition:
-              lambda: return id(init_in_progress);
-            then:
-              - lambda: id(init_in_progress) = false;
-              - script.execute: control_leds
+    priority: 600
+    then:
+      # Run the script to refresh the LED status
+      - script.execute: control_leds
+      # If after 30 second, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
+      - delay: 10min
+      - if:
+          condition:
+            lambda: return id(init_in_progress);
+          then:
+            - lambda: id(init_in_progress) = false;
+            - script.execute: control_leds
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -528,7 +528,6 @@ sensor:
                 id: control_hue
                 increase_hue: false
 
-
   - platform: debug
     free:
       name: "Heap Free"
@@ -742,13 +741,11 @@ script:
           id: voice_assistant_leds
           effect: "Timer Ring"
 
-
-
   # Script executed when the volume is increased/decreased from the dial
   - id: control_volume
     mode: restart
     parameters:
-      increase_volume: bool #True: Increase volume / False: Decrease volume.
+      increase_volume: bool  # True: Increase volume / False: Decrease volume.
     then:
       - delay: 16ms
       - if:
@@ -772,7 +769,7 @@ script:
   - id: control_hue
     mode: restart
     parameters:
-      increase_hue: bool #True: Increase volume / False: Decrease volume.
+      increase_hue: bool  # True: Increase volume / False: Decrease volume.
     then:
       - delay: 16ms
       - lambda: |
@@ -843,8 +840,9 @@ i2s_audio:
       number: GPIO9
       allow_other_uses: true
     i2s_mode: secondary
-  # i2s_output data pin is gpio10
+    # i2s_output data pin is gpio10
 
+  # yamllint disable rule:comments-indentation
   # This describes the second I2S interface between ESP32 and XMOS chip. Currently unused.
   # - id: i2s_output
   #   i2s_lrclk_pin:
@@ -858,6 +856,7 @@ i2s_audio:
   #     # allow_other_uses: true
   #   i2s_mode: primary #secondary
   # data line is GPIO15
+  # yamllint enable rule:comments-indentation
 
 microphone:
   - platform: i2s_audio
