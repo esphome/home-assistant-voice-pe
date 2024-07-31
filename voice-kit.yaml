@@ -495,7 +495,7 @@ sensor:
           condition:
             binary_sensor.is_off: center_button
           then:
-            - script.execute: 
+            - script.execute:
                 id: control_volume
                 increase_volume: true
             - if:
@@ -520,7 +520,7 @@ sensor:
           condition:
             binary_sensor.is_off: center_button
           then:
-            - script.execute: 
+            - script.execute:
                 id: control_volume
                 increase_volume: false
           else:
@@ -756,7 +756,7 @@ script:
             lambda: return increase_volume;
           then:
             - media_player.volume_up:
-          else: 
+          else:
             - media_player.volume_down:
       - delay: 16ms
       - lambda: id(dial_touched) = true;
@@ -807,7 +807,7 @@ script:
 
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
-    then: 
+    then:
       - while:
           condition:
             switch.is_on: timer_ringing
@@ -819,7 +819,7 @@ script:
                   .set_local_media_file(id(timer_finished_wave_file))
                   .perform();
             - delay: 1s
-      
+
 i2s_audio:
   - id: i2s_input
     i2s_lrclk_pin:
@@ -900,7 +900,7 @@ external_components:
 
   # TODO: Remove after ESPHome 2024.8.0 is released
   - source: github://pr#7165
-    components: [update, http_request]
+    components: [update, http_request, watchdog]
     refresh: 0s
 
 micro_wake_word:
