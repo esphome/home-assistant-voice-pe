@@ -1013,7 +1013,5 @@ button:
           id: update_http_request
           force_update: true
 
-  # End TODO
-
 debug:
   update_interval: 5s
