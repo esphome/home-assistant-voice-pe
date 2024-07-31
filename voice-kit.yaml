@@ -77,6 +77,17 @@ api:
 
 ota:
   - platform: esphome
+    id: ota_esphome
+  - platform: http_request
+    id: ota_http_request
+
+http_request:
+
+update:
+  - platform: http_request
+    name: None
+    id: update_http_request
+    source: https://esphome.github.io/voice-kit/manifest.json
 
 improv_serial:
 
