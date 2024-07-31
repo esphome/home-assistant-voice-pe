@@ -898,6 +898,11 @@ external_components:
     components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
+  # TODO: Remove after ESPHome 2024.8.0 is released
+  - source: github://pr#7165
+    components: [update, http_request]
+    refresh: 0s
+
 micro_wake_word:
   models:
     - model: okay_nabu
