@@ -28,7 +28,7 @@ jobs:
     uses: esphome/workflows/.github/workflows/build.yml@jesserockz-2024-326
     with:
       files: |
-        voice-kit.yml
+        voice-kit.yaml
       name: ESPHome Voice Kit
       esphome-version: 2024.7.3
       release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
