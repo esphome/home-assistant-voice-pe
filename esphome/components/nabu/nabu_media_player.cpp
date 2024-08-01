@@ -148,7 +148,7 @@ static void stats_task(void *arg) {
 static const char *const TAG = "nabu_media_player";
 
 void NabuMediaPlayer::setup() {
-  // xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
+  xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
@@ -212,7 +212,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
   i2s_driver_config_t config = {
       .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = 16000,
+      .sample_rate = 48000,
       .bits_per_sample = this_speaker->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,

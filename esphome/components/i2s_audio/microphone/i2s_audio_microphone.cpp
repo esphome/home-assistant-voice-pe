@@ -12,7 +12,7 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
+static const size_t SAMPLE_RATE_HZ = 48000;  // 16 kHz
 static const size_t RING_BUFFER_LENGTH = 64;      // 0.064 seconds
 static const size_t RING_BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * RING_BUFFER_LENGTH;
 static const size_t BUFFER_SIZE = 512;
@@ -83,7 +83,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
   i2s_driver_config_t config = {
       .mode = (i2s_mode_t) (this_microphone->parent_->get_i2s_mode() | I2S_MODE_RX),
-      .sample_rate = this_microphone->sample_rate_,
+      .sample_rate = SAMPLE_RATE_HZ, //this_microphone->sample_rate_,
       .bits_per_sample = this_microphone->bits_per_sample_,
       .channel_format = this_microphone->channel_,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -92,7 +92,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
       .dma_buf_len = 128,
       .use_apll = this_microphone->use_apll_,
       .tx_desc_auto_clear = false,
-      .fixed_mclk = 0,
+      .fixed_mclk = I2S_PIN_NO_CHANGE,
       .mclk_multiple = I2S_MCLK_MULTIPLE_256,
       .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT,
 #if SOC_I2S_SUPPORTS_TDM
@@ -185,11 +185,12 @@ void I2SAudioMicrophone::read_task_(void *params) {
       //   this_microphone->output_ring_buffer_->write(buffer, bytes_read);
       // } else if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_32BIT) {
 
-        size_t samples_read = bytes_read / sizeof(int32_t);
+        size_t samples_read = bytes_read / sizeof(int32_t) /3;
         samples.resize(samples_read);
         for (size_t i = 0; i < samples_read; i++) {
-          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 16;    // We are amplifying by a factor of 4 by only shifting 14 bits...
-          samples[i] = clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
+          samples[i] = reinterpret_cast<int32_t *>(buffer)[3*i] >> 16;  // only read every third sample
+          // samples[i] = temp;
+          // clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
         }
         size_t bytes_free = this_microphone->output_ring_buffer_->free();
         size_t bytes_to_write = samples_read * sizeof(int16_t);

@@ -67,8 +67,9 @@ void AudioResampler::start(media_player::StreamInfo &stream_info) {
     this->channel_factor_ = 2 / stream_info.channels;
     printf("Converting %d channels to 2 channels\n", stream_info.channels);
   }
-  constexpr float resample_rate = 16000.0f;
-  if (stream_info.sample_rate != 16000) {
+  constexpr float resample_rate = 48000.0f;
+  if (stream_info.sample_rate != 48000) {
+  // if (stream_info.sample_rate != 16000) {
     if (stream_info.sample_rate == 48000) {
       // Special case, we can do this a lot faster with esp-dsp code!
       const uint8_t decimation = 48000 / 16000;
@@ -89,7 +90,7 @@ void AudioResampler::start(media_player::StreamInfo &stream_info) {
 
       this->sample_ratio_ = resample_rate / static_cast<float>(stream_info.sample_rate);
 
-      printf("Resampling from %d Hz to 16000 Hz\n", stream_info.sample_rate);
+      printf("Resampling from %d Hz to 48000 Hz\n", stream_info.sample_rate);
 
       if (this->sample_ratio_ < 1.0) {
         this->lowpass_ratio_ -= (10.24 / 16);
