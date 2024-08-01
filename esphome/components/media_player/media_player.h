@@ -6,6 +6,16 @@
 namespace esphome {
 namespace media_player {
 
+struct StreamInfo {
+  bool operator==(const StreamInfo &rhs) const {
+    return (channels == rhs.channels) && (bits_per_sample == rhs.bits_per_sample) && (sample_rate == rhs.sample_rate);
+  }
+  bool operator!=(const StreamInfo &rhs) const { return !operator==(rhs); }
+  uint8_t channels = 1;
+  uint8_t bits_per_sample = 16;
+  uint32_t sample_rate = 16000;
+};
+
 enum MediaPlayerState : uint8_t {
   MEDIA_PLAYER_STATE_NONE = 0,
   MEDIA_PLAYER_STATE_IDLE = 1,

@@ -8,23 +8,11 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
 
-#include <esp_http_client.h>
-
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
 namespace esphome {
 namespace nabu {
-
-struct StreamInfo {
-  bool operator==(const StreamInfo &rhs) const {
-    return (channels == rhs.channels) && (bits_per_sample == rhs.bits_per_sample) && (sample_rate == rhs.sample_rate);
-  }
-  bool operator!=(const StreamInfo &rhs) const { return !operator==(rhs); }
-  uint8_t channels = 1;
-  uint8_t bits_per_sample = 16;
-  uint32_t sample_rate = 16000;
-};
 
 enum class EventType : uint8_t {
   STARTING = 0,
@@ -36,24 +24,14 @@ enum class EventType : uint8_t {
   WARNING = 255,
 };
 
-// enum class MediaFileType : uint8_t {
-//   NONE = 0,
-//   WAV,
-//   MP3,
-//   FLAC,
-// };
-
 struct TaskEvent {
   EventType type;
   esp_err_t err;
-  media_player::MediaFileType media_file_type;
-  StreamInfo stream_info;
 };
 
 enum class CommandEventType : uint8_t {
   START,
   STOP,
-  STOP_GRACEFULLY,
   DUCK,
   PAUSE_MEDIA,
   RESUME_MEDIA,
@@ -61,20 +39,15 @@ enum class CommandEventType : uint8_t {
   CLEAR_ANNOUNCEMENT,
 };
 
-enum class PipelineType : uint8_t {
-  MEDIA,
-  ANNOUNCEMENT,
-};
-
 struct CommandEvent {
   CommandEventType command;
   float ducking_ratio = 0.0;
-  media_player::MediaFileType media_file_type = media_player::MediaFileType::NONE;
-  StreamInfo stream_info;
 };
 
-class OutputStreamer {
+class AudioMixer {
  public:
+  AudioMixer();
+
   /// @brief Returns the number of bytes available to read from the ring buffer
   size_t available() { return this->output_ring_buffer_->available(); }
 
@@ -85,6 +58,21 @@ class OutputStreamer {
   BaseType_t read_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
     return xQueueReceive(this->event_queue_, event, ticks_to_wait);
   }
+
+  void start(const std::string &task_name, UBaseType_t priority = 1);
+
+  void stop() {
+    vTaskDelete(this->task_handle_);
+    this->task_handle_ = nullptr;
+
+    xQueueReset(this->event_queue_);
+    xQueueReset(this->command_queue_);
+  }
+
+  void reset_ring_buffers();
+
+  size_t media_free() { return this->media_ring_buffer_->free(); }
+  size_t announcement_free() { return this->announcement_ring_buffer_->free(); }
 
   /// @brief Reads from the output ring buffer
   /// @param buffer stores the read data
@@ -99,39 +87,37 @@ class OutputStreamer {
     return 0;
   }
 
-  virtual void reset_ring_buffers() { this->output_ring_buffer_->reset(); }
+  size_t write_media(uint8_t *buffer, size_t length);
+  size_t write_announcement(uint8_t *buffer, size_t length);
 
-  virtual void start(const std::string &task_name, UBaseType_t priority = 1) = 0;
-  virtual void stop();
+  BaseType_t read_media_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
+    return xQueueReceive(this->media_event_queue_, event, ticks_to_wait);
+  }
+  BaseType_t read_announcement_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
+    return xQueueReceive(this->announcement_event_queue_, event, ticks_to_wait);
+  }
+
+  RingBuffer *get_media_ring_buffer() { return this->media_ring_buffer_.get(); }
+  RingBuffer *get_announcement_ring_buffer() { return this->announcement_ring_buffer_.get(); }
 
  protected:
   TaskHandle_t task_handle_{nullptr};
+  StaticTask_t task_stack_;
+  StackType_t *stack_buffer_{nullptr};
+
   std::unique_ptr<RingBuffer> output_ring_buffer_;
   QueueHandle_t event_queue_;
   QueueHandle_t command_queue_;
+
+  static void mix_task_(void *params);
+
+  std::unique_ptr<RingBuffer> media_ring_buffer_;
+  std::unique_ptr<RingBuffer> announcement_ring_buffer_;
+
+  QueueHandle_t media_event_queue_;
+  QueueHandle_t announcement_event_queue_;
 };
-
-class HTTPStreamer : public OutputStreamer {
- public:
-  HTTPStreamer();
-
-  void start(const std::string &task_name, UBaseType_t priority = 1) override;
-  void start_http(const std::string &task_name, UBaseType_t priority = 1);
-  void start_file(const std::string &task_name, UBaseType_t priority = 1);
-  void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
-  void start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority = 1);
-
- protected:
-  static void read_task_(void *params);
-  static void file_read_task_(void *params);
-
-  media_player::MediaFileType establish_connection_(esp_http_client_handle_t *client);
-  void cleanup_connection_(esp_http_client_handle_t *client);
-
-  media_player::MediaFile *current_media_file_{};
-  std::string current_uri_{};
-};
-
 }  // namespace nabu
 }  // namespace esphome
+
 #endif

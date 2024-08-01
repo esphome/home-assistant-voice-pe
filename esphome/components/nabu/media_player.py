@@ -188,7 +188,8 @@ async def to_code(config):
     esp32.add_idf_component(
         name="esp-dsp",
         repo="https://github.com/kahrendt/esp-dsp",
-        ref="filename-fix",
+        ref="no-round-dot-product",
+        # ref="filename-fix",
         # repo="https://github.com/espressif/esp-dsp",
         # ref="v1.3.0",
     )

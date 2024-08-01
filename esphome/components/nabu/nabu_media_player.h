@@ -7,8 +7,8 @@
 #include "esphome/core/component.h"
 #include "esphome/core/ring_buffer.h"
 
-#include "streamer.h"
-#include "pipeline.h"
+#include "audio_mixer.h"
+#include "audio_pipeline.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -32,15 +32,6 @@ static const uint8_t DAC_MUTE_PAGE = 0x01;
 static const uint8_t DAC_MUTE_COMMAND = 0x40;
 static const uint8_t DAC_UNMUTE_COMMAND = 0x00;
 
-enum class PipelineState : uint8_t {
-  STARTING,
-  STARTED,
-  PLAYING,
-  PAUSED,
-  STOPPING,
-  STOPPED,
-};
-
 struct MediaCallCommand {
   optional<media_player::MediaPlayerCommand> command;
   optional<float> volume;
@@ -48,11 +39,6 @@ struct MediaCallCommand {
   optional<bool> new_url;
   optional<bool> new_file;
 };
-
-// struct MediaFile {
-//   const uint8_t *data;
-//   MediaFileType file_type;
-// };
 
 class NabuMediaPlayer : public Component,
                         public media_player::MediaPlayer,
@@ -95,17 +81,18 @@ class NabuMediaPlayer : public Component,
   optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
   QueueHandle_t media_control_command_queue_;
 
-  // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary. Writes to the pipeline
-  // command queues
+  // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary.
   void watch_media_commands_();
-  std::unique_ptr<Pipeline> media_pipeline_;
-  std::unique_ptr<Pipeline> announcement_pipeline_;
-  std::unique_ptr<CombineStreamer> combine_streamer_;
 
-  // Monitors the pipelines' and mixer's event queues. Only function that modifies pipeline_state_ variables
+  std::unique_ptr<AudioPipeline> media_pipeline_;
+  std::unique_ptr<AudioPipeline> announcement_pipeline_;
+  std::unique_ptr<AudioMixer> audio_mixer_;
+
+  // Monitors the mixer task
   void watch_();
-  PipelineState media_pipeline_state_{PipelineState::STOPPED};
-  PipelineState announcement_pipeline_state_{PipelineState::STOPPED};
+
+  AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
+  AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};
 
   void watch_speaker_();
   static void speaker_task(void *params);
