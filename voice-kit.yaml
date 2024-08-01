@@ -941,6 +941,11 @@ external_components:
     components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
+  # TODO: Remove after ESPHome 2024.8.0 is released
+  - source: github://pr#7165
+    components: [update, http_request, watchdog]
+    refresh: 0s
+
 micro_wake_word:
   models:
     - model: okay_nabu
@@ -1046,6 +1051,21 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
+
+  # TODO: Remove before launch, added for testing/development
+
+  - platform: template
+    name: Check for update
+    entity_category: config
+    on_press:
+      - component.update: update_http_request
+  - platform: template
+    name: Perform Update
+    entity_category: config
+    on_press:
+      - update.perform:
+          id: update_http_request
+          force_update: true
 
 debug:
   update_interval: 5s
