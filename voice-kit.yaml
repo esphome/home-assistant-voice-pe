@@ -32,7 +32,7 @@ esphome:
           condition:
             binary_sensor.is_on: hardware_mute_switch
           then:
-            - switch.template.publish: 
+            - switch.template.publish:
                 id: master_mute_switch
                 state: ON
       # Run the script to refresh the LED status
@@ -139,19 +139,19 @@ switch:
     name: Mute
     entity_category: config
     turn_on_action:
-      - if: 
+      - if:
           condition:
             binary_sensor.is_off: hardware_mute_switch
           then:
-            - switch.template.publish: 
+            - switch.template.publish:
                 id: master_mute_switch
                 state: ON
     turn_off_action:
-      - if: 
+      - if:
           condition:
             binary_sensor.is_off: hardware_mute_switch
           then:
-            - switch.template.publish: 
+            - switch.template.publish:
                 id: master_mute_switch
                 state: OFF
     on_turn_on:
@@ -273,11 +273,11 @@ binary_sensor:
     internal: true
     pin: GPIO3
     on_press:
-      - switch.template.publish: 
+      - switch.template.publish:
           id: master_mute_switch
           state: ON
     on_release:
-      - switch.template.publish: 
+      - switch.template.publish:
           id: master_mute_switch
           state: OFF
 
