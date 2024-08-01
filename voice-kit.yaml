@@ -27,6 +27,14 @@ esphome:
   on_boot:
     priority: 600
     then:
+      # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
+      - if:
+          condition:
+            binary_sensor.is_on: hardware_mute_switch
+          then:
+            - switch.template.publish:
+                id: master_mute_switch
+                state: ON
       # Run the script to refresh the LED status
       - script.execute: control_leds
       # If after 30 second, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
@@ -125,6 +133,33 @@ globals:
 
 switch:
   - platform: template
+    id: master_mute_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: "mdi:microphone-off"
+    name: Mute
+    entity_category: config
+    turn_on_action:
+      - if:
+          condition:
+            binary_sensor.is_off: hardware_mute_switch
+          then:
+            - switch.template.publish:
+                id: master_mute_switch
+                state: ON
+    turn_off_action:
+      - if:
+          condition:
+            binary_sensor.is_off: hardware_mute_switch
+          then:
+            - switch.template.publish:
+                id: master_mute_switch
+                state: OFF
+    on_turn_on:
+      - script.execute: control_leds
+    on_turn_off:
+      - script.execute: control_leds
+
+  - platform: template
     id: timer_ringing
     optimistic: true
     internal: true
@@ -152,12 +187,12 @@ binary_sensor:
             - switch.turn_off: timer_ringing
       - if:
           condition:
-            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_PLAYING;
+            media_player.is_playing:
           then:
             - media_player.pause:
       - if:
           condition:
-            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_PAUSED;
+            media_player.is_paused:
           then:
             - media_player.play:
       - script.execute: control_leds
@@ -232,15 +267,19 @@ binary_sensor:
               brightness: 100%
               id: voice_assistant_leds
               effect: "Rainbow"
+
   - platform: gpio
-    id: mute_switch
-    name: Muted
+    id: hardware_mute_switch
+    internal: true
     pin: GPIO3
-    icon: "mdi:microphone-off"
     on_press:
-      - script.execute: control_leds
+      - switch.template.publish:
+          id: master_mute_switch
+          state: ON
     on_release:
-      - script.execute: control_leds
+      - switch.template.publish:
+          id: master_mute_switch
+          state: OFF
 
 light:
   - platform: esp32_rmt_led_strip
@@ -252,6 +291,7 @@ light:
     chipset: WS2812
     default_transition_length: 0ms
     power_supply: led_power
+
   - platform: partition
     id: voice_assistant_leds
     internal: true
@@ -465,6 +505,7 @@ light:
               }
             }
             index = (index + 1) % 12;
+
   - platform: partition
     id: led_ring
     name: LED Ring
@@ -570,7 +611,7 @@ script:
                                         then:
                                           - if:
                                               condition:
-                                                binary_sensor.is_off: mute_switch
+                                                switch.is_off: master_mute_switch
                                               then:
                                                 - lambda: |
                                                     switch(id(voice_assistant_phase)) {
@@ -829,6 +870,7 @@ i2s_audio:
       number: GPIO9
       allow_other_uses: true
     i2s_mode: secondary
+
   - id: i2s_output
     i2s_lrclk_pin:
       number: GPIO7
@@ -878,18 +920,19 @@ media_player:
     i2s_audio_id: i2s_output
     files:
       - id: timer_finished_wave_file
-        file: sounds/timer_finished.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
       - id: tick_wave_file
-        file: sounds/tick.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/tick.wav
       - id: party_wave_file
-        file: sounds/party.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/party.wav
       - id: rewind_wave_file
-        file: sounds/rewind.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/rewind.wav
 
 external_components:
   - source: github://jesserockz/esphome-components
     components: [file, udp_audio]
     refresh: 0s
+
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
@@ -904,23 +947,29 @@ micro_wake_word:
   on_wake_word_detected:
     - if:
         condition:
-          switch.is_on: timer_ringing
+          switch.is_off: master_mute_switch
         then:
-          - switch.turn_off: timer_ringing
-          - micro_wake_word.start:
-        else:
           - if:
               condition:
-                lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                switch.is_on: timer_ringing
               then:
-                lambda: |-
-                  id(nabu_media_player)
-                    ->make_call()
-                    .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                    .set_announcement(true)
-                    .perform();
-          - voice_assistant.start:
-              wake_word: !lambda return wake_word;
+                - switch.turn_off: timer_ringing
+                - micro_wake_word.start:
+              else:
+                - if:
+                    condition:
+                      lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                    then:
+                      lambda: |-
+                        id(nabu_media_player)
+                          ->make_call()
+                          .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+                          .set_announcement(true)
+                          .perform();
+                - voice_assistant.start:
+                    wake_word: !lambda return wake_word;
+        else:
+          - micro_wake_word.start:
 
 voice_assistant:
   id: va
@@ -980,8 +1029,12 @@ voice_assistant:
 button:
   - platform: restart
     name: "Restart"
+    entity_category: diagnostic
+
   - platform: factory_reset
     name: "Factory Reset"
+    entity_category: diagnostic
+
   - platform: template
     name: "timer beep"
     entity_category: diagnostic
