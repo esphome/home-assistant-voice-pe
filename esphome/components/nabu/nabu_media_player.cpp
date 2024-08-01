@@ -15,23 +15,10 @@ namespace nabu {
 
 // TODO:
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - The various tasks are not uniform in their running/idle states meaning. Be consistent!
-//  - Determine the best place to yield in each task... it's inconsistent
-//    - Be careful of different task priorities... for example, the speaker task had issues yielding unless the delay
-//      was in the command queue receiving part
-//      - This showed up when I removed the "IDLE" and "RUNNING" task messages, caused WDT
-//    - Probably best to delay at the reading ring buffer stages... but this could also prevent necessary yielding
-//      while streaming
-//  - Ensure buffers are fuller before starting to stream media (especially with the resampler active) to avoid
-//    initial stuttering
-//  - Using lots of internal memory... the decoder streamer class can be optimized to avoid loading
-//    unnecessary parts (look at the mp3 decoder in particular)
 //  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
-//  - Verify ring buffers are reset in a safe way (only tasks that read should reset it?)
-//  - Eliminate code redundancy for start of media playback (url and file based)
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
@@ -161,7 +148,7 @@ static void stats_task(void *arg) {
 static const char *const TAG = "nabu_media_player";
 
 void NabuMediaPlayer::setup() {
-  // xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
+  xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
@@ -170,8 +157,8 @@ void NabuMediaPlayer::setup() {
   this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
 
-  this->combine_streamer_ = make_unique<CombineStreamer>();
-  this->combine_streamer_->start("mixer");
+  this->audio_mixer_ = make_unique<AudioMixer>();
+  this->audio_mixer_->start("mixer", 10);
 
   if (!this->parent_->try_lock()) {
     this->mark_failed();
@@ -181,6 +168,16 @@ void NabuMediaPlayer::setup() {
   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
 
   this->get_dac_volume_();
+
+  // if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, 0x01)) {
+  //   ESP_LOGE(TAG, "DAC failed to switch register page");
+  //   return;
+  // }
+
+  // if (!this->write_byte(0x7B, 0b00000001)) {  // 40 ms reference start up time on page 1, didn't help
+  //                                             // if (!this->write_byte(0x40, 0b00010000)) { // auto mute...
+  //   return;
+  // }
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }
@@ -279,7 +276,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
   xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
   while (true) {
-    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (10 / portTICK_PERIOD_MS)) == pdTRUE) {
+    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (5 / portTICK_PERIOD_MS)) == pdTRUE) {
       if (command_event.command == CommandEventType::STOP) {
         // Stop signal from main thread
         break;
@@ -295,8 +292,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
     size_t bytes_read = 0;
 
-    bytes_read =
-        this_speaker->combine_streamer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
+    bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
 
     if (bytes_read > 0) {
       size_t bytes_written;
@@ -348,50 +344,23 @@ void NabuMediaPlayer::watch_media_commands_() {
       if (media_command.announce.has_value() && media_command.announce.value()) {
         if (this->announcement_pipeline_ == nullptr) {
           this->announcement_pipeline_ =
-              make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
+              make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
-            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
-          command_event.command = CommandEventType::STOP;
-          this->announcement_pipeline_->send_command(&command_event);
-        }
-
-        this->cancel_retry("ann_start");
-        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
-          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
-            return RetryResult::RETRY;
-          }
-
-          this->announcement_pipeline_->start(this->announcement_url_.value(), "ann_pipe");
-          return RetryResult::DONE;
-        });
+        this->announcement_pipeline_->start(this->announcement_url_.value(), "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
-          this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
+          this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
-            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
-          command_event.command = CommandEventType::STOP;
-          this->media_pipeline_->send_command(&command_event);
+        this->media_pipeline_->start(this->media_url_.value(), "media", 2);
+
+        if (this->is_paused_) {
+          CommandEvent command_event;
+          command_event.command = CommandEventType::RESUME_MEDIA;
+          this->audio_mixer_->send_command(&command_event);
         }
-
-        this->cancel_retry("media_start");
-        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
-          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
-            return RetryResult::RETRY;
-          }
-
-          this->media_pipeline_->start(this->media_url_.value(), "med_pipe");
-          if (this->is_paused_) {
-            CommandEvent command_event;
-            command_event.command = CommandEventType::RESUME_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
-          }
-          this->is_paused_ = false;
-          return RetryResult::DONE;
-        });
+        this->is_paused_ = false;
       }
     }
 
@@ -399,50 +368,23 @@ void NabuMediaPlayer::watch_media_commands_() {
       if (media_command.announce.has_value() && media_command.announce.value()) {
         if (this->announcement_pipeline_ == nullptr) {
           this->announcement_pipeline_ =
-              make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::ANNOUNCEMENT);
+              make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        if ((this->announcement_pipeline_state_ != PipelineState::STOPPED) &&
-            (this->announcement_pipeline_state_ != PipelineState::STOPPING)) {
-          command_event.command = CommandEventType::STOP;
-          this->announcement_pipeline_->send_command(&command_event);
-        }
-
-        this->cancel_retry("ann_start");
-        this->set_retry("ann_start", 20, 3, [this](uint8_t attempts_left) -> RetryResult {
-          if (this->announcement_pipeline_state_ != PipelineState::STOPPED) {
-            return RetryResult::RETRY;
-          }
-
-          this->announcement_pipeline_->start(this->announcement_file_.value(), "ann_pipe");
-          return RetryResult::DONE;
-        });
+        this->announcement_pipeline_->start(this->announcement_file_.value(), "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
-          this->media_pipeline_ = make_unique<Pipeline>(this->combine_streamer_.get(), PipelineType::MEDIA);
+          this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        if ((this->media_pipeline_state_ != PipelineState::STOPPED) &&
-            (this->media_pipeline_state_ != PipelineState::STOPPING)) {
-          command_event.command = CommandEventType::STOP;
-          this->media_pipeline_->send_command(&command_event);
+        this->media_pipeline_->start(this->media_file_.value(), "media", 2);
+
+        if (this->is_paused_) {
+          CommandEvent command_event;
+          command_event.command = CommandEventType::RESUME_MEDIA;
+          this->audio_mixer_->send_command(&command_event);
         }
-
-        this->cancel_retry("media_start");
-        this->set_retry("media_start", 60, 3, [this](uint8_t attempts_left) -> RetryResult {
-          if (this->media_pipeline_state_ != PipelineState::STOPPED) {
-            return RetryResult::RETRY;
-          }
-
-          this->media_pipeline_->start(this->media_file_.value(), "med_pipe");
-          if (this->is_paused_) {
-            CommandEvent command_event;
-            command_event.command = CommandEventType::RESUME_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
-          }
-          this->is_paused_ = false;
-          return RetryResult::DONE;
-        });
+        this->is_paused_ = false;
       }
     }
 
@@ -458,34 +400,34 @@ void NabuMediaPlayer::watch_media_commands_() {
         case media_player::MEDIA_PLAYER_COMMAND_PLAY:
           if (this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
+            this->audio_mixer_->send_command(&command_event);
           }
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if (this->media_pipeline_state_ == PipelineState::PLAYING) {
+          if (this->media_pipeline_state_ == AudioPipelineState::PLAYING) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
+            this->audio_mixer_->send_command(&command_event);
           }
           this->is_paused_ = true;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           command_event.command = CommandEventType::STOP;
           if (media_command.announce.has_value() && media_command.announce.value()) {
-            this->announcement_pipeline_->send_command(&command_event, (10 / portTICK_PERIOD_MS));
+            this->announcement_pipeline_->stop();
           } else {
-            this->media_pipeline_->send_command(&command_event);
+            this->media_pipeline_->stop();
             this->is_paused_ = false;
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
           if (this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
+            this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = false;
           } else {
             command_event.command = CommandEventType::PAUSE_MEDIA;
-            this->combine_streamer_->send_command(&command_event);
+            this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = true;
           }
           break;
@@ -550,82 +492,10 @@ void NabuMediaPlayer::watch_speaker_() {
   }
 }
 
-// TODO: Reduce code redundancy
 void NabuMediaPlayer::watch_() {
   TaskEvent event;
-
-  if (this->announcement_pipeline_ != nullptr) {
-    while (this->announcement_pipeline_->read_event(&event)) {
-      switch (event.type) {
-        case EventType::STARTING:
-          this->announcement_pipeline_state_ = PipelineState::STARTING;
-          ESP_LOGD(TAG, "Starting Announcement Playback");
-          break;
-        case EventType::STARTED:
-          ESP_LOGD(TAG, "Started Announcement Playback");
-          this->announcement_pipeline_state_ = PipelineState::STARTED;
-          break;
-        case EventType::IDLE:
-          this->announcement_pipeline_state_ = PipelineState::PLAYING;
-          break;
-        case EventType::RUNNING:
-          this->announcement_pipeline_state_ = PipelineState::PLAYING;
-          this->status_clear_warning();
-          break;
-        case EventType::STOPPING:
-          ESP_LOGD(TAG, "Stopping Announcement Playback");
-          this->announcement_pipeline_state_ = PipelineState::STOPPING;
-          break;
-        case EventType::STOPPED: {
-          this->announcement_pipeline_->stop();
-          ESP_LOGD(TAG, "Stopped Announcement Playback");
-          this->announcement_pipeline_state_ = PipelineState::STOPPED;
-          break;
-        }
-        case EventType::WARNING:
-          ESP_LOGW(TAG, "Error reading announcement: %s", esp_err_to_name(event.err));
-          this->status_set_warning(esp_err_to_name(event.err));
-          break;
-      }
-    }
-  }
-
-  if (this->media_pipeline_ != nullptr) {
-    while (this->media_pipeline_->read_event(&event)) {
-      switch (event.type) {
-        case EventType::STARTING:
-          ESP_LOGD(TAG, "Starting Media Playback");
-          this->media_pipeline_state_ = PipelineState::STARTING;
-          break;
-        case EventType::STARTED:
-          ESP_LOGD(TAG, "Started Media Playback");
-          this->media_pipeline_state_ = PipelineState::STARTED;
-          break;
-        case EventType::IDLE:
-          this->media_pipeline_state_ = PipelineState::PLAYING;
-          break;
-        case EventType::RUNNING:
-          this->media_pipeline_state_ = PipelineState::PLAYING;
-          this->status_clear_warning();
-          break;
-        case EventType::STOPPING:
-          this->media_pipeline_state_ = PipelineState::STOPPING;
-          ESP_LOGD(TAG, "Stopping Media Playback");
-          break;
-        case EventType::STOPPED:
-          this->media_pipeline_->stop();
-          this->media_pipeline_state_ = PipelineState::STOPPED;
-          ESP_LOGD(TAG, "Stopped Media Playback");
-          break;
-        case EventType::WARNING:
-          ESP_LOGW(TAG, "Error reading media: %s", esp_err_to_name(event.err));
-          this->status_set_warning(esp_err_to_name(event.err));
-          break;
-      }
-    }
-  }
-  if (this->combine_streamer_ != nullptr) {
-    while (this->combine_streamer_->read_event(&event))
+  if (this->audio_mixer_ != nullptr) {
+    while (this->audio_mixer_->read_event(&event))
       ;
   }
 }
@@ -638,31 +508,38 @@ void NabuMediaPlayer::loop() {
   // Determine state of the media player
   media_player::MediaPlayerState old_state = this->state;
 
-  if ((this->announcement_pipeline_state_ != PipelineState::STOPPING) &&
-      (this->announcement_pipeline_state_ != PipelineState::STOPPED)) {
+  if (this->announcement_pipeline_ != nullptr)
+    this->announcement_pipeline_state_ = this->announcement_pipeline_->get_state();
+
+  if (this->media_pipeline_ != nullptr)
+    this->media_pipeline_state_ = this->media_pipeline_->get_state();
+
+  if ((this->announcement_pipeline_state_ != AudioPipelineState::STOPPING) &&
+      (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED)) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
-      this->unmute_();
+      // this->unmute_();
       this->is_idle_muted_ = false;
+      ESP_LOGD(TAG, "Unmuting as output is not idle");
     }
   } else {
     if (this->is_paused_) {
       this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
       if (!this->is_idle_muted_) {
-        this->mute_();
+        // this->mute_();
         this->is_idle_muted_ = true;
       }
-    } else if ((this->media_pipeline_state_ == PipelineState::STOPPING) ||
-               (this->media_pipeline_state_ == PipelineState::STOPPED)) {
+    } else if ((this->media_pipeline_state_ == AudioPipelineState::STOPPING) ||
+               (this->media_pipeline_state_ == AudioPipelineState::STOPPED)) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
       if (!this->is_idle_muted_) {
-        this->mute_();
+        // this->mute_();
         this->is_idle_muted_ = true;
       }
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
       if (this->is_idle_muted_ && !this->is_muted_) {
-        this->unmute_();
+        // this->unmute_();
         this->is_idle_muted_ = false;
       }
     }
@@ -674,11 +551,11 @@ void NabuMediaPlayer::loop() {
 }
 
 void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio) {
-  if (this->combine_streamer_ != nullptr) {
+  if (this->audio_mixer_ != nullptr) {
     CommandEvent command_event;
     command_event.command = CommandEventType::DUCK;
     command_event.ducking_ratio = ducking_ratio;
-    this->combine_streamer_->send_command(&command_event);
+    this->audio_mixer_->send_command(&command_event);
   }
 }
 
@@ -717,14 +594,16 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
 
   if (call.get_volume().has_value()) {
     media_command.volume = call.get_volume().value();
-    xQueueSend(this->media_control_command_queue_, &media_command, 0);    // Wait 0 ticks for queue to be free, volume sets aren't that important!
+    // Wait 0 ticks for queue to be free, volume sets aren't that important!
+    xQueueSend(this->media_control_command_queue_, &media_command, 0);
     return;
   }
 
   if (call.get_command().has_value()) {
     media_command.command = call.get_command().value();
     TickType_t ticks_to_wait = portMAX_DELAY;
-    if ((call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP) || (call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN)) {
+    if ((call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP) ||
+        (call.get_command().value() == media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN)) {
       ticks_to_wait = 0;  // Wait 0 ticks for queue to be free, volume sets aren't that important!
     }
     xQueueSend(this->media_control_command_queue_, &media_command, ticks_to_wait);
