@@ -920,13 +920,13 @@ media_player:
     i2s_audio_id: i2s_output
     files:
       - id: timer_finished_wave_file
-        file: sounds/timer_finished.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
       - id: tick_wave_file
-        file: sounds/tick.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/tick.wav
       - id: party_wave_file
-        file: sounds/party.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/party.wav
       - id: rewind_wave_file
-        file: sounds/rewind.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/rewind.wav
 
 external_components:
   - source: github://jesserockz/esphome-components
