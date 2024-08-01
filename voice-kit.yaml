@@ -937,7 +937,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: revert-28-kahrendt-20240801-simplify-media-player
+      ref: dev
     components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
