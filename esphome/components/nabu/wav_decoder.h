@@ -54,7 +54,7 @@ enum WAVDecoderResult {
 class WAVDecoder {
 
 public:
-  WAVDecoder(uint8_t **buffer) : buffer_(buffer){};
+  WAVDecoder(uint8_t *buffer) : buffer_(buffer){};
   ~WAVDecoder(){};
 
   WAVDecoderState state() { return this->state_; }
@@ -86,7 +86,7 @@ public:
   }
 
 protected:
-  uint8_t **buffer_;
+  uint8_t *buffer_;
   WAVDecoderState state_ = WAV_DECODER_BEFORE_RIFF;
   std::size_t bytes_needed_ = 8; // chunk name + size
   std::size_t bytes_to_skip_ = 0;

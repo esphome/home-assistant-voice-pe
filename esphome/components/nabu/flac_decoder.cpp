@@ -6,16 +6,16 @@
 
 #include "flac_decoder.h"
 
-#include "esp_dsp.h"
-
 namespace flac {
 
-FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
-  this->buffer_index_ = 0;
-  this->bytes_left_ = buffer_length;
-
+FLACDecoderResult FLACDecoder::read_header() {
   if (this->out_of_data_) {
     return FLAC_DECODER_ERROR_OUT_OF_DATA;
+  }
+
+  if (this->bytes_left_ < this->min_buffer_size_) {
+    // Refill the buffer before reading the header
+    this->fill_buffer();
   }
 
   // File must start with 'fLaC'
@@ -70,14 +70,12 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
   return FLAC_DECODER_SUCCESS;
 }  // read_header
 
-FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *output_buffer, uint32_t *num_samples) {
-  this->buffer_index_ = 0;
-  this->bytes_left_ = buffer_length;
+FLACDecoderResult FLACDecoder::decode_frame(int16_t *output_buffer, uint32_t *num_samples) {
   *num_samples = 0;
 
   if (!this->block_samples_) {
     // freed in free_buffers()
-    esphome::ExternalRAMAllocator<int16_t> allocator(esphome::ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+    esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
     this->block_samples_ = allocator.allocate(this->max_block_size_ * this->num_channels_);
   }
 
@@ -163,7 +161,7 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
 void FLACDecoder::free_buffers() {
   if (this->block_samples_) {
     // delete this->block_samples_;
-    esphome::ExternalRAMAllocator<int16_t> allocator(esphome::ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+    esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
     allocator.deallocate(this->block_samples_, this->max_block_size_ * this->num_channels_);
     this->block_samples_ = nullptr;
   }
@@ -171,6 +169,37 @@ void FLACDecoder::free_buffers() {
   this->block_result_.clear();
   this->block_result_.shrink_to_fit();
 }  // free_buffers
+
+std::size_t FLACDecoder::fill_buffer() {
+  if (this->bytes_left_ > 0) {
+    memmove(this->buffer_, this->buffer_ + this->buffer_index_, this->bytes_left_);
+  }
+
+  uint8_t *new_buffer_data = this->buffer_ + this->bytes_left_;
+
+  // TODO: This is hacky... we don't want to keep delaying every time fill_buffer is called if the file is done
+  // otherwise the decoder task will take a long time to end despite the media being finished
+  // if ((this->input_ring_buffer_->available() == 0) && (this->unsuccessful_read_count_ < 10)) {
+  // vTaskDelay(10 / portTICK_PERIOD_MS);
+  // }
+
+  std::size_t bytes_read = 0;
+  if (this->input_ring_buffer_->available() > 0) {
+    bytes_read = this->input_ring_buffer_->read((void *) new_buffer_data, this->buffer_size_ - this->bytes_left_,
+                                                0 / portTICK_PERIOD_MS);
+  }
+
+  // if (bytes_read > 0) {
+  //   this->unsuccessful_read_count_ = 0;
+  // } else if (this->unsuccessful_read_count_ < 10) {
+  //   ++this->unsuccessful_read_count_;
+  // }
+
+  this->buffer_index_ = 0;
+  this->bytes_left_ += bytes_read;
+
+  return bytes_read;
+}  // fill_buffer
 
 FLACDecoderResult FLACDecoder::decode_subframes(uint32_t block_size, uint32_t sample_depth,
                                                 uint32_t channel_assignment) {
@@ -303,12 +332,10 @@ FLACDecoderResult FLACDecoder::decode_lpc_subframe(uint32_t block_size, std::siz
   uint32_t precision = this->read_uint(4) + 1;
   int32_t shift = this->read_sint(5);
 
-  std::vector<int16_t> coefs;
-  coefs.resize(lpc_order + 1);
+  std::vector<int32_t> coefs;
   for (std::size_t i = 0; i < lpc_order; i++) {
-    coefs[lpc_order - i - 1] = this->read_sint(precision);
+    coefs.push_back(this->read_sint(precision));
   }
-  coefs[lpc_order] = 1 << shift;
 
   result = decode_residuals(block_size);
   if (result != FLAC_DECODER_SUCCESS) {
@@ -361,23 +388,21 @@ FLACDecoderResult FLACDecoder::decode_residuals(uint32_t block_size) {
   return FLAC_DECODER_SUCCESS;
 }  // decode_residuals
 
-void FLACDecoder::restore_linear_prediction(const std::vector<int16_t> &coefs, int32_t shift) {
-  // The esp-dsp dot product code has a round factor built-in that can cause small differences (at most 1) in the
-  // decoding compared to the original implementation
-  for (std::size_t i = 0; i < this->block_result_.size() - coefs.size() + 1; i++) {
-    dsps_dotprod_s16_ae32(&this->block_result_.data()[i], coefs.data(),
-                          &this->block_result_.data()[i + coefs.size() - 1], coefs.size(), 15 - shift);
+void FLACDecoder::restore_linear_prediction(const std::vector<int32_t> &coefs, int32_t shift) {
+  for (std::size_t i = coefs.size(); i < this->block_result_.size(); i++) {
+    int32_t sum = 0;
+    for (std::size_t j = 0; j < coefs.size(); j++) {
+      sum += (this->block_result_[i - 1 - j] * coefs[j]);
+    }
+    this->block_result_[i] += (sum >> shift);
   }
-  // for (std::size_t i = coefs.size(); i < this->block_result_.size(); i++) {
-  //   int32_t sum = 0;
-  //   for (std::size_t j = 0; j < coefs.size(); j++) {
-  //     sum += (this->block_result_[i - 1 - j] * coefs[j]);
-  //   }
-  //   this->block_result_[i] += (sum >> shift);
-  // }
 }  // restore_linear_prediction
 
 uint32_t FLACDecoder::read_uint(std::size_t num_bits) {
+  if (this->bytes_left_ < this->min_buffer_size_) {
+    this->fill_buffer();
+  }
+
   if (this->bytes_left_ == 0) {
     this->out_of_data_ = true;
     return 0;

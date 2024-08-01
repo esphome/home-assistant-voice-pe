@@ -19,10 +19,12 @@ namespace flac {
 const static uint32_t FLAC_MAGIC_NUMBER = 0x664C6143;
 
 const static uint32_t FLAC_UINT_MASK[] = {
-    0x00000000, 0x00000001, 0x00000003, 0x00000007, 0x0000000f, 0x0000001f, 0x0000003f, 0x0000007f, 0x000000ff,
-    0x000001ff, 0x000003ff, 0x000007ff, 0x00000fff, 0x00001fff, 0x00003fff, 0x00007fff, 0x0000ffff, 0x0001ffff,
-    0x0003ffff, 0x0007ffff, 0x000fffff, 0x001fffff, 0x003fffff, 0x007fffff, 0x00ffffff, 0x01ffffff, 0x03ffffff,
-    0x07ffffff, 0x0fffffff, 0x1fffffff, 0x3fffffff, 0x7fffffff, 0xffffffff};
+    0x00000000, 0x00000001, 0x00000003, 0x00000007, 0x0000000f, 0x0000001f,
+    0x0000003f, 0x0000007f, 0x000000ff, 0x000001ff, 0x000003ff, 0x000007ff,
+    0x00000fff, 0x00001fff, 0x00003fff, 0x00007fff, 0x0000ffff, 0x0001ffff,
+    0x0003ffff, 0x0007ffff, 0x000fffff, 0x001fffff, 0x003fffff, 0x007fffff,
+    0x00ffffff, 0x01ffffff, 0x03ffffff, 0x07ffffff, 0x0fffffff, 0x1fffffff,
+    0x3fffffff, 0x7fffffff, 0xffffffff};
 
 enum FLACDecoderResult {
   FLAC_DECODER_SUCCESS = 0,
@@ -40,31 +42,39 @@ enum FLACDecoderResult {
 };
 
 // Coefficients for fixed linear prediction
-const static std::vector<int16_t> FLAC_FIXED_COEFFICIENTS[] = {
-    {1}, {1, 1}, {-1, 2, 1}, {1, -3, 3, 1}, {-1, 4, -6, 4, 1}};
+const static std::vector<int32_t> FLAC_FIXED_COEFFICIENTS[] = {{},
+                                                               {
+                                                                   1,
+                                                               },
+                                                               {2, -1},
+                                                               {3, -3, 1},
+                                                               {4, -6, 4, -1}};
 
 /* Basic FLAC decoder ported from:
  * https://www.nayuki.io/res/simple-flac-implementation/simple-decode-flac-to-wav.py
  */
 class FLACDecoder {
- public:
+
+public:
   /* buffer - FLAC data
    * buffer_size - size of the data buffer
    * min_buffer_size - min bytes in buffer before fill_buffer is called
    */
-  FLACDecoder(uint8_t *buffer)
-      : buffer_(buffer) {}
+  FLACDecoder(uint8_t *buffer, const std::size_t buffer_size, const std::size_t min_buffer_size,
+              esphome::RingBuffer *input_ring_buffer)
+      : buffer_(buffer), buffer_size_(buffer_size),
+        min_buffer_size_(min_buffer_size), input_ring_buffer_(input_ring_buffer) {}
 
   ~FLACDecoder() { this->free_buffers(); }
 
   /* Reads FLAC header from buffer.
    * Must be called before decode_frame. */
-  FLACDecoderResult read_header(size_t buffer_length);
+  FLACDecoderResult read_header();
 
   /* Decodes a single frame of audio.
    * Copies num_samples into output_buffer.
    * Use get_output_buffer_size() to allocate output_buffer. */
-  FLACDecoderResult decode_frame(size_t buffer_length, int16_t *output_buffer, uint32_t *num_samples);
+  FLACDecoderResult decode_frame(int16_t *output_buffer, uint32_t *num_samples);
 
   /* Frees internal memory. */
   void free_buffers();
@@ -82,33 +92,43 @@ class FLACDecoder {
   uint32_t get_num_samples() { return this->num_samples_; }
 
   /* Maximum number of output samples per frame (after read_header()) */
-  uint32_t get_output_buffer_size() { return this->max_block_size_ * this->num_channels_; }
+  uint32_t get_output_buffer_size() {
+    return this->max_block_size_ * this->num_channels_;
+  }
 
   std::size_t get_bytes_index() { return this->buffer_index_; }
 
-  /* Number of unread bytes in the input buffer. */
-  std::size_t get_bytes_left() { return this->bytes_left_; }
 
- protected:
+protected:
+  /* Fills the input buffer, moving unused chunk to front. */
+  std::size_t fill_buffer();
+
   /* Decodes one or more subframes by type. */
-  FLACDecoderResult decode_subframes(uint32_t block_size, uint32_t sample_depth, uint32_t channel_assignment);
+  FLACDecoderResult decode_subframes(uint32_t block_size, uint32_t sample_depth,
+                                     uint32_t channel_assignment);
 
   /* Decodes a subframe by type. */
-  FLACDecoderResult decode_subframe(uint32_t block_size, uint32_t sample_depth, std::size_t block_samples_offset);
+  FLACDecoderResult decode_subframe(uint32_t block_size, uint32_t sample_depth,
+                                    std::size_t block_samples_offset);
 
   /* Decodes a subframe with fixed coefficients. */
-  FLACDecoderResult decode_fixed_subframe(uint32_t block_size, std::size_t block_samples_offset, uint32_t pre_order,
+  FLACDecoderResult decode_fixed_subframe(uint32_t block_size,
+                                          std::size_t block_samples_offset,
+                                          uint32_t pre_order,
                                           uint32_t sample_depth);
 
   /* Decodes a subframe with dynamic coefficients. */
-  FLACDecoderResult decode_lpc_subframe(uint32_t block_size, std::size_t block_samples_offset, uint32_t lpc_order,
+  FLACDecoderResult decode_lpc_subframe(uint32_t block_size,
+                                        std::size_t block_samples_offset,
+                                        uint32_t lpc_order,
                                         uint32_t sample_depth);
 
   /* Decodes prediction residuals. */
   FLACDecoderResult decode_residuals(uint32_t block_size);
 
   /* Completes predicted samples. */
-  void restore_linear_prediction(const std::vector<int16_t> &coefs, int32_t shift);
+  void restore_linear_prediction(const std::vector<int32_t> &coefs,
+                                 int32_t shift);
 
   /* Reads an unsigned integer of arbitrary bit size. */
   uint32_t read_uint(std::size_t num_bits);
@@ -119,12 +139,22 @@ class FLACDecoder {
   /* Reads a rice-encoded signed integer. */
   int64_t read_rice_sint(uint8_t param);
 
+  /* Number of unread bytes in the input buffer. */
+  std::size_t get_bytes_left() { return this->bytes_left_; }
+
+
   /* Forces input buffer to be byte-aligned. */
   void align_to_byte();
 
- private:
+private:
   /* Pointer to input buffer with FLAC data. */
   uint8_t *buffer_ = nullptr;
+
+  /* Size of the input buffer in bytes. */
+  const std::size_t buffer_size_;
+
+  /* Minimum bytes in the input buffer before fill_buffer() is called. */
+  const std::size_t min_buffer_size_;
 
   /* Next index to read from the input buffer. */
   std::size_t buffer_index_ = 0;
@@ -163,12 +193,14 @@ class FLACDecoder {
   uint32_t num_samples_ = 0;
 
   /* Buffer of decoded samples at full precision (all channels). */
-  int16_t *block_samples_ = nullptr;
+  int32_t *block_samples_ = nullptr;
 
   /* Buffer of decoded samples at full precision (single channel). */
-  std::vector<int16_t, esphome::ExternalRAMAllocator<int16_t>> block_result_;
+  std::vector<int32_t, esphome::ExternalRAMAllocator<int32_t>> block_result_;
+
+  esphome::RingBuffer *input_ring_buffer_;
 };
 
-}  // namespace flac
+} // namespace flac
 
 #endif

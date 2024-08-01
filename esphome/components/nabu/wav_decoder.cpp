@@ -7,12 +7,12 @@ WAVDecoderResult WAVDecoder::next() {
 
   switch (this->state_) {
   case WAV_DECODER_BEFORE_RIFF: {
-    this->chunk_name_ = std::string((const char *)*this->buffer_, 4);
+    this->chunk_name_ = std::string((const char *)this->buffer_, 4);
     if (this->chunk_name_ != "RIFF") {
       return WAV_DECODER_ERROR_NO_RIFF;
     }
 
-    this->chunk_bytes_left_ = *((uint32_t *)(*this->buffer_ + 4));
+    this->chunk_bytes_left_ = *((uint32_t *)(this->buffer_ + 4));
     if ((this->chunk_bytes_left_ % 2) != 0) {
       // Pad byte
       this->chunk_bytes_left_++;
@@ -25,7 +25,7 @@ WAVDecoderResult WAVDecoder::next() {
   }
 
   case WAV_DECODER_BEFORE_WAVE: {
-    this->chunk_name_ = std::string((const char *)*this->buffer_, 4);
+    this->chunk_name_ = std::string((const char *)this->buffer_, 4);
     if (this->chunk_name_ != "WAVE") {
       return WAV_DECODER_ERROR_NO_WAVE;
     }
@@ -37,8 +37,8 @@ WAVDecoderResult WAVDecoder::next() {
   }
 
   case WAV_DECODER_BEFORE_FMT: {
-    this->chunk_name_ = std::string((const char *)*this->buffer_, 4);
-    this->chunk_bytes_left_ = *((uint32_t *)(*this->buffer_ + 4));
+    this->chunk_name_ = std::string((const char *)this->buffer_, 4);
+    this->chunk_bytes_left_ = *((uint32_t *)(this->buffer_ + 4));
     if ((this->chunk_bytes_left_ % 2) != 0) {
       // Pad byte
       this->chunk_bytes_left_++;
@@ -74,9 +74,9 @@ WAVDecoderResult WAVDecoder::next() {
      * bits per sample (uint16_t)
      * [rest of format chunk]
      */
-    this->num_channels_ = *((uint16_t *)(*this->buffer_ + 2));
-    this->sample_rate_ = *((uint32_t *)(*this->buffer_ + 4));
-    this->bits_per_sample_ = *((uint16_t *)(*this->buffer_ + 14));
+    this->num_channels_ = *((uint16_t *)(this->buffer_ + 2));
+    this->sample_rate_ = *((uint32_t *)(this->buffer_ + 4));
+    this->bits_per_sample_ = *((uint16_t *)(this->buffer_ + 14));
 
     // Next chunk
     this->state_ = WAV_DECODER_BEFORE_DATA;
@@ -85,8 +85,8 @@ WAVDecoderResult WAVDecoder::next() {
   }
 
   case WAV_DECODER_BEFORE_DATA: {
-    this->chunk_name_ = std::string((const char *)*this->buffer_, 4);
-    this->chunk_bytes_left_ = *((uint32_t *)(*this->buffer_ + 4));
+    this->chunk_name_ = std::string((const char *)this->buffer_, 4);
+    this->chunk_bytes_left_ = *((uint32_t *)(this->buffer_ + 4));
     if ((this->chunk_bytes_left_ % 2) != 0) {
       // Pad byte
       this->chunk_bytes_left_++;

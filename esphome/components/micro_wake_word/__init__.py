@@ -502,8 +502,7 @@ async def to_code(config):
             )
 
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
-    cg.add_library(None,None,"https://github.com/kahrendt/ESPMicroSpeechFeatures.git#psram-allocations")
-    # cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.0.0")
+    cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.0.0")
 
 
 MICRO_WAKE_WORD_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(MicroWakeWord)})
