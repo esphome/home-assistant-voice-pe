@@ -1,0 +1,22 @@
+name: YAML lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.yaml"
+      - "**.yml"
+  pull_request:
+    paths:
+      - "**.yaml"
+      - "**.yml"
+
+jobs:
+  yamllint:
+    name: 🧹 yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out configuration from GitHub
+        uses: actions/checkout@v4.1.7
+      - name: 🚀 Run yamllint
+        run: yamllint --strict .
