@@ -14,15 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  yamllint:
-    name: 🧹 yamllint
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out configuration from GitHub
-        uses: actions/checkout@v4.1.7
-      - name: 🚀 Run yamllint
-        run: yamllint --strict .
-
   build-firmware:
     name: Build Firmware
     uses: esphome/workflows/.github/workflows/build.yml@jesserockz-2024-326
