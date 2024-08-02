@@ -1,4 +1,4 @@
-name: Build ESPHome firmware
+name: Build
 
 on:
   push:
@@ -16,12 +16,14 @@ concurrency:
 jobs:
   build-firmware:
     name: Build Firmware
-    uses: esphome/workflows/.github/workflows/build.yml@jesserockz-2024-326
+    uses: esphome/workflows/.github/workflows/build.yml@main
     with:
       files: |
         voice-kit.yaml
-      name: ESPHome Voice Kit
+      name: voice-kit
       esphome-version: 2024.7.3
       release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
       release-url: ${{ github.event_name == 'release' && github.event.release.url || '' }}
-      upload: ${{ github.event_name == 'release' }}
+      upload: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') }}
+      release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+    secrets: inherit
