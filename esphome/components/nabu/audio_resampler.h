@@ -30,7 +30,7 @@ class AudioResampler {
                  size_t internal_buffer_samples);
   ~AudioResampler();
 
-  void start(media_player::StreamInfo &stream_info);
+  void start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate);
 
   AudioResamplerState resample(bool stop_gracefully);
 

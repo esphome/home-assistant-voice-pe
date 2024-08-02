@@ -57,6 +57,7 @@ class NabuMediaPlayer : public Component,
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+  void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
  protected:
   // Receives commands from HA or from the voice assistant component
@@ -101,6 +102,7 @@ class NabuMediaPlayer : public Component,
   QueueHandle_t speaker_command_queue_;
 
   i2s_bits_per_sample_t bits_per_sample_;
+  uint32_t sample_rate_;
   uint8_t dout_pin_{0};
 
   bool is_paused_{false};

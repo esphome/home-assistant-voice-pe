@@ -46,6 +46,7 @@ TYPE_LOCAL = "local"
 TYPE_WEB = "web"
 
 CONF_FILES = "files"
+CONF_SAMPLE_RATE = "sample_rate"
 
 nabu_ns = cg.esphome_ns.namespace("nabu")
 NabuMediaPlayer = nabu_ns.class_("NabuMediaPlayer")
@@ -176,6 +177,7 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         cv.GenerateID(): cv.declare_id(NabuMediaPlayer),
         cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
         cv.Required(CONF_I2S_DOUT_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
         cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
         ),
@@ -203,6 +205,7 @@ async def to_code(config):
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
     cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
+    cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
 
     if files_list := config.get(CONF_FILES):
         media_files = []

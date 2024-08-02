@@ -23,7 +23,6 @@ namespace nabu {
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
 
-static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
@@ -148,7 +147,7 @@ static void stats_task(void *arg) {
 static const char *const TAG = "nabu_media_player";
 
 void NabuMediaPlayer::setup() {
-  // xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
+  xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
@@ -212,7 +211,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
   i2s_driver_config_t config = {
       .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = 16000,
+      .sample_rate = this_speaker->sample_rate_,
       .bits_per_sample = this_speaker->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -347,13 +346,13 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        this->announcement_pipeline_->start(this->announcement_url_.value(), "ann", 7);
+        this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        this->media_pipeline_->start(this->media_url_.value(), "media", 2);
+        this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", 2);
 
         if (this->is_paused_) {
           CommandEvent command_event;
@@ -371,13 +370,13 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        this->announcement_pipeline_->start(this->announcement_file_.value(), "ann", 7);
+        this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        this->media_pipeline_->start(this->media_file_.value(), "media", 2);
+        this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media", 5);
 
         if (this->is_paused_) {
           CommandEvent command_event;

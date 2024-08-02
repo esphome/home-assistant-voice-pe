@@ -40,8 +40,8 @@ class AudioPipeline {
  public:
   AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type);
 
-  void start(const std::string &uri, const std::string &task_name, UBaseType_t priority = 1);
-  void start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority = 1);
+  void start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
+  void start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
 
   void stop();
 
@@ -50,7 +50,9 @@ class AudioPipeline {
   void reset_ring_buffers();
 
  protected:
-  void common_start_(const std::string &task_name, UBaseType_t priority);
+  void common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority);
+
+  uint32_t target_sample_rate_;
 
   AudioMixer *mixer_;
 

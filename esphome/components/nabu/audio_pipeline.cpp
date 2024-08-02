@@ -9,7 +9,7 @@ namespace nabu {
 
 static const size_t QUEUE_COUNT = 10;
 
-static const size_t HTTP_BUFFER_SIZE = 32 * 1024;
+static const size_t HTTP_BUFFER_SIZE = 128 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
@@ -50,21 +50,21 @@ AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type)
   this->event_group_ = xEventGroupCreate();
 }
 
-void AudioPipeline::start(const std::string &uri, const std::string &task_name, UBaseType_t priority) {
-  this->common_start_(task_name, priority);
+void AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
+  this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_uri_ = uri;
   xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_HTTP);
 }
 
-void AudioPipeline::start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority) {
-  this->common_start_(task_name, priority);
+void AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
+  this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_media_file_ = media_file;
   xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_FILE);
 }
 
-void AudioPipeline::common_start_(const std::string &task_name, UBaseType_t priority) {
+void AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
   if (this->read_task_handle_ == nullptr) {
     this->read_task_handle_ =
         xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), 8192, (void *) this, priority,
@@ -82,6 +82,8 @@ void AudioPipeline::common_start_(const std::string &task_name, UBaseType_t prio
   }
 
   this->stop();
+
+  this->target_sample_rate_ = target_sample_rate;
 }
 
 AudioPipelineState AudioPipeline::get_state() {
@@ -189,7 +191,7 @@ void AudioPipeline::decode_task_(void *params) {
 
     {
       AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
-                                          this_pipeline->decoded_ring_buffer_.get(), BUFFER_SIZE_BYTES);
+                                          this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);//BUFFER_SIZE_BYTES);
       decoder.start(this_pipeline->current_media_file_type_);
 
       bool has_stream_info = false;
@@ -224,7 +226,7 @@ void AudioPipeline::decode_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(15);
       }
     }
   }
@@ -257,7 +259,7 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      resampler.start(this_pipeline->current_stream_info_);
+      resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_);
 
       while (true) {
         event_bits = xEventGroupGetBits(this_pipeline->event_group_);
