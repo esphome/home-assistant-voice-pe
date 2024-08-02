@@ -88,7 +88,8 @@ AudioPipelineState AudioPipeline::get_state() {
   EventBits_t event_bits = xEventGroupGetBits(this->event_group_);
   if (!this->read_task_handle_ && !this->decode_task_handle_ && !this->resample_task_handle_) {
     return AudioPipelineState::STOPPED;
-  } else if (event_bits & (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED)) {
+  } else if ((event_bits & READER_MESSAGE_FINISHED) && (event_bits & DECODER_MESSAGE_FINISHED) &&
+             (event_bits & RESAMPLER_MESSAGE_FINISHED)) {
     return AudioPipelineState::STOPPED;
   }
 
