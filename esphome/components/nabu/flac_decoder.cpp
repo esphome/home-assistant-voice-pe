@@ -14,29 +14,29 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
   this->buffer_index_ = 0;
   this->bytes_left_ = buffer_length;
 
-  if (this->out_of_data_) {
-    return FLAC_DECODER_ERROR_OUT_OF_DATA;
+  this->out_of_data_ = (buffer_length == 0);
+
+  if (!this->partial_header_read_) {
+    // File must start with 'fLaC'
+    if (this->read_uint(32) != FLAC_MAGIC_NUMBER) {
+      return FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER;
+    }
   }
 
-  // File must start with 'fLaC'
-  if (this->read_uint(32) != FLAC_MAGIC_NUMBER) {
-    return FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER;
-  }
-
-  // Read header blocks
-  bool last = false;
-  uint32_t type = 0;
-  uint32_t length = 0;
-
-  while (!last) {
-    if (this->out_of_data_) {
-      return FLAC_DECODER_ERROR_OUT_OF_DATA;
+  while (!this->partial_header_last_ || (this->partial_header_length_ > 0)) {
+    if (this->bytes_left_ == 0) {
+      // We'll try to finish reading it once more data is loaded
+      this->partial_header_read_ = true;
+      return FLAC_DECODER_HEADER_OUT_OF_DATA;
     }
 
-    last = this->read_uint(1) != 0;
-    type = this->read_uint(7);
-    length = this->read_uint(24);
-    if (type == 0) {
+    if (this->partial_header_length_ == 0) {
+      this->partial_header_last_ = this->read_uint(1) != 0;
+      this->partial_header_type_ = this->read_uint(7);
+      this->partial_header_length_ = this->read_uint(24);
+    }
+
+    if (this->partial_header_type_ == 0) {
       // Stream info block
       this->min_block_size_ = this->read_uint(16);
       this->max_block_size_ = this->read_uint(16);
@@ -48,18 +48,19 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
       this->sample_depth_ = this->read_uint(5) + 1;
       this->num_samples_ = this->read_uint(36);
       this->read_uint(128);
+
+      this->partial_header_length_ = 0;
     } else {
       // Variable block
-      for (uint32_t i = 0; i < length; i++) {
-        this->read_uint(8);
-
-        // Exit early if we run out of data here
-        if (this->out_of_data_) {
-          return FLAC_DECODER_ERROR_OUT_OF_DATA;
+      while (this->partial_header_length_ > 0) {
+        if (this->bytes_left_ == 0) {
+          break;
         }
-      }  // for each byte in block
+        this->read_uint(8);
+        --this->partial_header_length_;
+      }
     }  // variable block
-  }  // while not last
+  }
 
   if ((this->sample_rate_ == 0) || (this->num_channels_ == 0) || (this->sample_depth_ == 0) ||
       (this->max_block_size_ == 0)) {
@@ -386,7 +387,6 @@ uint32_t FLACDecoder::read_uint(std::size_t num_bits) {
   while (this->bit_buffer_length_ < num_bits) {
     uint8_t next_byte = this->buffer_[this->buffer_index_];
     this->buffer_index_++;
-    this->buffer_total_read_++;
     this->bytes_left_--;
     if (this->bytes_left_ == 0) {
       this->out_of_data_ = true;

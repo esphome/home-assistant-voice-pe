@@ -27,16 +27,17 @@ const static uint32_t FLAC_UINT_MASK[] = {
 enum FLACDecoderResult {
   FLAC_DECODER_SUCCESS = 0,
   FLAC_DECODER_NO_MORE_FRAMES = 1,
-  FLAC_DECODER_ERROR_OUT_OF_DATA = 2,
-  FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER = 3,
-  FLAC_DECODER_ERROR_SYNC_NOT_FOUND = 4,
-  FLAC_DECODER_ERROR_BAD_BLOCK_SIZE_CODE = 5,
-  FLAC_DECODER_ERROR_BAD_HEADER = 6,
-  FLAC_DECODER_ERROR_RESERVED_CHANNEL_ASSIGNMENT = 7,
-  FLAC_DECODER_ERROR_RESERVED_SUBFRAME_TYPE = 8,
-  FLAC_DECODER_ERROR_BAD_FIXED_PREDICTION_ORDER = 9,
-  FLAC_DECODER_ERROR_RESERVED_RESIDUAL_CODING_METHOD = 10,
-  FLAC_DECODER_ERROR_BLOCK_SIZE_NOT_DIVISIBLE_RICE = 11,
+  FLAC_DECODER_HEADER_OUT_OF_DATA = 2,
+  FLAC_DECODER_ERROR_OUT_OF_DATA = 3,
+  FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER = 4,
+  FLAC_DECODER_ERROR_SYNC_NOT_FOUND = 5,
+  FLAC_DECODER_ERROR_BAD_BLOCK_SIZE_CODE = 6,
+  FLAC_DECODER_ERROR_BAD_HEADER = 7,
+  FLAC_DECODER_ERROR_RESERVED_CHANNEL_ASSIGNMENT = 8,
+  FLAC_DECODER_ERROR_RESERVED_SUBFRAME_TYPE = 9,
+  FLAC_DECODER_ERROR_BAD_FIXED_PREDICTION_ORDER = 10,
+  FLAC_DECODER_ERROR_RESERVED_RESIDUAL_CODING_METHOD = 11,
+  FLAC_DECODER_ERROR_BLOCK_SIZE_NOT_DIVISIBLE_RICE = 12,
 };
 
 // Coefficients for fixed linear prediction
@@ -52,8 +53,7 @@ class FLACDecoder {
    * buffer_size - size of the data buffer
    * min_buffer_size - min bytes in buffer before fill_buffer is called
    */
-  FLACDecoder(uint8_t *buffer)
-      : buffer_(buffer) {}
+  FLACDecoder(uint8_t *buffer) : buffer_(buffer) {}
 
   ~FLACDecoder() { this->free_buffers(); }
 
@@ -129,9 +129,6 @@ class FLACDecoder {
   /* Next index to read from the input buffer. */
   std::size_t buffer_index_ = 0;
 
-  /* Total number of bytes read across frames (debugging). */
-  std::size_t buffer_total_read_ = 0;
-
   /* Number of byte that haven't been read from the input buffer yet. */
   std::size_t bytes_left_ = 0;
 
@@ -167,6 +164,11 @@ class FLACDecoder {
 
   /* Buffer of decoded samples at full precision (single channel). */
   std::vector<int16_t, esphome::ExternalRAMAllocator<int16_t>> block_result_;
+
+  bool partial_header_read_{false};
+  bool partial_header_last_{false};
+  uint32_t partial_header_type_{0};
+  uint32_t partial_header_length_{0};
 };
 
 }  // namespace flac
