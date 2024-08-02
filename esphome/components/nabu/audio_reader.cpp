@@ -7,8 +7,6 @@
 namespace esphome {
 namespace nabu {
 
-  static const size_t MAX_HTTP_BYTES_TO_READ_PER_ITERATION = 4096;
-
 AudioReader::AudioReader(esphome::RingBuffer *output_ring_buffer, size_t transfer_buffer_size) {
   this->output_ring_buffer_ = output_ring_buffer;
 
@@ -103,7 +101,6 @@ AudioReaderState AudioReader::read() {
 AudioReaderState AudioReader::file_read_() {
   if (this->media_file_bytes_left_ > 0) {
     size_t bytes_to_write = std::min(this->media_file_bytes_left_, this->output_ring_buffer_->free());
-    bytes_to_write = std::min(bytes_to_write, MAX_HTTP_BYTES_TO_READ_PER_ITERATION);
 
     if (bytes_to_write == 0) {
       return AudioReaderState::READING;
