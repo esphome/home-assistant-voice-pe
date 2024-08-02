@@ -23,7 +23,7 @@ esphome:
     board_build.flash_mode: dio
   project:
     name: esphome.voice-kit
-    version: "1.0"
+    version: dev
   on_boot:
     priority: 600
     then:
