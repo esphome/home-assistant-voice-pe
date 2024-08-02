@@ -69,20 +69,21 @@ void AudioResampler::start(media_player::StreamInfo &stream_info) {
   }
   constexpr float resample_rate = 16000.0f;
   if (stream_info.sample_rate != 16000) {
-    if (stream_info.sample_rate == 48000) {
-      // Special case, we can do this a lot faster with esp-dsp code!
-      const uint8_t decimation = 48000 / 16000;
-      const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
+    // if (stream_info.sample_rate == 48000) {
+    //   // Special case, we can do this a lot faster with esp-dsp code!
+    //   const uint8_t decimation = 48000 / 16000;
+    //   const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
 
-      int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH,
-                                                          (float) 0.5 / decimation);
-      // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
-      dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
-                         decimation, fir_out_offset, -shift);
-      this->decimation_filter_ = true;
-      this->needs_resampling_ = true;
-      // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
-    } else {
+    //   int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH,
+    //                                                       (float) 0.5 / decimation);
+    //   // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
+    //   dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
+    //                      decimation, fir_out_offset, -shift);
+    //   this->decimation_filter_ = true;
+    //   this->needs_resampling_ = true;
+    //   // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
+    // } else 
+    {
       int flags = 0;
 
       this->needs_resampling_ = true;
