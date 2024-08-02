@@ -13,6 +13,8 @@ namespace flac {
 FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
   this->buffer_index_ = 0;
   this->bytes_left_ = buffer_length;
+  this->bit_buffer_ = 0;
+  this->bit_buffer_length_ = 0;
 
   this->out_of_data_ = (buffer_length == 0);
 
@@ -74,6 +76,8 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
 FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *output_buffer, uint32_t *num_samples) {
   this->buffer_index_ = 0;
   this->bytes_left_ = buffer_length;
+  this->out_of_data_ = false;
+
   *num_samples = 0;
 
   if (!this->block_samples_) {
@@ -86,6 +90,9 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
     // Done with the stream
     return FLAC_DECODER_NO_MORE_FRAMES;
   }
+
+  uint64_t previous_bit_buffer = this->bit_buffer_;
+  uint32_t previous_bit_buffer_length = this->bit_buffer_length_;
 
   // sync code
   if (this->read_uint(14) != 0x3FFE) {
@@ -108,6 +115,8 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
     next_int = (next_int << 1) & 0xFF;
 
     if (this->out_of_data_) {
+      this->bit_buffer_ = previous_bit_buffer;
+      this->bit_buffer_length_ = previous_bit_buffer_length;
       return FLAC_DECODER_ERROR_OUT_OF_DATA;
     }
   }
@@ -139,6 +148,12 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
   // Output buffer size should be max_block_size * num_channels
   this->decode_subframes(block_size, this->sample_depth_, channel_assignment);
   *num_samples = block_size * this->num_channels_;
+
+  if (this->bytes_left_ < 2) {
+    this->bit_buffer_ = previous_bit_buffer;
+    this->bit_buffer_length_ = previous_bit_buffer_length;
+    return FLAC_DECODER_ERROR_OUT_OF_DATA;
+  }
 
   // Footer
   this->align_to_byte();

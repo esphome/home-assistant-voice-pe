@@ -9,7 +9,7 @@ namespace nabu {
 
 static const size_t QUEUE_COUNT = 10;
 
-static const size_t HTTP_BUFFER_SIZE = 128 * 1024;
+static const size_t HTTP_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
@@ -226,7 +226,7 @@ void AudioPipeline::decode_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(15);
+        delay(10);
       }
     }
   }
