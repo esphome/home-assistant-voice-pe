@@ -64,8 +64,11 @@ class NabuMediaPlayer : public Component,
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @return volume read from DAC between 0.0 and 1.0, if successful
+  /// @return Volume read from DAC between 0.0 and 1.0, if successful. Updates volume_ if publish is true.
   optional<float> get_dac_volume_(bool publish = true);
+
+  /// @return Mute status read from DAC, if successful. Updates is_muted_ if publish is true.
+  optional<bool> get_dac_mute_(bool publish = true);
 
   /// @return true if I2C writes were successful
   bool set_volume_(float volume, bool publish = true);

@@ -19,7 +19,6 @@ namespace nabu {
 //    - Remove printf
 //    - Log which part of an audio pipeline has an error
 //  - Verify we can handle the audio stream (no more than 2 channels, etc...) and abort if not
-//  - Add I2C getting of mute status on boot
 //  - Clear mixer input buffer if an audio tream is stopped
 //  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
@@ -214,7 +213,10 @@ void NabuMediaPlayer::setup() {
 
   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
 
-  this->get_dac_volume_();
+  if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
+    ESP_LOGE(TAG, "Couldn't communicate with DAC");
+    this->mark_failed();
+  }
 
   // if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, 0x01)) {
   //   ESP_LOGE(TAG, "DAC failed to switch register page");
@@ -701,6 +703,31 @@ bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
     this->volume = volume;
 
   return true;
+}
+
+optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
+    return {};
+  }
+
+  uint8_t dac_mute_left = 0;
+  uint8_t dac_mute_right = 0;
+  if (!this->read_byte(DAC_LEFT_MUTE_REGISTER, &dac_mute_left) ||
+      !this->read_byte(DAC_RIGHT_MUTE_REGISTER, &dac_mute_right)) {
+    ESP_LOGE(TAG, "DAC failed to read mute status");
+    return {};
+  }
+
+  bool is_muted = false;
+  if (dac_mute_left == DAC_MUTE_COMMAND && dac_mute_right == DAC_MUTE_COMMAND) {
+    is_muted = true;
+  }
+
+  if (publish) {
+    this->is_muted_ = is_muted;
+  }
+  return is_muted;
 }
 
 bool NabuMediaPlayer::mute_() {
