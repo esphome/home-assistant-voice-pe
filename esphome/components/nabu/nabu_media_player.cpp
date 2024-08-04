@@ -14,14 +14,62 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
+//  - Have better logging outputs
+//    - Output file type and stream information + any resampling processes
+//    - Remove printf
+//    - Log which part of an audio pipeline has an error
+//  - Verify we can handle the audio stream (no more than 2 channels, etc...) and abort if not
+//  - Add I2C getting of mute status on boot
+//  - Clear mixer input buffer if an audio tream is stopped
+//  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
+//    - What do I need to give them an ESPHome id?
 //    - Add a yaml action to play a specific media file
+//
+//
+// Framework:
+//  - Media player that can handle two streams; one for media and one for announcements
+//    - If played together, they are mixed with the announcement stream staying at full volume
+//    - The media audio can be further ducked via the ``set_ducking_ratio`` function
+//  - Each stream is handled by an ``AudioPipeline`` object with three parts/tasks
+//    - ``AudioReader`` handles reading from an HTTP source or from a PROGMEM flash set at compile time
+//    - ``AudioDecoder`` handles decoding the audio file. All formats are limited to two channels and 16 bits per sample
+//      - FLAC
+//      - WAV
+//      - MP3 (based on the libhelix decoder - a random mp3 file may be incompatible)
+//    - ``AudioResampler`` handles converting the sample rate to the configured output sample rate and converting mono
+//      to stereo
+//      - The quality is not good, and it is slow! Please send audio at the configured sample rate to avoid these issues
+//    - Each task will always run once started, but they will not doing anything until they are needed
+//    - FreeRTOS Event Groups make up the inter-task communication
+//    - The ``AudioPipeline`` sets up an output ring buffer for the Reader and Decoder parts. The next part/task
+//      automatically pulls from the previous ring buffer
+//  - The streams are mixed together in the ``AudioMixer`` task
+//    - Each stream has a corresponding input buffer that the ``AudioResampler`` feeds directly
+//    - Pausing the media stream is done here
+//    - Media stream ducking is done here
+//    - The output ring buffer feeds the ``speaker_task`` directly. It is kept small intentionally to avoid latency when
+//      pausing
+//  - Audio output is handled by the ``speaker_task``. It configures the I2S bus and copies audio from the mixer's
+//    output ring buffer to the DMA buffers
+//  - Media player commands are received by the ``control`` function. The commands are added to the
+//    ``media_control_command_queue_`` to be processed in the component's loop
+//    - Starting a stream intializes the appropriate pipeline or stops it if it is already running
+//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. They communicate
+//      directly with the DAC over I2C.
+//      - Volume commands are ignored if the media control queue is full to avoid crashing when the track wheel is spun
+//      fast
+//    - Pausing is sent to the ``AudioMixer`` task. It only effects the media stream.
+//  - The components main loop performs housekeeping:
+//    - It reads the media control queue and processes it directly
+//    - It watches the state of speaker and mixer tasks
+//    - It determines the overall state of the media player by considering the state of each pipeline
+//      - announcement playback takes highest priority
 
 static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
