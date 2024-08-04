@@ -181,9 +181,11 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   // Mono to stereo -> cut in half
   max_input_samples /= (2 / this->stream_info_.channels);
 
-  // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
-  uint32_t upsampling_factor = std::ceil(this->sample_ratio_);
-  max_input_samples /= upsampling_factor;
+  if (this->sample_ratio_ > 1.0) {
+    // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
+    uint32_t upsampling_factor = std::ceil(this->sample_ratio_);
+    max_input_samples /= upsampling_factor;
+  }
 
   // Move old data to the start of the buffer
   if (this->input_buffer_length_ > 0) {
