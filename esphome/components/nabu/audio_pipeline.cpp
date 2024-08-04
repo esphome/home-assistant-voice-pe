@@ -50,14 +50,16 @@ AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type)
   this->event_group_ = xEventGroupCreate();
 }
 
-void AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
+void AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
+                          UBaseType_t priority) {
   this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_uri_ = uri;
   xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_HTTP);
 }
 
-void AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
+void AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate,
+                          const std::string &task_name, UBaseType_t priority) {
   this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_media_file_ = media_file;
@@ -190,8 +192,9 @@ void AudioPipeline::decode_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_FINISHED);
 
     {
-      AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
-                                          this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);//BUFFER_SIZE_BYTES);
+      AudioDecoder decoder =
+          AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(),
+                       HTTP_BUFFER_SIZE);  // BUFFER_SIZE_BYTES);
       decoder.start(this_pipeline->current_media_file_type_);
 
       bool has_stream_info = false;
@@ -259,7 +262,11 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_);
+      if (!resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_)) {
+        // Unsupported incoming audio stream
+        xEventGroupSetBits(this_pipeline->event_group_,
+                           EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+      }
 
       while (true) {
         event_bits = xEventGroupGetBits(this_pipeline->event_group_);

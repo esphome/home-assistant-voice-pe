@@ -48,7 +48,7 @@ AudioResampler::~AudioResampler() {
   }
 }
 
-void AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
+bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
   this->stream_info_ = stream_info;
 
   this->input_buffer_current_ = this->input_buffer_;
@@ -62,6 +62,11 @@ void AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
   this->float_output_buffer_length_ = 0;
 
   this->needs_mono_to_stereo_ = (stream_info.channels != 2);
+
+  if ((stream_info.channels > 2) || (stream_info_.bits_per_sample != 16)) {
+    // TODO: Make these values configurable
+    return false;
+  }
 
   if (stream_info.channels > 0) {
     this->channel_factor_ = 2 / stream_info.channels;
@@ -138,6 +143,8 @@ void AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
   } else {
     this->needs_resampling_ = false;
   }
+
+  return true;
 }
 
 AudioResamplerState AudioResampler::resample(bool stop_gracefully) {

@@ -18,8 +18,7 @@ namespace nabu {
 //    - Output file type and stream information + any resampling processes
 //    - Remove printf
 //    - Log which part of an audio pipeline has an error
-//  - Verify we can handle the audio stream (no more than 2 channels, etc...) and abort if not
-//  - Clear mixer input buffer if an audio tream is stopped
+//  - Clear mixer input buffer if an audio stream is stopped
 //  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Ducking improvements
