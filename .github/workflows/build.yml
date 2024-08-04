@@ -26,12 +26,12 @@ jobs:
       release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
   upload:
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
     name: Upload to R2
     needs:
       - build-firmware
     uses: esphome/workflows/.github/workflows/upload.yml@main
     with:
-      name: voice-kit
+      directory: voice-kit
       version: ${{ needs.build-firmware.outputs.version }}
     secrets: inherit
