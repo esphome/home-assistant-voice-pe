@@ -69,6 +69,12 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
     return FLAC_DECODER_ERROR_BAD_HEADER;
   }
 
+  if (this->sample_depth_ > 16) {
+    // This decoder can support higher sample depths, but it would require using int32s throughout. We limit to 16 bits
+    // per sample for the sake of speed, as we can then use a quick esp-dsp function for the dot product calculation
+    return FLAC_DECODER_ERROR_UNSUPPORTED_BITS_PER_SAMPLE;
+  }
+
   // Successfully read header
   return FLAC_DECODER_SUCCESS;
 }  // read_header
