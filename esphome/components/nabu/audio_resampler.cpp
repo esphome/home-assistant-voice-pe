@@ -79,7 +79,8 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
     //   const uint8_t decimation = 48000 / 16000;
     //   const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
 
-    //   int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH,
+    //   int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t)
+    //   FIR_FILTER_LENGTH,
     //                                                       (float) 0.5 / decimation);
     //   // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
     //   dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
@@ -87,7 +88,7 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
     //   this->decimation_filter_ = true;
     //   this->needs_resampling_ = true;
     //   // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
-    // } else 
+    // } else
     {
       int flags = 0;
 
@@ -173,14 +174,14 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   // Refill input buffer
   //////
 
-  // Depending on if we are converting mono to stereo or if we are upsampling, we may need to restrict how many input samples to load
-  // Mono to stereo -> cut in half
-  // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
-
+  // Depending on if we are converting mono to stereo or if we are upsampling, we may need to restrict how many input
+  // samples we transfer
   size_t max_input_samples = this->internal_buffer_samples_;
 
-  max_input_samples /= this->stream_info_.channels;
-  
+  // Mono to stereo -> cut in half
+  max_input_samples /= (2 / this->stream_info_.channels);
+
+  // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
   uint32_t upsampling_factor = std::ceil(this->sample_ratio_);
   max_input_samples /= upsampling_factor;
 
@@ -192,8 +193,7 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
 
   // Copy new data to the end of the of the buffer
   size_t bytes_available = this->input_ring_buffer_->available();
-  size_t bytes_to_read =
-      std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
+  size_t bytes_to_read = std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
 
   if (bytes_to_read > 0) {
     int16_t *new_input_buffer_data = this->input_buffer_ + this->input_buffer_length_ / sizeof(int16_t);
@@ -226,7 +226,8 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
         }
       } else {
         // Interleaved stereo samples
-        // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't mixed
+        // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't
+        // mixed
         size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
         for (int i = 0; i < available_samples / 2; ++i) {
           // split interleaved samples into two separate streams
