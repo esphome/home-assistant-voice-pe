@@ -28,12 +28,11 @@ enum class AudioPipelineType : uint8_t {
 };
 
 enum class AudioPipelineState : uint8_t {
-  STARTING,
-  STARTED,
   PLAYING,
-  PAUSED,
-  STOPPING,
   STOPPED,
+  ERROR_READING,
+  ERROR_DECODING,
+  ERROR_RESAMPLING,
 };
 
 class AudioPipeline {

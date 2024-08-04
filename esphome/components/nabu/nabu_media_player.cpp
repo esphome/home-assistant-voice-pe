@@ -17,7 +17,6 @@ namespace nabu {
 //  - Have better logging outputs
 //    - Output file type and stream information + any resampling processes
 //    - Remove printf
-//    - Log which part of an audio pipeline has an error
 //  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Ducking improvements
@@ -452,7 +451,7 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if (this->media_pipeline_state_ == AudioPipelineState::PLAYING) {
+          if (!this->is_paused_) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
@@ -557,12 +556,31 @@ void NabuMediaPlayer::loop() {
 
   if (this->announcement_pipeline_ != nullptr)
     this->announcement_pipeline_state_ = this->announcement_pipeline_->get_state();
+  
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Encountered an error reading the announcement file");
+  }
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Encountered an error decoding the announcement file");
+  }
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Encountered an error resampling the announcement file");
+  }
 
   if (this->media_pipeline_ != nullptr)
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
 
-  if ((this->announcement_pipeline_state_ != AudioPipelineState::STOPPING) &&
-      (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED)) {
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Encountered an error reading the media file");
+  }
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Encountered an error decoding the media file");
+  }
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Encountered an error resampling the media file");
+  }
+
+  if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
       // this->unmute_();
@@ -576,8 +594,7 @@ void NabuMediaPlayer::loop() {
         // this->mute_();
         this->is_idle_muted_ = true;
       }
-    } else if ((this->media_pipeline_state_ == AudioPipelineState::STOPPING) ||
-               (this->media_pipeline_state_ == AudioPipelineState::STOPPED)) {
+    } else if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
       if (!this->is_idle_muted_) {
         // this->mute_();
