@@ -110,6 +110,15 @@ void AudioPipeline::stop() {
       true,                                                                               // Wait for all the bits,
       pdMS_TO_TICKS(200));  // Block temporarily before deleting each task
 
+  // Clear the ring buffer in the mixer; avoids playing incorrect audio when starting a new file while paused
+  CommandEvent command_event;
+  if (this->pipeline_type_ == AudioPipelineType::MEDIA) {
+    command_event.command = CommandEventType::CLEAR_MEDIA;
+  } else {
+    command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
+  }
+  this->mixer_->send_command(&command_event);
+
   xEventGroupClearBits(this->event_group_, ALL_BITS);
   this->reset_ring_buffers();
 }
