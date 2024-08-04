@@ -121,8 +121,8 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       // Shift unread data in input buffer to start
       if (this->input_buffer_length_ > 0) {
         memmove(this->input_buffer_, this->input_buffer_current_, this->input_buffer_length_);
-        this->input_buffer_current_ = this->input_buffer_;
       }
+      this->input_buffer_current_ = this->input_buffer_;
 
       // read in new ring buffer data to fill the remaining input buffer
       size_t bytes_read = 0;
@@ -231,11 +231,10 @@ FileDecoderState AudioDecoder::decode_wav_() {
       this->wav_bytes_left_ -= bytes_to_write;
     }
 
-    return FileDecoderState::MORE_TO_PROCESS;
+    return FileDecoderState::IDLE;
   }
 
   return FileDecoderState::END_OF_FILE;
-  // return DecoderState::FINISHED;
 }
 
 FileDecoderState AudioDecoder::decode_mp3_() {
