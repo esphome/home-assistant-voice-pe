@@ -173,6 +173,17 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   // Refill input buffer
   //////
 
+  // Depending on if we are converting mono to stereo or if we are upsampling, we may need to restrict how many input samples to load
+  // Mono to stereo -> cut in half
+  // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
+
+  size_t max_input_samples = this->internal_buffer_samples_;
+
+  max_input_samples /= this->stream_info_.channels;
+  
+  uint32_t upsampling_factor = std::ceil(this->sample_ratio_);
+  max_input_samples /= upsampling_factor;
+
   // Move old data to the start of the buffer
   if (this->input_buffer_length_ > 0) {
     memmove((void *) this->input_buffer_, (void *) this->input_buffer_current_, this->input_buffer_length_);
@@ -182,7 +193,7 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   // Copy new data to the end of the of the buffer
   size_t bytes_available = this->input_ring_buffer_->available();
   size_t bytes_to_read =
-      std::min(bytes_available, this->internal_buffer_samples_ * sizeof(int16_t) - this->input_buffer_length_);
+      std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
 
   if (bytes_to_read > 0) {
     int16_t *new_input_buffer_data = this->input_buffer_ + this->input_buffer_length_ / sizeof(int16_t);
@@ -252,15 +263,12 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
 
         size_t samples_read = this->input_buffer_length_ / sizeof(int16_t);
 
-        // This is inefficient! It reconverts any samples that weren't used in the previous resampling run
         for (int i = 0; i < samples_read; ++i) {
           this->float_input_buffer_[i] = static_cast<float>(this->input_buffer_[i]) / 32768.0f;
         }
 
         size_t frames_read = samples_read / this->stream_info_.channels;
 
-        // The low pass filter seems to be causing glitches... probably because samples are repeated due to the above
-        // ineffeciency!
         if (this->pre_filter_) {
           for (int i = 0; i < this->stream_info_.channels; ++i) {
             biquad_apply_buffer(&this->lowpass_[i][0], this->float_input_buffer_ + i, frames_read,
