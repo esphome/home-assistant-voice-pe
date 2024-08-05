@@ -46,9 +46,11 @@ AudioResampler::~AudioResampler() {
     resampleFree(this->resampler_);
     this->resampler_ = nullptr;
   }
+
+  // dsps_fird_s16_aexx_free(&this->fir_filter_);
 }
 
-void AudioResampler::start(media_player::StreamInfo &stream_info) {
+bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
   this->stream_info_ = stream_info;
 
   this->input_buffer_current_ = this->input_buffer_;
@@ -63,33 +65,40 @@ void AudioResampler::start(media_player::StreamInfo &stream_info) {
 
   this->needs_mono_to_stereo_ = (stream_info.channels != 2);
 
+  if ((stream_info.channels > 2) || (stream_info_.bits_per_sample != 16)) {
+    // TODO: Make these values configurable
+    return false;
+  }
+
   if (stream_info.channels > 0) {
     this->channel_factor_ = 2 / stream_info.channels;
     printf("Converting %d channels to 2 channels\n", stream_info.channels);
   }
-  constexpr float resample_rate = 16000.0f;
-  if (stream_info.sample_rate != 16000) {
-    if (stream_info.sample_rate == 48000) {
-      // Special case, we can do this a lot faster with esp-dsp code!
-      const uint8_t decimation = 48000 / 16000;
-      const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
 
-      int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH,
-                                                          (float) 0.5 / decimation);
-      // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
-      dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
-                         decimation, fir_out_offset, -shift);
-      this->decimation_filter_ = true;
-      this->needs_resampling_ = true;
-      // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
-    } else {
+  if (stream_info.sample_rate != target_sample_rate) {
+    // if (stream_info.sample_rate == 48000) {
+    //   // Special case, we can do this a lot faster with esp-dsp code!
+    //   const uint8_t decimation = 48000 / 16000;
+    //   const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
+
+    //   int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t)
+    //   FIR_FILTER_LENGTH,
+    //                                                       (float) 0.5 / decimation);
+    //   // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
+    //   dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
+    //                      decimation, fir_out_offset, -shift);
+    //   this->decimation_filter_ = true;
+    //   this->needs_resampling_ = true;
+    //   // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
+    // } else
+    {
       int flags = 0;
 
       this->needs_resampling_ = true;
 
-      this->sample_ratio_ = resample_rate / static_cast<float>(stream_info.sample_rate);
+      this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(stream_info.sample_rate);
 
-      printf("Resampling from %d Hz to 16000 Hz\n", stream_info.sample_rate);
+      printf("Resampling from %d Hz to %d Hz\n", stream_info.sample_rate, target_sample_rate);
 
       if (this->sample_ratio_ < 1.0) {
         this->lowpass_ratio_ -= (10.24 / 16);
@@ -137,6 +146,8 @@ void AudioResampler::start(media_player::StreamInfo &stream_info) {
   } else {
     this->needs_resampling_ = false;
   }
+
+  return true;
 }
 
 AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
@@ -165,6 +176,19 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   // Refill input buffer
   //////
 
+  // Depending on if we are converting mono to stereo or if we are upsampling, we may need to restrict how many input
+  // samples we transfer
+  size_t max_input_samples = this->internal_buffer_samples_;
+
+  // Mono to stereo -> cut in half
+  max_input_samples /= (2 / this->stream_info_.channels);
+
+  if (this->sample_ratio_ > 1.0) {
+    // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
+    uint32_t upsampling_factor = std::ceil(this->sample_ratio_);
+    max_input_samples /= upsampling_factor;
+  }
+
   // Move old data to the start of the buffer
   if (this->input_buffer_length_ > 0) {
     memmove((void *) this->input_buffer_, (void *) this->input_buffer_current_, this->input_buffer_length_);
@@ -173,8 +197,7 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
 
   // Copy new data to the end of the of the buffer
   size_t bytes_available = this->input_ring_buffer_->available();
-  size_t bytes_to_read =
-      std::min(bytes_available, this->internal_buffer_samples_ * sizeof(int16_t) - this->input_buffer_length_);
+  size_t bytes_to_read = std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
 
   if (bytes_to_read > 0) {
     int16_t *new_input_buffer_data = this->input_buffer_ + this->input_buffer_length_ / sizeof(int16_t);
@@ -207,7 +230,8 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
         }
       } else {
         // Interleaved stereo samples
-        // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't mixed
+        // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't
+        // mixed
         size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
         for (int i = 0; i < available_samples / 2; ++i) {
           // split interleaved samples into two separate streams
@@ -244,15 +268,12 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
 
         size_t samples_read = this->input_buffer_length_ / sizeof(int16_t);
 
-        // This is inefficient! It reconverts any samples that weren't used in the previous resampling run
         for (int i = 0; i < samples_read; ++i) {
           this->float_input_buffer_[i] = static_cast<float>(this->input_buffer_[i]) / 32768.0f;
         }
 
         size_t frames_read = samples_read / this->stream_info_.channels;
 
-        // The low pass filter seems to be causing glitches... probably because samples are repeated due to the above
-        // ineffeciency!
         if (this->pre_filter_) {
           for (int i = 0; i < this->stream_info_.channels; ++i) {
             biquad_apply_buffer(&this->lowpass_[i][0], this->float_input_buffer_ + i, frames_read,
@@ -363,6 +384,7 @@ int8_t AudioResampler::generate_q15_fir_coefficients_(int16_t *fir_coeffs, const
   }
 
   free(fir_window);
+  free(float_coeffs);
 
   return shift;
 }

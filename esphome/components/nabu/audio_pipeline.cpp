@@ -9,7 +9,7 @@ namespace nabu {
 
 static const size_t QUEUE_COUNT = 10;
 
-static const size_t HTTP_BUFFER_SIZE = 32 * 1024;
+static const size_t HTTP_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
@@ -50,21 +50,23 @@ AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type)
   this->event_group_ = xEventGroupCreate();
 }
 
-void AudioPipeline::start(const std::string &uri, const std::string &task_name, UBaseType_t priority) {
-  this->common_start_(task_name, priority);
+void AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
+                          UBaseType_t priority) {
+  this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_uri_ = uri;
   xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_HTTP);
 }
 
-void AudioPipeline::start(media_player::MediaFile *media_file, const std::string &task_name, UBaseType_t priority) {
-  this->common_start_(task_name, priority);
+void AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate,
+                          const std::string &task_name, UBaseType_t priority) {
+  this->common_start_(target_sample_rate, task_name, priority);
 
   this->current_media_file_ = media_file;
   xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_FILE);
 }
 
-void AudioPipeline::common_start_(const std::string &task_name, UBaseType_t priority) {
+void AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
   if (this->read_task_handle_ == nullptr) {
     this->read_task_handle_ =
         xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), 8192, (void *) this, priority,
@@ -82,13 +84,33 @@ void AudioPipeline::common_start_(const std::string &task_name, UBaseType_t prio
   }
 
   this->stop();
+
+  this->target_sample_rate_ = target_sample_rate;
 }
 
 AudioPipelineState AudioPipeline::get_state() {
   EventBits_t event_bits = xEventGroupGetBits(this->event_group_);
   if (!this->read_task_handle_ && !this->decode_task_handle_ && !this->resample_task_handle_) {
     return AudioPipelineState::STOPPED;
-  } else if (event_bits & (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED)) {
+  }
+  
+  if ((event_bits & READER_MESSAGE_ERROR)) {
+    xEventGroupClearBits(this->event_group_, READER_MESSAGE_ERROR);
+    return AudioPipelineState::ERROR_READING;
+  }
+  
+  if ((event_bits & DECODER_MESSAGE_ERROR)) {
+    xEventGroupClearBits(this->event_group_, DECODER_MESSAGE_ERROR);
+    return AudioPipelineState::ERROR_DECODING;
+  }
+
+  if ((event_bits & RESAMPLER_MESSAGE_ERROR)) {
+    xEventGroupClearBits(this->event_group_, RESAMPLER_MESSAGE_ERROR);
+    return AudioPipelineState::ERROR_RESAMPLING;
+  }
+
+  if ((event_bits & READER_MESSAGE_FINISHED) && (event_bits & DECODER_MESSAGE_FINISHED) &&
+             (event_bits & RESAMPLER_MESSAGE_FINISHED)) {
     return AudioPipelineState::STOPPED;
   }
 
@@ -104,6 +126,15 @@ void AudioPipeline::stop() {
       pdTRUE,                                                                             // Clear the bit on exit
       true,                                                                               // Wait for all the bits,
       pdMS_TO_TICKS(200));  // Block temporarily before deleting each task
+
+  // Clear the ring buffer in the mixer; avoids playing incorrect audio when starting a new file while paused
+  CommandEvent command_event;
+  if (this->pipeline_type_ == AudioPipelineType::MEDIA) {
+    command_event.command = CommandEventType::CLEAR_MEDIA;
+  } else {
+    command_event.command = CommandEventType::CLEAR_ANNOUNCEMENT;
+  }
+  this->mixer_->send_command(&command_event);
 
   xEventGroupClearBits(this->event_group_, ALL_BITS);
   this->reset_ring_buffers();
@@ -187,8 +218,9 @@ void AudioPipeline::decode_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_FINISHED);
 
     {
-      AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
-                                          this_pipeline->decoded_ring_buffer_.get(), BUFFER_SIZE_BYTES);
+      AudioDecoder decoder =
+          AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(),
+                       HTTP_BUFFER_SIZE);  // BUFFER_SIZE_BYTES);
       decoder.start(this_pipeline->current_media_file_type_);
 
       bool has_stream_info = false;
@@ -256,7 +288,11 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      resampler.start(this_pipeline->current_stream_info_);
+      if (!resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_)) {
+        // Unsupported incoming audio stream
+        xEventGroupSetBits(this_pipeline->event_group_,
+                           EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+      }
 
       while (true) {
         event_bits = xEventGroupGetBits(this_pipeline->event_group_);

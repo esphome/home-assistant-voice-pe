@@ -57,14 +57,18 @@ class NabuMediaPlayer : public Component,
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+  void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
  protected:
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @return volume read from DAC between 0.0 and 1.0, if successful
+  /// @return Volume read from DAC between 0.0 and 1.0, if successful. Updates volume_ if publish is true.
   optional<float> get_dac_volume_(bool publish = true);
+
+  /// @return Mute status read from DAC, if successful. Updates is_muted_ if publish is true.
+  optional<bool> get_dac_mute_(bool publish = true);
 
   /// @return true if I2C writes were successful
   bool set_volume_(float volume, bool publish = true);
@@ -101,6 +105,7 @@ class NabuMediaPlayer : public Component,
   QueueHandle_t speaker_command_queue_;
 
   i2s_bits_per_sample_t bits_per_sample_;
+  uint32_t sample_rate_;
   uint8_t dout_pin_{0};
 
   bool is_paused_{false};

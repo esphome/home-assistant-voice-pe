@@ -14,16 +14,59 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
+//  - Have better logging outputs
+//    - Output file type and stream information + any resampling processes
+//    - Remove printf
+//  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Biquad filters work for downsampling without handling float buffer carefully, upsampling will require some care
 //  - Ducking improvements
 //    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
+//    - What do I need to give them an ESPHome id?
 //    - Add a yaml action to play a specific media file
+//
+//
+// Framework:
+//  - Media player that can handle two streams; one for media and one for announcements
+//    - If played together, they are mixed with the announcement stream staying at full volume
+//    - The media audio can be further ducked via the ``set_ducking_ratio`` function
+//  - Each stream is handled by an ``AudioPipeline`` object with three parts/tasks
+//    - ``AudioReader`` handles reading from an HTTP source or from a PROGMEM flash set at compile time
+//    - ``AudioDecoder`` handles decoding the audio file. All formats are limited to two channels and 16 bits per sample
+//      - FLAC
+//      - WAV
+//      - MP3 (based on the libhelix decoder - a random mp3 file may be incompatible)
+//    - ``AudioResampler`` handles converting the sample rate to the configured output sample rate and converting mono
+//      to stereo
+//      - The quality is not good, and it is slow! Please send audio at the configured sample rate to avoid these issues
+//    - Each task will always run once started, but they will not doing anything until they are needed
+//    - FreeRTOS Event Groups make up the inter-task communication
+//    - The ``AudioPipeline`` sets up an output ring buffer for the Reader and Decoder parts. The next part/task
+//      automatically pulls from the previous ring buffer
+//  - The streams are mixed together in the ``AudioMixer`` task
+//    - Each stream has a corresponding input buffer that the ``AudioResampler`` feeds directly
+//    - Pausing the media stream is done here
+//    - Media stream ducking is done here
+//    - The output ring buffer feeds the ``speaker_task`` directly. It is kept small intentionally to avoid latency when
+//      pausing
+//  - Audio output is handled by the ``speaker_task``. It configures the I2S bus and copies audio from the mixer's
+//    output ring buffer to the DMA buffers
+//  - Media player commands are received by the ``control`` function. The commands are added to the
+//    ``media_control_command_queue_`` to be processed in the component's loop
+//    - Starting a stream intializes the appropriate pipeline or stops it if it is already running
+//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. They communicate
+//      directly with the DAC over I2C.
+//      - Volume commands are ignored if the media control queue is full to avoid crashing when the track wheel is spun
+//      fast
+//    - Pausing is sent to the ``AudioMixer`` task. It only effects the media stream.
+//  - The components main loop performs housekeeping:
+//    - It reads the media control queue and processes it directly
+//    - It watches the state of speaker and mixer tasks
+//    - It determines the overall state of the media player by considering the state of each pipeline
+//      - announcement playback takes highest priority
 
-static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
@@ -167,7 +210,10 @@ void NabuMediaPlayer::setup() {
 
   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
 
-  this->get_dac_volume_();
+  if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
+    ESP_LOGE(TAG, "Couldn't communicate with DAC");
+    this->mark_failed();
+  }
 
   // if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, 0x01)) {
   //   ESP_LOGE(TAG, "DAC failed to switch register page");
@@ -212,7 +258,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
   i2s_driver_config_t config = {
       .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = 16000,
+      .sample_rate = this_speaker->sample_rate_,
       .bits_per_sample = this_speaker->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -347,13 +393,13 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        this->announcement_pipeline_->start(this->announcement_url_.value(), "ann", 7);
+        this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        this->media_pipeline_->start(this->media_url_.value(), "media", 2);
+        this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", 2);
 
         if (this->is_paused_) {
           CommandEvent command_event;
@@ -371,13 +417,13 @@ void NabuMediaPlayer::watch_media_commands_() {
               make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
         }
 
-        this->announcement_pipeline_->start(this->announcement_file_.value(), "ann", 7);
+        this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann", 7);
       } else {
         if (this->media_pipeline_ == nullptr) {
           this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
         }
 
-        this->media_pipeline_->start(this->media_file_.value(), "media", 2);
+        this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media", 5);
 
         if (this->is_paused_) {
           CommandEvent command_event;
@@ -405,7 +451,7 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if (this->media_pipeline_state_ == AudioPipelineState::PLAYING) {
+          if (!this->is_paused_) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
@@ -510,12 +556,31 @@ void NabuMediaPlayer::loop() {
 
   if (this->announcement_pipeline_ != nullptr)
     this->announcement_pipeline_state_ = this->announcement_pipeline_->get_state();
+  
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Encountered an error reading the announcement file");
+  }
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Encountered an error decoding the announcement file");
+  }
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Encountered an error resampling the announcement file");
+  }
 
   if (this->media_pipeline_ != nullptr)
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
 
-  if ((this->announcement_pipeline_state_ != AudioPipelineState::STOPPING) &&
-      (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED)) {
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Encountered an error reading the media file");
+  }
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Encountered an error decoding the media file");
+  }
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Encountered an error resampling the media file");
+  }
+
+  if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
       // this->unmute_();
@@ -529,8 +594,7 @@ void NabuMediaPlayer::loop() {
         // this->mute_();
         this->is_idle_muted_ = true;
       }
-    } else if ((this->media_pipeline_state_ == AudioPipelineState::STOPPING) ||
-               (this->media_pipeline_state_ == AudioPipelineState::STOPPED)) {
+    } else if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
       if (!this->is_idle_muted_) {
         // this->mute_();
@@ -654,6 +718,31 @@ bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
     this->volume = volume;
 
   return true;
+}
+
+optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
+    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
+    return {};
+  }
+
+  uint8_t dac_mute_left = 0;
+  uint8_t dac_mute_right = 0;
+  if (!this->read_byte(DAC_LEFT_MUTE_REGISTER, &dac_mute_left) ||
+      !this->read_byte(DAC_RIGHT_MUTE_REGISTER, &dac_mute_right)) {
+    ESP_LOGE(TAG, "DAC failed to read mute status");
+    return {};
+  }
+
+  bool is_muted = false;
+  if (dac_mute_left == DAC_MUTE_COMMAND && dac_mute_right == DAC_MUTE_COMMAND) {
+    is_muted = true;
+  }
+
+  if (publish) {
+    this->is_muted_ = is_muted;
+  }
+  return is_muted;
 }
 
 bool NabuMediaPlayer::mute_() {
