@@ -203,7 +203,7 @@ void MicroWakeWord::set_state_(State state) {
 }
 
 size_t MicroWakeWord::read_microphone_() {
-  size_t bytes_read = this->microphone_->read(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t));
+  size_t bytes_read = this->microphone_->read_secondary(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t));
   if (bytes_read == 0) {
     return 0;
   }

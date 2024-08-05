@@ -14,9 +14,6 @@
 namespace esphome {
 namespace i2s_audio {
 
-
-
-
 class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, public Component {
  public:
   void setup() override;
@@ -29,9 +26,10 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   void set_pdm(bool pdm) { this->pdm_ = pdm; }
 
   size_t read(int16_t *buf, size_t len) override;
+  size_t read_secondary(int16_t *buf, size_t len) override;
 
 #if SOC_I2S_SUPPORTS_ADC
-  void set_adc_channel(adc1_channel_t channel) {
+      void set_adc_channel(adc1_channel_t channel) {
     this->adc_channel_ = channel;
     this->adc_ = true;
   }
@@ -49,7 +47,8 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   TaskHandle_t read_task_handle_{nullptr};
   QueueHandle_t event_queue_;
   QueueHandle_t command_queue_;
-  std::unique_ptr<RingBuffer> output_ring_buffer_;
+  std::unique_ptr<RingBuffer> asr_ring_buffer_;
+  std::unique_ptr<RingBuffer> comm_ring_buffer_;
 
   void start_();
   void stop_();

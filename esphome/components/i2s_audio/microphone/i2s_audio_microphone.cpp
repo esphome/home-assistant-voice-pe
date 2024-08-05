@@ -12,13 +12,17 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
-static const size_t RING_BUFFER_LENGTH = 64;      // 0.064 seconds
+static const size_t SAMPLE_RATE_HZ = 16000;   // 16 kHz
+static const size_t RING_BUFFER_LENGTH = 64;  // 0.064 seconds
 static const size_t RING_BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * RING_BUFFER_LENGTH;
 static const size_t BUFFER_SIZE = 512;
 static const size_t BUFFER_COUNT = 10;
 
-// TODO: 
+static const size_t DMA_BUF_COUNT = 10;
+static const size_t DMA_BUF_LEN = 512;
+static const size_t DMA_SAMPLES = DMA_BUF_COUNT * DMA_BUF_LEN * 2;  // left and right channels
+
+// TODO:
 //   - Determine optimal buffer sizes (dma included)
 //   - Determine appropriate timeout durations for FreeRTOS operations
 
@@ -45,9 +49,19 @@ void I2SAudioMicrophone::setup() {
 
   this->command_queue_ = xQueueCreate(BUFFER_COUNT, sizeof(CommandEvent));
   this->event_queue_ = xQueueCreate(BUFFER_COUNT, sizeof(TaskEvent));
-  this->output_ring_buffer_ = RingBuffer::create(RING_BUFFER_SIZE * sizeof(int16_t));
-  if (this->output_ring_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Could not allocate ring buffer");
+
+  size_t ring_buffer_size = RING_BUFFER_LENGTH * this->sample_rate_ / 1000 * sizeof(int16_t);
+
+  this->asr_ring_buffer_ = RingBuffer::create(RING_BUFFER_SIZE * sizeof(int16_t));
+  if (this->asr_ring_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Could not allocate ASR ring buffer");
+    this->mark_failed();
+    return;
+  }
+
+  this->comm_ring_buffer_ = RingBuffer::create(RING_BUFFER_SIZE * sizeof(int16_t));
+  if (this->comm_ring_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Could not allocate COMM ring buffer");
     this->mark_failed();
     return;
   }
@@ -58,12 +72,12 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
   TaskEvent event;
   CommandEvent command_event;
-  
+
   event.type = TaskEventType::STARTING;
   xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
   ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
-  int32_t *buffer = allocator.allocate(BUFFER_SIZE);
+  int32_t *buffer = allocator.allocate(DMA_SAMPLES);
 
   if (buffer == nullptr) {
     event.type = TaskEventType::WARNING;
@@ -85,11 +99,11 @@ void I2SAudioMicrophone::read_task_(void *params) {
       .mode = (i2s_mode_t) (this_microphone->parent_->get_i2s_mode() | I2S_MODE_RX),
       .sample_rate = this_microphone->sample_rate_,
       .bits_per_sample = this_microphone->bits_per_sample_,
-      .channel_format = this_microphone->channel_,
+      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,  // this_microphone->channel_,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 8,
-      .dma_buf_len = 128,
+      .dma_buf_count = DMA_BUF_COUNT,
+      .dma_buf_len = DMA_BUF_LEN,
       .use_apll = this_microphone->use_apll_,
       .tx_desc_auto_clear = false,
       .fixed_mclk = 0,
@@ -136,10 +150,10 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
       return;
     }
-    
+
     i2s_pin_config_t pin_config = this_microphone->parent_->get_pin_config();
     pin_config.data_in_num = this_microphone->din_pin_;
-    
+
     err = i2s_set_pin(this_microphone->parent_->get_port(), &pin_config);
     if (err != ESP_OK) {
       event.type = TaskEventType::WARNING;
@@ -160,7 +174,11 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
   event.type = TaskEventType::STARTED;
   xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
-  std::vector<int16_t> samples;
+  std::vector<int16_t, ExternalRAMAllocator<int16_t>> asr_samples;
+  std::vector<int16_t, ExternalRAMAllocator<int16_t>> comm_samples;
+
+  asr_samples.resize(DMA_SAMPLES);
+  comm_samples.resize(DMA_SAMPLES);
 
   while (true) {
     if (xQueueReceive(this_microphone->command_queue_, &command_event, 0) == pdTRUE) {
@@ -170,14 +188,14 @@ void I2SAudioMicrophone::read_task_(void *params) {
       }
     }
     size_t bytes_read;
-    esp_err_t err =
-        i2s_read(this_microphone->parent_->get_port(), buffer, BUFFER_SIZE, &bytes_read, (10 / portTICK_PERIOD_MS));
+    esp_err_t err = i2s_read(this_microphone->parent_->get_port(), buffer, DMA_SAMPLES * sizeof(int32_t), &bytes_read,
+                             (10 / portTICK_PERIOD_MS));
     if (err != ESP_OK) {
       event.type = TaskEventType::WARNING;
       event.err = err;
       xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
     }
-    
+
     if (bytes_read > 0) {
       // TODO: Handle 16 bits per sample, currently it won't allow that option at codegen stage
 
@@ -185,16 +203,24 @@ void I2SAudioMicrophone::read_task_(void *params) {
       //   this_microphone->output_ring_buffer_->write(buffer, bytes_read);
       // } else if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_32BIT) {
 
-        size_t samples_read = bytes_read / sizeof(int32_t);
-        samples.resize(samples_read);
-        for (size_t i = 0; i < samples_read; i++) {
-          int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 16;    // We are amplifying by a factor of 4 by only shifting 14 bits...
-          samples[i] = clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
-        }
-        size_t bytes_free = this_microphone->output_ring_buffer_->free();
-        size_t bytes_to_write = samples_read * sizeof(int16_t);
+      // At 48000 kHz, the current XMOS firmware is sending the same sample 3 times
+      const size_t sample_rate_factor = this_microphone->sample_rate_ / 16000;
 
-        this_microphone->output_ring_buffer_->write((void *) samples.data(), samples_read * sizeof(int16_t));
+      size_t samples_read = (bytes_read / sizeof(int32_t)) / (sample_rate_factor);
+      size_t frames_read = samples_read / 2;  // Left and right channel samples combine into 1 frame
+
+      // asr_samples.resize(frames_read);
+      // comm_samples.resize(frames_read);
+      for (size_t i = 0; i < frames_read; i++) {
+        asr_samples[i] = buffer[2 * sample_rate_factor * i] >> 16;
+        comm_samples[i] = buffer[2 * sample_rate_factor * i + 1] >> 16;
+        // int32_t temp = reinterpret_cast<int32_t *>(buffer)[i] >> 16;    // We are amplifying by a factor of 4 by only
+        // shifting 14 bits... samples[i] = clamp<int16_t>(temp, INT16_MIN, INT16_MAX);
+      }
+      size_t bytes_to_write = frames_read * sizeof(int16_t);
+
+      this_microphone->asr_ring_buffer_->write((void *) asr_samples.data(), bytes_to_write);
+      this_microphone->comm_ring_buffer_->write((void *) comm_samples.data(), bytes_to_write);
       // }
     }
 
@@ -205,7 +231,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
   event.type = TaskEventType::STOPPING;
   xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
-  allocator.deallocate(buffer, BUFFER_SIZE);
+  allocator.deallocate(buffer, DMA_SAMPLES);
   i2s_stop(this_microphone->parent_->get_port());
   i2s_driver_uninstall(this_microphone->parent_->get_port());
 
@@ -250,7 +276,12 @@ void I2SAudioMicrophone::stop_() {
 }
 
 size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) {
-  size_t bytes_read = this->output_ring_buffer_->read((void *) buf, len, 0);
+  size_t bytes_read = this->asr_ring_buffer_->read((void *) buf, len, 0);
+  return bytes_read;
+}
+
+size_t I2SAudioMicrophone::read_secondary(int16_t *buf, size_t len) {
+  size_t bytes_read = this->comm_ring_buffer_->read((void *) buf, len, 0);
   return bytes_read;
 }
 
@@ -306,7 +337,8 @@ void I2SAudioMicrophone::watch_() {
         this->read_task_handle_ = nullptr;
         this->parent_->unlock();
 
-        this->output_ring_buffer_->reset();
+        this->asr_ring_buffer_->reset();
+        this->comm_ring_buffer_->reset();
         xQueueReset(this->event_queue_);
         xQueueReset(this->command_queue_);
 
