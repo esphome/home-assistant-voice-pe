@@ -1,15 +1,16 @@
 name: YAML lint
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "**.yaml"
-      - "**.yml"
-  pull_request:
-    paths:
-      - "**.yaml"
-      - "**.yml"
+  workflow_dispatch:
+  #push:
+  #  branches: [main]
+  #  paths:
+  #    - "**.yaml"
+  #    - "**.yml"
+  #pull_request:
+  #  paths:
+  #    - "**.yaml"
+  #    - "**.yml"
 
 jobs:
   yamllint:
