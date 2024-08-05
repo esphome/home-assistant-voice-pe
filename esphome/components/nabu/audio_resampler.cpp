@@ -46,6 +46,8 @@ AudioResampler::~AudioResampler() {
     resampleFree(this->resampler_);
     this->resampler_ = nullptr;
   }
+
+  // dsps_fird_s16_aexx_free(&this->fir_filter_);
 }
 
 bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
@@ -382,6 +384,7 @@ int8_t AudioResampler::generate_q15_fir_coefficients_(int16_t *fir_coeffs, const
   }
 
   free(fir_window);
+  free(float_coeffs);
 
   return shift;
 }
