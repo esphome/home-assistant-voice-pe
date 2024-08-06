@@ -23,11 +23,7 @@ namespace micro_wake_word {
 
 enum State {
   IDLE,
-  START_MICROPHONE,
-  STARTING_MICROPHONE,
   DETECTING_WAKE_WORD,
-  STOP_MICROPHONE,
-  STOPPING_MICROPHONE,
 };
 
 // The number of audio slices to process before accepting a positive detection

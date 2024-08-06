@@ -17,9 +17,6 @@
 #include <cmath>
 
 // Major TODOs:
-//  - move everything into tasks
-//  - mWW will sit between the microphone and the voice_assistant
-//    - mWW will feed audio samples with VAD and wake word info to the voice assistant
 //  - Allow users, after, compilation, to set which wake words are loaded
 
 namespace esphome {
@@ -39,8 +36,9 @@ enum EventGroupBits : uint32_t {
   PREPROCESSOR_MESSAGE_IDLE = (1 << 6),
   PREPROCESSOR_MESSAGE_ERROR = (1 << 7),
 
-  INFERENCE_MESSAGE_IDLE = (1 << 12),
-  INFERENCE_MESSAGE_ERROR = (1 << 13),
+  INFERENCE_MESSAGE_STARTED = (1 << 12),
+  INFERENCE_MESSAGE_IDLE = (1 << 13),
+  INFERENCE_MESSAGE_ERROR = (1 << 14),
 
   ALL_BITS = 0xfffff,  // 24 total bits available in an event group
 };
@@ -51,16 +49,8 @@ static const LogString *micro_wake_word_state_to_string(State state) {
   switch (state) {
     case State::IDLE:
       return LOG_STR("IDLE");
-    case State::START_MICROPHONE:
-      return LOG_STR("START_MICROPHONE");
-    case State::STARTING_MICROPHONE:
-      return LOG_STR("STARTING_MICROPHONE");
     case State::DETECTING_WAKE_WORD:
       return LOG_STR("DETECTING_WAKE_WORD");
-    case State::STOP_MICROPHONE:
-      return LOG_STR("STOP_MICROPHONE");
-    case State::STOPPING_MICROPHONE:
-      return LOG_STR("STOPPING_MICROPHONE");
     default:
       return LOG_STR("UNKNOWN");
   }
@@ -245,6 +235,10 @@ void MicroWakeWord::inference_task_(void *params) {
                            EventGroupBits::INFERENCE_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
 
+      if (!(xEventGroupGetBits(this_mww->event_group_) & EventGroupBits::INFERENCE_MESSAGE_ERROR)) {
+        xEventGroupSetBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_STARTED);
+      }
+
       while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
         while (this_mww->features_ring_buffer_->available() > PREPROCESSOR_FEATURE_SIZE) {
           this_mww->update_model_probabilities_();
@@ -252,7 +246,7 @@ void MicroWakeWord::inference_task_(void *params) {
           // TODO: Use a queue to send this information
           if (this_mww->detect_wake_words_()) {
             this_mww->detected_ = true;
-            this_mww->reset_states_();  // Do we really want to reset all states?
+            this_mww->reset_states_();  // TODO: Do we really want to reset *all* states?
           }
         }
 
@@ -280,50 +274,43 @@ void MicroWakeWord::add_vad_model(const uint8_t *model_start, float probability_
 #endif
 
 void MicroWakeWord::loop() {
-  switch (this->state_) {
-    case State::IDLE:
-      break;
-    case State::START_MICROPHONE:
-      ESP_LOGD(TAG, "Starting Microphone");
+  if ((this->preprocessor_task_handle_ == nullptr) || (this->inference_task_handle_ == nullptr)) {
+    this->set_state_(State::IDLE);
+    return;
+  }
 
-      if (this->preprocessor_task_handle_ == nullptr) {
-        this->preprocessor_task_handle_ =
-            xTaskCreateStatic(MicroWakeWord::preprocessor_task_, "preprocessor", 8192, (void *) this, 10,
-                              this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
-      }
+  uint32_t event_bits = xEventGroupGetBits(this->event_group_);
+  if (event_bits & PREPROCESSOR_MESSAGE_ERROR) {
+    xEventGroupClearBits(this->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_ERROR);
+    this->set_state_(State::IDLE);
+    ESP_LOGE(TAG, "Preprocessor task encounted an error");
+    return;
+  }
 
-      xEventGroupSetBits(this->event_group_, PREPROCESSOR_COMMAND_START);
+  if (event_bits & INFERENCE_MESSAGE_ERROR) {
+    xEventGroupClearBits(this->event_group_, EventGroupBits::INFERENCE_MESSAGE_ERROR);
+    this->set_state_(State::IDLE);
+    ESP_LOGE(TAG, "Inference task encounted an error");
+    return;
+  }
 
-      this->set_state_(State::STARTING_MICROPHONE);
-      break;
-    case State::STARTING_MICROPHONE:
-      if (this->microphone_->is_running()) {
-        this->set_state_(State::DETECTING_WAKE_WORD);
+  if ((event_bits & PREPROCESSOR_MESSAGE_IDLE) || (event_bits & INFERENCE_MESSAGE_IDLE)) {
+    this->set_state_(State::IDLE);
+    return;
+  }
 
-        if (this->inference_task_handle_ == nullptr) {
-          this->inference_task_handle_ =
-              xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", 8192, (void *) this, 5,
-                                this->inference_task_stack_buffer_, &this->inference_task_stack_);
-        }
-      }
-      break;
-    case State::DETECTING_WAKE_WORD:
-      if (this->detected_) {
-        if (this->detected_) {
-          this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
-          this->detected_ = false;
-          this->detected_wake_word_ = "";
-        }
-      }
-      break;
-    case State::STOP_MICROPHONE:
-      xEventGroupSetBits(this->event_group_, COMMAND_STOP);
-      ESP_LOGD(TAG, "Stopping microWakeWord");
-      this->set_state_(State::STOPPING_MICROPHONE);
-      break;
-    case State::STOPPING_MICROPHONE:
-      this->set_state_(State::IDLE);
-      break;
+  if (event_bits & INFERENCE_MESSAGE_STARTED) {
+    xEventGroupClearBits(this->event_group_, EventGroupBits::INFERENCE_MESSAGE_STARTED);
+    this->set_state_(State::DETECTING_WAKE_WORD);
+  }
+
+  // TODO: Move this to a queue!
+  if (this->detected_) {
+    if (this->detected_) {
+      this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
+      this->detected_ = false;
+      this->detected_wake_word_ = "";
+    }
   }
 }
 
@@ -338,31 +325,52 @@ void MicroWakeWord::start() {
     return;
   }
 
-  if (this->state_ != State::IDLE) {
-    ESP_LOGW(TAG, "Wake word is already running");
+  if (this->is_running()) {
+    ESP_LOGW(TAG, "Wake word dection is already running");
     return;
   }
 
-  this->reset_states_();
-  this->set_state_(State::START_MICROPHONE);
+  ESP_LOGD(TAG, "Starting wake word detection");
+
+  if (this->preprocessor_task_handle_ == nullptr) {
+    this->preprocessor_task_handle_ =
+        xTaskCreateStatic(MicroWakeWord::preprocessor_task_, "preprocessor", 8192, (void *) this, 10,
+                          this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
+  }
+
+  if (this->inference_task_handle_ == nullptr) {
+    this->inference_task_handle_ =
+        xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", 8192, (void *) this, 5,
+                          this->inference_task_stack_buffer_, &this->inference_task_stack_);
+  }
+
+  xEventGroupSetBits(this->event_group_, PREPROCESSOR_COMMAND_START);
 }
 
 void MicroWakeWord::stop() {
-  if (this->state_ == State::IDLE) {
-    ESP_LOGW(TAG, "Wake word is already stopped");
+  if (this->state_ == IDLE)
     return;
-  }
-  if (this->state_ == State::STOPPING_MICROPHONE) {
-    ESP_LOGW(TAG, "Wake word is already stopping");
-    return;
-  }
-  this->set_state_(State::STOP_MICROPHONE);
+
+  ESP_LOGD(TAG, "Stopping wake word detection");
+
+  xEventGroupSetBits(this->event_group_, COMMAND_STOP);
+
+  xEventGroupWaitBits(this->event_group_,
+                      (PREPROCESSOR_MESSAGE_IDLE | INFERENCE_MESSAGE_IDLE),  // Bit message to read
+                      pdTRUE,                                                // Clear the bit on exit
+                      true,                                                  // Wait for all the bits,
+                      pdMS_TO_TICKS(200));  // Block temporarily before deleting each task
+
+  xEventGroupClearBits(this->event_group_, ALL_BITS);
+  this->features_ring_buffer_->reset();
 }
 
 void MicroWakeWord::set_state_(State state) {
-  ESP_LOGD(TAG, "State changed from %s to %s", LOG_STR_ARG(micro_wake_word_state_to_string(this->state_)),
-           LOG_STR_ARG(micro_wake_word_state_to_string(state)));
-  this->state_ = state;
+  if (this->state_ != state) {
+    ESP_LOGD(TAG, "State changed from %s to %s", LOG_STR_ARG(micro_wake_word_state_to_string(this->state_)),
+             LOG_STR_ARG(micro_wake_word_state_to_string(state)));
+    this->state_ = state;
+  }
 }
 
 bool MicroWakeWord::load_models_() {
