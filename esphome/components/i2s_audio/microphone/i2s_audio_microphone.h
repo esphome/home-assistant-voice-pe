@@ -25,6 +25,8 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   size_t read(int16_t *buf, size_t len) override;
   size_t read_secondary(int16_t *buf, size_t len) override;
 
+  size_t available_secondary() override { return this->comm_ring_buffer_->available(); }
+
 #if SOC_I2S_SUPPORTS_ADC
   void set_adc_channel(adc1_channel_t channel) {
     this->adc_channel_ = channel;
