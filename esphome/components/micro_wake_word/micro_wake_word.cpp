@@ -121,9 +121,9 @@ void MicroWakeWord::loop() {
       }
       break;
     case State::DETECTING_WAKE_WORD:
-      while (!this->has_enough_samples_()) {
+      // while (!this->has_enough_samples_()) {
         this->read_microphone_();
-      }
+      // }
       this->update_model_probabilities_();
       if (this->detect_wake_words_()) {
         ESP_LOGD(TAG, "Wake Word '%s' Detected", (this->detected_wake_word_).c_str());
