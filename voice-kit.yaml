@@ -677,7 +677,6 @@ event:
       - triple_press
       - long_press
 
-
 script:
   # Master script controling the LEDs, based on differente conditions : initialisation in progress, wifi and api connceted and voice assistant phase.
   # For the sake of simplicity and re-usability, the script calls child sripts defined below.
@@ -947,7 +946,6 @@ script:
       - lambda: id(dial_touched) = false;
       - script.execute: control_leds
 
-
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
     then:
@@ -1036,8 +1034,6 @@ media_player:
         file: sounds/awake.wav
       - id: facotry_reset_initiated_wave_file
         file: sounds/facotry_reset_initiated.wav
-
-
 
 external_components:
   - source: github://jesserockz/esphome-components
