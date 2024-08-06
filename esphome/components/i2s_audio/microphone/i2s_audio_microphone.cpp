@@ -12,16 +12,23 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const size_t RING_BUFFER_LENGTH = 64;  // 0.064 seconds
+static const size_t RING_BUFFER_LENGTH = 64;  // Measured in milliseconds
 static const size_t QUEUE_LENGTH = 10;
 
 static const size_t DMA_BUF_COUNT = 4;
 static const size_t DMA_BUF_LEN = 512;
-static const size_t DMA_SAMPLES = DMA_BUF_COUNT * DMA_BUF_LEN * 2;  // left and right channels
+static const size_t CHANNELS = 2;  // XMOS sends different info on left and right channels
+static const size_t DMA_SAMPLES = DMA_BUF_COUNT * DMA_BUF_LEN * CHANNELS;
 
 // TODO:
 //   - Determine optimal buffer sizes (dma included)
 //   - Determine appropriate timeout durations for FreeRTOS operations
+//   - Test if stopping the microphone behaves properly
+
+// Notes on things taken out/removed:
+//   - Doesn't properly handle 16 bit samples
+//   - Removed the watch_ function and handling any callbacks
+//   - Channels are fixed to left and right for the XMOS chip
 
 static const char *const TAG = "i2s_audio.microphone";
 
@@ -69,6 +76,10 @@ void I2SAudioMicrophone::setup() {
 }
 
 esp_err_t I2SAudioMicrophone::start_i2s_driver_() {
+  if (!this->parent_->try_lock()) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
   esp_err_t err;
 
   i2s_driver_config_t config = {
@@ -132,7 +143,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
 
   while (true) {
     uint32_t notification_bits = 0;
-    xTaskNotifyWait(pdTRUE,              // clear all bits at start of wait
+    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
                     ULONG_MAX,           // clear all bits after waiting
                     &notification_bits,  // notifcation value after wait is finished
                     portMAX_DELAY);      // how long to wait
@@ -141,6 +152,7 @@ void I2SAudioMicrophone::read_task_(void *params) {
       event.type = TaskEventType::STARTING;
       xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
+      // Note, if we have 16 bit samples incoming, this requires modification
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
       int32_t *buffer = allocator.allocate(DMA_SAMPLES);
 
@@ -161,6 +173,10 @@ void I2SAudioMicrophone::read_task_(void *params) {
           event.err = err;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         } else {
+          // TODO: Is this the ideal spot to reset the ring buffers?
+          this_microphone->asr_ring_buffer_->reset();
+          this_microphone->comm_ring_buffer_->reset();
+
           event.type = TaskEventType::STARTED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
@@ -182,25 +198,20 @@ void I2SAudioMicrophone::read_task_(void *params) {
             if (bytes_read > 0) {
               // TODO: Handle 16 bits per sample, currently it won't allow that option at codegen stage
 
-              // if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-              //   this_microphone->output_ring_buffer_->write(buffer, bytes_read);
-              // } else if (this_microphone->bits_per_sample_ == I2S_BITS_PER_SAMPLE_32BIT) {
-
-              // At 48000 kHz, the current XMOS firmware is sending the same sample 3 times
+              // At 48000 kHz, the current XMOS firmware is sending the same sample 3 times as a hack
               const size_t sample_rate_factor = this_microphone->sample_rate_ / 16000;
 
               size_t samples_read = (bytes_read / sizeof(int32_t)) / (sample_rate_factor);
-              size_t frames_read = samples_read / 2;  // Left and right channel samples combine into 1 frame
+              size_t frames_read = samples_read / CHANNELS;  // Left and right channel samples combine into 1 frame
 
               for (size_t i = 0; i < frames_read; i++) {
-                asr_samples[i] = buffer[2 * sample_rate_factor * i] >> 16;
-                comm_samples[i] = buffer[2 * sample_rate_factor * i + 1] >> 16;
+                asr_samples[i] = buffer[CHANNELS * sample_rate_factor * i] >> 16;
+                comm_samples[i] = buffer[CHANNELS * sample_rate_factor * i + 1] >> 16;
               }
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
               this_microphone->asr_ring_buffer_->write((void *) asr_samples.data(), bytes_to_write);
               this_microphone->comm_ring_buffer_->write((void *) comm_samples.data(), bytes_to_write);
-              // }
             }
 
             event.type = TaskEventType::RUNNING;
@@ -213,6 +224,8 @@ void I2SAudioMicrophone::read_task_(void *params) {
           allocator.deallocate(buffer, DMA_SAMPLES);
           i2s_stop(this_microphone->parent_->get_port());
           i2s_driver_uninstall(this_microphone->parent_->get_port());
+
+          this_microphone->parent_->unlock();
 
           event.type = TaskEventType::STOPPED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -228,106 +241,57 @@ void I2SAudioMicrophone::read_task_(void *params) {
 void I2SAudioMicrophone::start() {
   if (this->is_failed())
     return;
-  if (this->state_ == microphone::STATE_RUNNING)
-    return;  // Already running
-  this->state_ = microphone::STATE_STARTING;
-}
-
-void I2SAudioMicrophone::start_() {
-  if (!this->parent_->try_lock()) {
+  if ((this->state_ == microphone::STATE_STARTING) || (this->state_ == microphone::STATE_RUNNING))
     return;
-  }
 
   if (this->read_task_handle_ == nullptr) {
     xTaskCreate(I2SAudioMicrophone::read_task_, "microphone_task", 3584, (void *) this, 23, &this->read_task_handle_);
   }
+
+  // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
   xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
 }
 
 void I2SAudioMicrophone::stop() {
   if (this->state_ == microphone::STATE_STOPPED || this->is_failed())
     return;
-  if (this->state_ == microphone::STATE_STARTING) {
-    this->state_ = microphone::STATE_STOPPED;
-    return;
-  }
-  this->state_ = microphone::STATE_STOPPING;
-}
 
-void I2SAudioMicrophone::stop_() {
   xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
 }
 
-size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) {
-  size_t bytes_read = this->asr_ring_buffer_->read((void *) buf, len, 0);
-  return bytes_read;
-}
+size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) { return this->asr_ring_buffer_->read((void *) buf, len, 0); }
 
 size_t I2SAudioMicrophone::read_secondary(int16_t *buf, size_t len) {
-  size_t bytes_read = this->comm_ring_buffer_->read((void *) buf, len, 0);
-  return bytes_read;
-}
-
-void I2SAudioMicrophone::read_() {
-  // TODO: Does anything acutally use the callbacks?
-
-  // std::vector<int16_t, ExternalRAMAllocator<int16_t>> samples;
-  // samples.resize(BUFFER_SIZE);
-  // // TODO this probably isn't correct
-  // size_t bytes_read = this->read(samples.data(), BUFFER_SIZE / sizeof(int16_t));
-  // samples.resize(bytes_read / sizeof(int16_t));
-  // // this->data_callbacks_.call(samples);
+  return this->comm_ring_buffer_->read((void *) buf, len, 0);
 }
 
 void I2SAudioMicrophone::loop() {
-  this->watch_();
-  switch (this->state_) {
-    case microphone::STATE_STARTING:
-      this->start_();
-      break;
-    case microphone::STATE_RUNNING:
-      // if (this->data_callbacks_.size() > 0) {
-      //   this->read_();
-      // }
-      break;
-    case microphone::STATE_STOPPING:
-      this->stop_();
-      break;
-    case microphone::STATE_STOPPED:
-      break;
-  }
-}
+  // Note this->state_ is only modified here based on the status of the task
 
-void I2SAudioMicrophone::watch_() {
   TaskEvent event;
   while (xQueueReceive(this->event_queue_, &event, 0)) {
     switch (event.type) {
       case TaskEventType::STARTING:
+        this->state_ = microphone::STATE_STARTING;
         ESP_LOGD(TAG, "Starting I2S Audio Microphne");
         break;
       case TaskEventType::STARTED:
-        ESP_LOGD(TAG, "Started I2S Audio Microphone");
         this->state_ = microphone::STATE_RUNNING;
+        ESP_LOGD(TAG, "Started I2S Audio Microphone");
         break;
       case TaskEventType::RUNNING:
         this->status_clear_warning();
         break;
       case TaskEventType::STOPPING:
+        this->state_ = microphone::STATE_STOPPING;
         ESP_LOGD(TAG, "Stopping I2S Audio Microphone");
         break;
       case TaskEventType::STOPPED:
         this->state_ = microphone::STATE_STOPPED;
-
-        this->parent_->unlock();
-
-        this->asr_ring_buffer_->reset();
-        this->comm_ring_buffer_->reset();
-        xQueueReset(this->event_queue_);
-
         ESP_LOGD(TAG, "Stopped I2S Audio Microphone");
         break;
       case TaskEventType::WARNING:
-        ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(event.err));
+        ESP_LOGW(TAG, "Error involving I2S: %s", esp_err_to_name(event.err));
         this->status_set_warning();
         break;
       case TaskEventType::IDLE:
