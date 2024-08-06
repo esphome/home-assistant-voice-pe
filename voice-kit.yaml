@@ -203,11 +203,20 @@ binary_sensor:
                       media_player.is_playing:
                     then:
                       - media_player.pause:
-                - if:
-                    condition:
-                      media_player.is_paused:
-                    then:
-                      - media_player.play:
+                    else:
+                      - if:
+                          condition:
+                            media_player.is_paused:
+                          then:
+                            - media_player.play:
+                          else:
+                            if:
+                              condition:
+                                not:
+                                  voice_assistant.is_running
+                              then:
+                                - micro_wake_word.stop:
+                                - voice_assistant.start:
       # Double Click
       - timing:
           - ON for at most 1s
@@ -1031,9 +1040,9 @@ media_player:
       - id: rewind_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/rewind.wav
       - id: awake_wave_file
-        file: sounds/awake.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/awake.wav
       - id: facotry_reset_initiated_wave_file
-        file: sounds/facotry_reset_initiated.wav
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_initiated.wav
 
 external_components:
   - source: github://jesserockz/esphome-components
