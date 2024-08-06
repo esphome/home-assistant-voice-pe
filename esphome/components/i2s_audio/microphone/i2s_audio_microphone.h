@@ -29,7 +29,7 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   size_t read_secondary(int16_t *buf, size_t len) override;
 
 #if SOC_I2S_SUPPORTS_ADC
-      void set_adc_channel(adc1_channel_t channel) {
+  void set_adc_channel(adc1_channel_t channel) {
     this->adc_channel_ = channel;
     this->adc_ = true;
   }
@@ -44,9 +44,10 @@ class I2SAudioMicrophone : public I2SAudioIn, public microphone::Microphone, pub
   static void read_task_(void *params);
   void watch_();
 
+  esp_err_t start_i2s_driver_();
+
   TaskHandle_t read_task_handle_{nullptr};
   QueueHandle_t event_queue_;
-  QueueHandle_t command_queue_;
   std::unique_ptr<RingBuffer> asr_ring_buffer_;
   std::unique_ptr<RingBuffer> comm_ring_buffer_;
 
