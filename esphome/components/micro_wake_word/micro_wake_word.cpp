@@ -31,9 +31,18 @@ static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t BUFFER_LENGTH = 64;      // 0.064 seconds
 static const size_t BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * BUFFER_LENGTH;
 
-enum TaskNotificationBits : uint32_t {
-  COMMAND_START = (1 << 0),  // Starts the main task purpose
-  COMMAND_STOP = (1 << 1),   // stops the main task
+enum EventGroupBits : uint32_t {
+  COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
+
+  PREPROCESSOR_COMMAND_START = (1 << 4),
+  PREPROCESSOR_MESSAGE_STARTED = (1 << 5),
+  PREPROCESSOR_MESSAGE_IDLE = (1 << 6),
+  PREPROCESSOR_MESSAGE_ERROR = (1 << 7),
+
+  INFERENCE_MESSAGE_IDLE = (1 << 12),
+  INFERENCE_MESSAGE_ERROR = (1 << 13),
+
+  ALL_BITS = 0xfffff,  // 24 total bits available in an event group
 };
 
 float MicroWakeWord::get_setup_priority() const { return setup_priority::AFTER_CONNECTION; }
@@ -92,8 +101,9 @@ void MicroWakeWord::setup() {
   this->frontend_config_.log_scale.enable_log = 1;
   this->frontend_config_.log_scale.scale_shift = 6;
 
-  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
+  this->event_group_ = xEventGroupCreate();
 
+  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
   this->preprocessor_task_stack_buffer_ = allocator.allocate(8192);
   this->inference_task_stack_buffer_ = allocator.allocate(8192);
 
@@ -104,18 +114,22 @@ void MicroWakeWord::preprocessor_task_(void *params) {
   MicroWakeWord *this_mww = (MicroWakeWord *) params;
 
   while (true) {
-    uint32_t notification_bits = 0;
-    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
-                    ULONG_MAX,           // clear all bits after waiting
-                    &notification_bits,  // notifcation value after wait is finished
-                    portMAX_DELAY);      // how long to wait
+    xEventGroupSetBits(this_mww->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_IDLE);
 
-    if (notification_bits & TaskNotificationBits::COMMAND_START) {
+    EventBits_t event_bits = xEventGroupWaitBits(this_mww->event_group_,
+                                                 PREPROCESSOR_COMMAND_START,  // Bit message to read
+                                                 pdTRUE,                      // Clear the bit on exit
+                                                 pdFALSE,                     // Wait for all the bits,
+                                                 portMAX_DELAY);              // Block indefinitely until bit is set
+
+    xEventGroupClearBits(this_mww->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_IDLE);
+    {
       // Setup preprocesor feature generator
       if (!FrontendPopulateState(&this_mww->frontend_config_, &this_mww->frontend_state_, AUDIO_SAMPLE_FREQUENCY)) {
-        // TODO: Handle failure
+        // TODO: Potentially better handle failure
         FrontendFreeStateContents(&this_mww->frontend_state_);
-        continue;
+        xEventGroupSetBits(this_mww->event_group_,
+                           EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
 
       const size_t new_samples_to_read = this_mww->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000);
@@ -127,15 +141,17 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       int16_t *audio_buffer = int16_allocator.allocate(new_samples_to_read);
 
       if ((audio_buffer == nullptr) || (features_buffer == nullptr)) {
-        // TODO: Handle buffer allocation failure
-        continue;
+        // TODO: Potentially better handle buffer allocation failure
+        xEventGroupSetBits(this_mww->event_group_,
+                           EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
 
       if (this_mww->features_ring_buffer_ == nullptr) {
         this_mww->features_ring_buffer_ = RingBuffer::create(PREPROCESSOR_FEATURE_SIZE * 10);  // TODO: Tweak this
         if (this_mww->features_ring_buffer_ == nullptr) {
-          // TODO: Handle failure
-          continue;
+          // TODO: Potentially better handle failure
+          xEventGroupSetBits(this_mww->event_group_,
+                             EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
         }
       }
 
@@ -143,12 +159,11 @@ void MicroWakeWord::preprocessor_task_(void *params) {
         this_mww->microphone_->start();
       }
 
-      while (true) {
-        notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
-        if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
-          break;
-        }
+      if (!(xEventGroupGetBits(this_mww->event_group_) & EventGroupBits::PREPROCESSOR_MESSAGE_ERROR)) {
+        xEventGroupSetBits(this_mww->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_STARTED);
+      }
 
+      while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
         while (this_mww->microphone_->available_secondary() / sizeof(int16_t) >= new_samples_to_read) {
           size_t bytes_read =
               this_mww->microphone_->read_secondary(audio_buffer, new_samples_to_read * sizeof(int16_t));
@@ -191,11 +206,20 @@ void MicroWakeWord::preprocessor_task_(void *params) {
 
           this_mww->features_ring_buffer_->write((void *) features_buffer, PREPROCESSOR_FEATURE_SIZE);
         }
+
+        // Block to give other tasks opportunity to run
+        delay(10);
       }
 
       FrontendFreeStateContents(&this_mww->frontend_state_);
-      int8_allocator.deallocate(features_buffer, PREPROCESSOR_FEATURE_SIZE);
-      int16_allocator.deallocate(audio_buffer, new_samples_to_read);
+
+      if (features_buffer != nullptr) {
+        int8_allocator.deallocate(features_buffer, PREPROCESSOR_FEATURE_SIZE);
+      }
+
+      if (audio_buffer != nullptr) {
+        int16_allocator.deallocate(audio_buffer, new_samples_to_read);
+      }
     }
   }
 }
@@ -204,24 +228,24 @@ void MicroWakeWord::inference_task_(void *params) {
   MicroWakeWord *this_mww = (MicroWakeWord *) params;
 
   while (true) {
-    uint32_t notification_bits = 0;
-    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
-                    ULONG_MAX,           // clear all bits after waiting
-                    &notification_bits,  // notifcation value after wait is finished
-                    portMAX_DELAY);      // how long to wait
+    xEventGroupSetBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_IDLE);
 
-    if (notification_bits & TaskNotificationBits::COMMAND_START) {
+    EventBits_t event_bits = xEventGroupWaitBits(this_mww->event_group_,
+                                                 PREPROCESSOR_MESSAGE_STARTED,  // Bit message to read
+                                                 pdTRUE,                        // Clear the bit on exit
+                                                 pdFALSE,                       // Wait for all the bits,
+                                                 portMAX_DELAY);                // Block indefinitely until bit is set
+
+    xEventGroupClearBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_IDLE);
+
+    {
       if (!this_mww->load_models_()) {
-        // TODO: Handle failure
-        continue;
+        // TODO: Potentially handle failure better
+        xEventGroupSetBits(this_mww->event_group_,
+                           EventGroupBits::INFERENCE_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
 
-      while (true) {
-        notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
-        if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
-          break;
-        }
-
+      while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
         while (this_mww->features_ring_buffer_->available() > PREPROCESSOR_FEATURE_SIZE) {
           this_mww->update_model_probabilities_();
 
@@ -231,6 +255,9 @@ void MicroWakeWord::inference_task_(void *params) {
             this_mww->reset_states_();  // Do we really want to reset all states?
           }
         }
+
+        // Block to give other tasks opportunity to run
+        delay(10);
       }
 
       this_mww->unload_models_();
@@ -264,8 +291,8 @@ void MicroWakeWord::loop() {
             xTaskCreateStatic(MicroWakeWord::preprocessor_task_, "preprocessor", 8192, (void *) this, 10,
                               this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
       }
-      // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
-      xTaskNotify(this->preprocessor_task_handle_, TaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
+
+      xEventGroupSetBits(this->event_group_, PREPROCESSOR_COMMAND_START);
 
       this->set_state_(State::STARTING_MICROPHONE);
       break;
@@ -278,8 +305,6 @@ void MicroWakeWord::loop() {
               xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", 8192, (void *) this, 5,
                                 this->inference_task_stack_buffer_, &this->inference_task_stack_);
         }
-        // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
-        xTaskNotify(this->inference_task_handle_, TaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
       }
       break;
     case State::DETECTING_WAKE_WORD:
@@ -292,8 +317,7 @@ void MicroWakeWord::loop() {
       }
       break;
     case State::STOP_MICROPHONE:
-      xTaskNotify(this->preprocessor_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
-      xTaskNotify(this->inference_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
+      xEventGroupSetBits(this->event_group_, COMMAND_STOP);
       ESP_LOGD(TAG, "Stopping microWakeWord");
       this->set_state_(State::STOPPING_MICROPHONE);
       break;
@@ -311,18 +335,6 @@ void MicroWakeWord::start() {
 
   if (this->is_failed()) {
     ESP_LOGW(TAG, "Wake word component is marked as failed. Please check setup logs");
-    return;
-  }
-
-  if (!this->load_models_()) {
-    ESP_LOGE(TAG, "Failed to load the wake word model(s) or allocate buffers");
-    this->status_set_error();
-  } else {
-    this->status_clear_error();
-  }
-
-  if (this->status_has_error()) {
-    ESP_LOGW(TAG, "Wake word component has an error. Please check logs");
     return;
   }
 

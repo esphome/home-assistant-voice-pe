@@ -17,6 +17,7 @@
 #include <tensorflow/lite/micro/micro_interpreter.h>
 #include <tensorflow/lite/micro/micro_mutable_op_resolver.h>
 
+#include <freertos/event_groups.h>
 namespace esphome {
 namespace micro_wake_word {
 
@@ -118,6 +119,8 @@ class MicroWakeWord : public Component {
   bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);
 
   inline uint16_t new_samples_to_get_() { return (this->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000)); }
+
+  EventGroupHandle_t event_group_;
 
   static void preprocessor_task_(void *params);
   TaskHandle_t preprocessor_task_handle_{nullptr};
