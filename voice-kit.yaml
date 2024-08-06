@@ -167,8 +167,10 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_off:
       - delay: 200ms
+      - lambda: id(nabu_media_player).set_ducking_ratio(1);
       - script.execute: control_leds
     on_turn_on:
+      - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
       - script.execute: ring_timer
       - script.execute: control_leds
       - delay: 15min
@@ -181,25 +183,65 @@ binary_sensor:
       number: GPIO17
       inverted: true
     on_press:
-      - if:
-          condition:
-            switch.is_on: timer_ringing
-          then:
-            - switch.turn_off: timer_ringing
-      - if:
-          condition:
-            media_player.is_playing:
-          then:
-            - media_player.pause:
-      - if:
-          condition:
-            media_player.is_paused:
-          then:
-            - media_player.play:
       - script.execute: control_leds
     on_release:
       - script.execute: control_leds
     on_multi_click:
+      # Simple Click
+      - timing:
+          - ON for at most 1s
+          - OFF for at least 0.5s
+        then:
+          - if:
+              condition:
+                switch.is_on: timer_ringing
+              then:
+                - switch.turn_off: timer_ringing
+              else:
+                - if:
+                    condition:
+                      media_player.is_playing:
+                    then:
+                      - media_player.pause:
+                - if:
+                    condition:
+                      media_player.is_paused:
+                    then:
+                      - media_player.play:
+      # Double Click
+      - timing:
+          - ON for at most 1s
+          - OFF for at most 0.5s
+          - ON for at most 1s
+          - OFF for at least 0.5s
+        then:
+          - event.trigger:
+              id: button_press_event
+              event_type: "double_press"
+      # Triple Click
+      - timing:
+          - ON for at most 1s
+          - OFF for at most 0.5s
+          - ON for at most 1s
+          - OFF for at most 0.5s
+          - ON for at most 1s
+          - OFF for at least 0.5s
+        then:
+          - event.trigger:
+              id: button_press_event
+              event_type: "triple_press"
+      # Long Press
+      - timing:
+          - ON for at least 1s
+        then:
+          - if:
+              condition:
+                lambda: return !id(dial_touched);
+              then:
+                - light.turn_off: voice_assistant_leds
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "long_press"
       # Very important do not remove. Trust me :D
       - timing:
           # E .
@@ -268,6 +310,28 @@ binary_sensor:
               brightness: 100%
               id: voice_assistant_leds
               effect: "Rainbow"
+      # Factory Reset Warning
+      - timing:
+          - ON for at least 10s
+        then:
+          - light.turn_on:
+              brightness: 100%
+              id: voice_assistant_leds
+              effect: "Factory Reset Coming Up"
+          - lambda: |-
+              id(nabu_media_player)
+                ->make_call()
+                .set_announcement(true)
+                .set_local_media_file(id(facotry_reset_initiated_wave_file))
+                .perform();
+          - wait_until:
+              binary_sensor.is_off: center_button
+          - light.turn_off: voice_assistant_leds
+      # Factory Reset
+      - timing:
+          - ON for at least 22s
+        then:
+          - button.press: factory_reset_button
 
   - platform: gpio
     id: hardware_mute_switch
@@ -498,11 +562,31 @@ light:
           lambda: |-
             static uint8_t index = 0;
             Color color(255, 0, 0);
+            if (initial_run) {
+              index = 0;
+            }
             for (int i = 0; i < 12; i++) {
               if (i <= index ) {
                 it[i] = Color::BLACK;
               } else {
                 it[i] = color;
+              }
+            }
+            index = (index + 1) % 12;
+      - addressable_lambda:
+          name: "Factory Reset Coming Up"
+          update_interval: 1s
+          lambda: |-
+            static uint8_t index = 0;
+            Color color(255, 0, 0);
+            if (initial_run) {
+              index = 0;
+            }
+            for (int i = 0; i < 12; i++) {
+              if (i <= index ) {
+                it[i] = color;
+              } else {
+                it[i] = Color::BLACK;
               }
             }
             index = (index + 1) % 12;
@@ -533,6 +617,7 @@ sensor:
     pin_b: GPIO18
     resolution: 2
     on_clockwise:
+      - lambda: id(dial_touched) = true;
       - if:
           condition:
             binary_sensor.is_off: center_button
@@ -542,7 +627,7 @@ sensor:
                 increase_volume: true
             - if:
                 condition:
-                  lambda: return(id(dial).state > 60);
+                  lambda: return(id(dial).state > 120);
                 then:
                   - sensor.rotary_encoder.set_value:
                       id: dial
@@ -558,6 +643,7 @@ sensor:
                 id: control_hue
                 increase_hue: true
     on_anticlockwise:
+      - lambda: id(dial_touched) = true;
       - if:
           condition:
             binary_sensor.is_off: center_button
@@ -579,6 +665,18 @@ sensor:
       name: "Loop Time"
     psram:
       name: "PSRAM Free"
+
+event:
+  - platform: template
+    id: button_press_event
+    name: "Button press"
+    icon: mdi:button-pointer
+    device_class: button
+    event_types:
+      - double_press
+      - triple_press
+      - long_press
+
 
 script:
   # Master script controling the LEDs, based on differente conditions : initialisation in progress, wifi and api connceted and voice assistant phase.
@@ -797,8 +895,6 @@ script:
             - media_player.volume_up:
           else:
             - media_player.volume_down:
-      - delay: 16ms
-      - lambda: id(dial_touched) = true;
       - script.execute: control_leds
       - delay: 2s
       - lambda: id(dial_touched) = false;
@@ -843,6 +939,14 @@ script:
                       green,
                       blue);
           id(led_ring).make_call().set_rgb(red, green, blue).perform();
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
+      - wait_until:
+          binary_sensor.is_off: center_button
+      - lambda: id(dial_touched) = false;
+      - script.execute: control_leds
+
 
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
@@ -928,6 +1032,12 @@ media_player:
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/party.wav
       - id: rewind_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/rewind.wav
+      - id: awake_wave_file
+        file: sounds/awake.wav
+      - id: facotry_reset_initiated_wave_file
+        file: sounds/facotry_reset_initiated.wav
+
+
 
 external_components:
   - source: github://jesserockz/esphome-components
@@ -941,8 +1051,7 @@ external_components:
     components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
-  # TODO: Remove after ESPHome 2024.8.0 is released
-  - source: github://pr#7165
+  - source: github://esphome/esphome@dev
     components: [update, http_request, watchdog]
     refresh: 0s
 
@@ -1008,6 +1117,12 @@ voice_assistant:
           - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
           - script.execute: control_leds
   on_start:
+    - lambda: |-
+        id(nabu_media_player)
+          ->make_call()
+          .set_announcement(true)
+          .set_local_media_file(id(awake_wave_file))
+          .perform();
     - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
@@ -1032,12 +1147,14 @@ voice_assistant:
   on_timer_finished:
     - switch.turn_on: timer_ringing
 
+# TODO: Remove before launch, added for testing/development
 button:
   - platform: restart
     name: "Restart"
     entity_category: diagnostic
 
   - platform: factory_reset
+    id: factory_reset_button
     name: "Factory Reset"
     entity_category: diagnostic
 
@@ -1051,17 +1168,14 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
-
-  # TODO: Remove before launch, added for testing/development
-
   - platform: template
     name: Check for update
-    entity_category: config
+    entity_category: diagnostic
     on_press:
       - component.update: update_http_request
   - platform: template
     name: Perform Update
-    entity_category: config
+    entity_category: diagnostic
     on_press:
       - update.perform:
           id: update_http_request
