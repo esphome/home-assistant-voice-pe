@@ -62,9 +62,8 @@ class MicroWakeWord : public Component {
   microphone::Microphone *microphone_{nullptr};
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
   State state_{State::IDLE};
-  HighFrequencyLoopRequester high_freq_;
 
-  std::unique_ptr<RingBuffer> ring_buffer_;
+  std::unique_ptr<RingBuffer> features_ring_buffer_;
 
   std::vector<WakeWordModel> wake_word_models_;
 
@@ -84,35 +83,10 @@ class MicroWakeWord : public Component {
 
   uint8_t features_step_size_;
 
-  // Stores audio read from the microphone before being added to the ring buffer.
-  int16_t *input_buffer_{nullptr};
-  // Stores audio to be fed into the audio frontend for generating features.
-  int16_t *preprocessor_audio_buffer_{nullptr};
-
   bool detected_{false};
   std::string detected_wake_word_{""};
 
   void set_state_(State state);
-
-  /// @brief Tests if there are enough samples in the ring buffer to generate new features.
-  /// @return True if enough samples, false otherwise.
-  bool has_enough_samples_();
-
-  /** Reads audio from microphone into the ring buffer
-   *
-   * Audio data (16000 kHz with int16 samples) is read into the input_buffer_.
-   * Verifies the ring buffer has enough space for all audio data. If not, it logs
-   * a warning and resets the ring buffer entirely.
-   * @return Number of bytes written to the ring buffer
-   */
-  size_t read_microphone_();
-
-  /// @brief Allocates memory for input_buffer_, preprocessor_audio_buffer_, and ring_buffer_
-  /// @return True if successful, false otherwise
-  bool allocate_buffers_();
-
-  /// @brief Frees memory allocated for input_buffer_ and preprocessor_audio_buffer_
-  void deallocate_buffers_();
 
   /// @brief Loads streaming models and prepares the feature generation frontend
   /// @return True if successful, false otherwise
@@ -137,15 +111,6 @@ class MicroWakeWord : public Component {
    */
   bool detect_wake_words_();
 
-  /** Generates features for a window of audio samples
-   *
-   * Reads samples from the ring buffer and feeds them into the preprocessor frontend.
-   * Adapted from TFLite microspeech frontend.
-   * @param features int8_t array to store the audio features
-   * @return True if successful, false otherwise.
-   */
-  bool generate_features_for_window_(int8_t features[PREPROCESSOR_FEATURE_SIZE]);
-
   /// @brief Resets the ring buffer, ignore_windows_, and sliding window probabilities
   void reset_states_();
 
@@ -153,6 +118,16 @@ class MicroWakeWord : public Component {
   bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);
 
   inline uint16_t new_samples_to_get_() { return (this->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000)); }
+
+  static void preprocessor_task_(void *params);
+  TaskHandle_t preprocessor_task_handle_{nullptr};
+  StaticTask_t preprocessor_task_stack_;
+  StackType_t *preprocessor_task_stack_buffer_{nullptr};
+
+  static void inference_task_(void *params);
+  TaskHandle_t inference_task_handle_{nullptr};
+  StaticTask_t inference_task_stack_;
+  StackType_t *inference_task_stack_buffer_{nullptr};
 };
 
 template<typename... Ts> class StartAction : public Action<Ts...>, public Parented<MicroWakeWord> {

@@ -30,7 +30,11 @@ static const char *const TAG = "micro_wake_word";
 static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
 static const size_t BUFFER_LENGTH = 64;      // 0.064 seconds
 static const size_t BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * BUFFER_LENGTH;
-static const size_t INPUT_BUFFER_SIZE = 32 * SAMPLE_RATE_HZ / 1000;  // 16ms * 16kHz / 1000ms
+
+enum TaskNotificationBits : uint32_t {
+  COMMAND_START = (1 << 0),  // Starts the main task purpose
+  COMMAND_STOP = (1 << 1),   // stops the main task
+};
 
 float MicroWakeWord::get_setup_priority() const { return setup_priority::AFTER_CONNECTION; }
 
@@ -72,8 +76,6 @@ void MicroWakeWord::setup() {
     return;
   }
 
-  ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
-
   this->frontend_config_.window.size_ms = FEATURE_DURATION_MS;
   this->frontend_config_.window.step_size_ms = this->features_step_size_;
   this->frontend_config_.filterbank.num_channels = PREPROCESSOR_FEATURE_SIZE;
@@ -89,6 +91,151 @@ void MicroWakeWord::setup() {
   this->frontend_config_.pcan_gain_control.gain_bits = 21;
   this->frontend_config_.log_scale.enable_log = 1;
   this->frontend_config_.log_scale.scale_shift = 6;
+
+  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
+
+  this->preprocessor_task_stack_buffer_ = allocator.allocate(8192);
+  this->inference_task_stack_buffer_ = allocator.allocate(8192);
+
+  ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
+}
+
+void MicroWakeWord::preprocessor_task_(void *params) {
+  MicroWakeWord *this_mww = (MicroWakeWord *) params;
+
+  while (true) {
+    uint32_t notification_bits = 0;
+    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
+                    ULONG_MAX,           // clear all bits after waiting
+                    &notification_bits,  // notifcation value after wait is finished
+                    portMAX_DELAY);      // how long to wait
+
+    if (notification_bits & TaskNotificationBits::COMMAND_START) {
+      // Setup preprocesor feature generator
+      if (!FrontendPopulateState(&this_mww->frontend_config_, &this_mww->frontend_state_, AUDIO_SAMPLE_FREQUENCY)) {
+        // TODO: Handle failure
+        FrontendFreeStateContents(&this_mww->frontend_state_);
+        continue;
+      }
+
+      const size_t new_samples_to_read = this_mww->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000);
+
+      ExternalRAMAllocator<int8_t> int8_allocator(ExternalRAMAllocator<int8_t>::ALLOW_FAILURE);
+      ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+
+      int8_t *features_buffer = int8_allocator.allocate(PREPROCESSOR_FEATURE_SIZE);
+      int16_t *audio_buffer = int16_allocator.allocate(new_samples_to_read);
+
+      if ((audio_buffer == nullptr) || (features_buffer == nullptr)) {
+        // TODO: Handle buffer allocation failure
+        continue;
+      }
+
+      if (this_mww->features_ring_buffer_ == nullptr) {
+        this_mww->features_ring_buffer_ = RingBuffer::create(PREPROCESSOR_FEATURE_SIZE * 10);  // TODO: Tweak this
+        if (this_mww->features_ring_buffer_ == nullptr) {
+          // TODO: Handle failure
+          continue;
+        }
+      }
+
+      if (this_mww->microphone_->is_stopped()) {
+        this_mww->microphone_->start();
+      }
+
+      while (true) {
+        notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+        if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
+          break;
+        }
+
+        while (this_mww->microphone_->available_secondary() / sizeof(int16_t) >= new_samples_to_read) {
+          size_t bytes_read =
+              this_mww->microphone_->read_secondary(audio_buffer, new_samples_to_read * sizeof(int16_t));
+          if (bytes_read < new_samples_to_read * sizeof(int16_t)) {
+            // TODO: Handle not enough samples read
+            continue;
+          }
+
+          size_t num_samples_processed;
+          struct FrontendOutput frontend_output = FrontendProcessSamples(&this_mww->frontend_state_, audio_buffer,
+                                                                         new_samples_to_read, &num_samples_processed);
+
+          for (size_t i = 0; i < frontend_output.size; ++i) {
+            // These scaling values are set to match the TFLite audio frontend int8 output.
+            // The feature pipeline outputs 16-bit signed integers in roughly a 0 to 670
+            // range. In training, these are then arbitrarily divided by 25.6 to get
+            // float values in the rough range of 0.0 to 26.0. This scaling is performed
+            // for historical reasons, to match up with the output of other feature
+            // generators.
+            // The process is then further complicated when we quantize the model. This
+            // means we have to scale the 0.0 to 26.0 real values to the -128 to 127
+            // signed integer numbers.
+            // All this means that to get matching values from our integer feature
+            // output into the tensor input, we have to perform:
+            // input = (((feature / 25.6) / 26.0) * 256) - 128
+            // To simplify this and perform it in 32-bit integer math, we rearrange to:
+            // input = (feature * 256) / (25.6 * 26.0) - 128
+            constexpr int32_t value_scale = 256;
+            constexpr int32_t value_div = 666;  // 666 = 25.6 * 26.0 after rounding
+            int32_t value = ((frontend_output.values[i] * value_scale) + (value_div / 2)) / value_div;
+            value -= 128;
+            if (value < -128) {
+              value = -128;
+            }
+            if (value > 127) {
+              value = 127;
+            }
+            features_buffer[i] = value;
+          }
+
+          this_mww->features_ring_buffer_->write((void *) features_buffer, PREPROCESSOR_FEATURE_SIZE);
+        }
+      }
+
+      FrontendFreeStateContents(&this_mww->frontend_state_);
+      int8_allocator.deallocate(features_buffer, PREPROCESSOR_FEATURE_SIZE);
+      int16_allocator.deallocate(audio_buffer, new_samples_to_read);
+    }
+  }
+}
+
+void MicroWakeWord::inference_task_(void *params) {
+  MicroWakeWord *this_mww = (MicroWakeWord *) params;
+
+  while (true) {
+    uint32_t notification_bits = 0;
+    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
+                    ULONG_MAX,           // clear all bits after waiting
+                    &notification_bits,  // notifcation value after wait is finished
+                    portMAX_DELAY);      // how long to wait
+
+    if (notification_bits & TaskNotificationBits::COMMAND_START) {
+      if (!this_mww->load_models_()) {
+        // TODO: Handle failure
+        continue;
+      }
+
+      while (true) {
+        notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+        if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
+          break;
+        }
+
+        while (this_mww->features_ring_buffer_->available() > PREPROCESSOR_FEATURE_SIZE) {
+          this_mww->update_model_probabilities_();
+
+          // TODO: Use a queue to send this information
+          if (this_mww->detect_wake_words_()) {
+            this_mww->detected_ = true;
+            this_mww->reset_states_();  // Do we really want to reset all states?
+          }
+        }
+      }
+
+      this_mww->unload_models_();
+    }
+  }
 }
 
 void MicroWakeWord::add_wake_word_model(const uint8_t *model_start, float probability_cutoff,
@@ -111,43 +258,47 @@ void MicroWakeWord::loop() {
       break;
     case State::START_MICROPHONE:
       ESP_LOGD(TAG, "Starting Microphone");
-      this->microphone_->start();
+
+      if (this->preprocessor_task_handle_ == nullptr) {
+        this->preprocessor_task_handle_ =
+            xTaskCreateStatic(MicroWakeWord::preprocessor_task_, "preprocessor", 8192, (void *) this, 10,
+                              this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
+      }
+      // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
+      xTaskNotify(this->preprocessor_task_handle_, TaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
+
       this->set_state_(State::STARTING_MICROPHONE);
-      // this->high_freq_.start();
       break;
     case State::STARTING_MICROPHONE:
       if (this->microphone_->is_running()) {
         this->set_state_(State::DETECTING_WAKE_WORD);
+
+        if (this->inference_task_handle_ == nullptr) {
+          this->inference_task_handle_ =
+              xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", 8192, (void *) this, 5,
+                                this->inference_task_stack_buffer_, &this->inference_task_stack_);
+        }
+        // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
+        xTaskNotify(this->inference_task_handle_, TaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
       }
       break;
     case State::DETECTING_WAKE_WORD:
-      // while (!this->has_enough_samples_()) {
-        this->read_microphone_();
-      // }
-      this->update_model_probabilities_();
-      if (this->detect_wake_words_()) {
-        ESP_LOGD(TAG, "Wake Word '%s' Detected", (this->detected_wake_word_).c_str());
-        this->detected_ = true;
-        this->set_state_(State::STOP_MICROPHONE);
+      if (this->detected_) {
+        if (this->detected_) {
+          this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
+          this->detected_ = false;
+          this->detected_wake_word_ = "";
+        }
       }
       break;
     case State::STOP_MICROPHONE:
-      ESP_LOGD(TAG, "Stopping Microphone");
-      // this->microphone_->stop();
+      xTaskNotify(this->preprocessor_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
+      xTaskNotify(this->inference_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
+      ESP_LOGD(TAG, "Stopping microWakeWord");
       this->set_state_(State::STOPPING_MICROPHONE);
-      // this->high_freq_.stop();
-      this->unload_models_();
-      this->deallocate_buffers_();
       break;
     case State::STOPPING_MICROPHONE:
-      // if (this->microphone_->is_stopped()) {
       this->set_state_(State::IDLE);
-      if (this->detected_) {
-        this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
-        this->detected_ = false;
-        this->detected_wake_word_ = "";
-      }
-      // }
       break;
   }
 }
@@ -163,7 +314,7 @@ void MicroWakeWord::start() {
     return;
   }
 
-  if (!this->load_models_() || !this->allocate_buffers_()) {
+  if (!this->load_models_()) {
     ESP_LOGE(TAG, "Failed to load the wake word model(s) or allocate buffers");
     this->status_set_error();
   } else {
@@ -202,72 +353,7 @@ void MicroWakeWord::set_state_(State state) {
   this->state_ = state;
 }
 
-size_t MicroWakeWord::read_microphone_() {
-  size_t bytes_read = this->microphone_->read_secondary(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t));
-  if (bytes_read == 0) {
-    return 0;
-  }
-
-  size_t bytes_free = this->ring_buffer_->free();
-
-  if (bytes_free < bytes_read) {
-    ESP_LOGW(TAG,
-             "Not enough free bytes in ring buffer to store incoming audio data (free bytes=%d, incoming bytes=%d). "
-             "Resetting the ring buffer. Wake word detection accuracy will be reduced.",
-             bytes_free, bytes_read);
-
-    this->ring_buffer_->reset();
-  }
-  // ESP_LOGD(TAG, "microphone_read %d", this->input_buffer_[0]);
-  return this->ring_buffer_->write((void *) this->input_buffer_, bytes_read);
-}
-
-bool MicroWakeWord::allocate_buffers_() {
-  ExternalRAMAllocator<int16_t> audio_samples_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-
-  if (this->input_buffer_ == nullptr) {
-    this->input_buffer_ = audio_samples_allocator.allocate(INPUT_BUFFER_SIZE * sizeof(int16_t));
-    if (this->input_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Could not allocate input buffer");
-      return false;
-    }
-  }
-
-  if (this->preprocessor_audio_buffer_ == nullptr) {
-    this->preprocessor_audio_buffer_ = audio_samples_allocator.allocate(this->new_samples_to_get_());
-    if (this->preprocessor_audio_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Could not allocate the audio preprocessor's buffer.");
-      return false;
-    }
-  }
-
-  if (this->ring_buffer_ == nullptr) {
-    this->ring_buffer_ = RingBuffer::create(BUFFER_SIZE * sizeof(int16_t));
-    if (this->ring_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Could not allocate ring buffer");
-      return false;
-    }
-  }
-
-  return true;
-}
-
-void MicroWakeWord::deallocate_buffers_() {
-  ExternalRAMAllocator<int16_t> audio_samples_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  audio_samples_allocator.deallocate(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t));
-  this->input_buffer_ = nullptr;
-  audio_samples_allocator.deallocate(this->preprocessor_audio_buffer_, this->new_samples_to_get_());
-  this->preprocessor_audio_buffer_ = nullptr;
-}
-
 bool MicroWakeWord::load_models_() {
-  // Setup preprocesor feature generator
-  if (!FrontendPopulateState(&this->frontend_config_, &this->frontend_state_, AUDIO_SAMPLE_FREQUENCY)) {
-    ESP_LOGD(TAG, "Failed to populate frontend state");
-    FrontendFreeStateContents(&this->frontend_state_);
-    return false;
-  }
-
   // Setup streaming models
   for (auto &model : this->wake_word_models_) {
     if (!model.load_model(this->streaming_op_resolver_)) {
@@ -286,8 +372,6 @@ bool MicroWakeWord::load_models_() {
 }
 
 void MicroWakeWord::unload_models_() {
-  FrontendFreeStateContents(&this->frontend_state_);
-
   for (auto &model : this->wake_word_models_) {
     model.unload_model();
   }
@@ -299,11 +383,8 @@ void MicroWakeWord::unload_models_() {
 void MicroWakeWord::update_model_probabilities_() {
   int8_t audio_features[PREPROCESSOR_FEATURE_SIZE];
 
-  // if (!this->generate_features_for_window_(audio_features)) {
-  //   return;
-  // }
-
-  while (this->generate_features_for_window_(audio_features)) {
+  while (this->features_ring_buffer_->available() >= PREPROCESSOR_FEATURE_SIZE) {
+    this->features_ring_buffer_->read((void *) audio_features, PREPROCESSOR_FEATURE_SIZE);
     // Increase the counter since the last positive detection
     this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
 
@@ -356,67 +437,8 @@ bool MicroWakeWord::detect_wake_words_() {
   return false;
 }
 
-bool MicroWakeWord::has_enough_samples_() {
-  return this->ring_buffer_->available() >=
-         (this->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000)) * sizeof(int16_t);
-}
-
-bool MicroWakeWord::generate_features_for_window_(int8_t features[PREPROCESSOR_FEATURE_SIZE]) {
-  // Ensure we have enough new audio samples in the ring buffer for a full window
-  if (!this->has_enough_samples_()) {
-    return false;
-  }
-
-  size_t bytes_read = this->ring_buffer_->read((void *) (this->preprocessor_audio_buffer_),
-                                               this->new_samples_to_get_() * sizeof(int16_t), pdMS_TO_TICKS(200));
-
-  if (bytes_read == 0) {
-    ESP_LOGE(TAG, "Could not read data from Ring Buffer");
-  } else if (bytes_read < this->new_samples_to_get_() * sizeof(int16_t)) {
-    ESP_LOGD(TAG, "Partial Read of Data by Model");
-    ESP_LOGD(TAG, "Could only read %d bytes when required %d bytes ", bytes_read,
-             (int) (this->new_samples_to_get_() * sizeof(int16_t)));
-    return false;
-  }
-
-  size_t num_samples_read;
-  struct FrontendOutput frontend_output = FrontendProcessSamples(
-      &this->frontend_state_, this->preprocessor_audio_buffer_, this->new_samples_to_get_(), &num_samples_read);
-
-  for (size_t i = 0; i < frontend_output.size; ++i) {
-    // These scaling values are set to match the TFLite audio frontend int8 output.
-    // The feature pipeline outputs 16-bit signed integers in roughly a 0 to 670
-    // range. In training, these are then arbitrarily divided by 25.6 to get
-    // float values in the rough range of 0.0 to 26.0. This scaling is performed
-    // for historical reasons, to match up with the output of other feature
-    // generators.
-    // The process is then further complicated when we quantize the model. This
-    // means we have to scale the 0.0 to 26.0 real values to the -128 to 127
-    // signed integer numbers.
-    // All this means that to get matching values from our integer feature
-    // output into the tensor input, we have to perform:
-    // input = (((feature / 25.6) / 26.0) * 256) - 128
-    // To simplify this and perform it in 32-bit integer math, we rearrange to:
-    // input = (feature * 256) / (25.6 * 26.0) - 128
-    constexpr int32_t value_scale = 256;
-    constexpr int32_t value_div = 666;  // 666 = 25.6 * 26.0 after rounding
-    int32_t value = ((frontend_output.values[i] * value_scale) + (value_div / 2)) / value_div;
-    value -= 128;
-    if (value < -128) {
-      value = -128;
-    }
-    if (value > 127) {
-      value = 127;
-    }
-    features[i] = value;
-  }
-
-  return true;
-}
-
 void MicroWakeWord::reset_states_() {
   ESP_LOGD(TAG, "Resetting buffers and probabilities");
-  this->ring_buffer_->reset();
   this->ignore_windows_ = -MIN_SLICES_BEFORE_DETECTION;
   for (auto &model : this->wake_word_models_) {
     model.reset_probabilities();
