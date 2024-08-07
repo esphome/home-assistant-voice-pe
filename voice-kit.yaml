@@ -37,7 +37,7 @@ esphome:
                 state: ON
       # Run the script to refresh the LED status
       - script.execute: control_leds
-      # If after 30 second, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
+      # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
       - delay: 10min
       - if:
           condition:
@@ -112,27 +112,29 @@ psram:
   speed: 80MHz
 
 globals:
-  # Global index for our LEDs. So that switching between different animation does not led to unwanted effects.
+  # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
   - id: global_led_animation_index
     type: int
     restore_value: no
     initial_value: '0'
-  # Global initialisation variable. Initialized to true and set to fasle once everything is connected. Only used to have a smooth "plugging" experience
+  # Global initialization variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
   - id: init_in_progress
     type: bool
     restore_value: no
     initial_value: 'true'
-  # Global variable tracking the pahse of the voice assistant (defined above). Initialized to not_ready
+  # Global variable tracking the phase of the voice assistant (defined above). Initialized to not_ready
   - id: voice_assistant_phase
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
+  # Global variable tracking if the dial was recently touched.
   - id: dial_touched
     type: bool
     restore_value: no
     initial_value: 'false'
 
 switch:
+  # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one) 
   - platform: template
     id: master_mute_switch
     restore_mode: RESTORE_DEFAULT_OFF
@@ -159,7 +161,7 @@ switch:
       - script.execute: control_leds
     on_turn_off:
       - script.execute: control_leds
-
+  # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
     optimistic: true
@@ -177,6 +179,7 @@ switch:
       - switch.turn_off: timer_ringing
 
 binary_sensor:
+  # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
     id: center_button
     pin:
@@ -187,7 +190,11 @@ binary_sensor:
     on_release:
       - script.execute: control_leds
     on_multi_click:
-      # Simple Click
+      # Simple Click:
+      #   . Stops timer if a timer is ringing
+      #   . Pauses music if music is playing
+      #   . Resumes music if music is paused
+      #   . Starts the voice assistant if it is not yet running and if the device is not muted.
       - timing:
           - ON for at most 1s
           - OFF for at least 0.5s
@@ -212,12 +219,15 @@ binary_sensor:
                           else:
                             if:
                               condition:
-                                not:
-                                  voice_assistant.is_running
+                                and:
+                                  - switch.is_off: master_mute_switch
+                                  - not:
+                                      voice_assistant.is_running
                               then:
                                 - micro_wake_word.stop:
                                 - voice_assistant.start:
       # Double Click
+      #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
           - ON for at most 1s
           - OFF for at most 0.5s
@@ -228,6 +238,7 @@ binary_sensor:
               id: button_press_event
               event_type: "double_press"
       # Triple Click
+      #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
           - ON for at most 1s
           - OFF for at most 0.5s
@@ -240,6 +251,7 @@ binary_sensor:
               id: button_press_event
               event_type: "triple_press"
       # Long Press
+      #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
           - ON for at least 1s
         then:
@@ -320,28 +332,43 @@ binary_sensor:
               id: voice_assistant_leds
               effect: "Rainbow"
       # Factory Reset Warning
+      #  . Audible and Visible warning. 
       - timing:
           - ON for at least 10s
         then:
-          - light.turn_on:
-              brightness: 100%
-              id: voice_assistant_leds
-              effect: "Factory Reset Coming Up"
-          - lambda: |-
-              id(nabu_media_player)
-                ->make_call()
-                .set_announcement(true)
-                .set_local_media_file(id(facotry_reset_initiated_wave_file))
-                .perform();
-          - wait_until:
-              binary_sensor.is_off: center_button
-          - light.turn_off: voice_assistant_leds
+          - if:
+              condition:
+                lambda: return !id(dial_touched);
+              then:
+                - light.turn_on:
+                    brightness: 100%
+                    id: voice_assistant_leds
+                    effect: "Factory Reset Coming Up"
+                - lambda: |-
+                    id(nabu_media_player)
+                      ->make_call()
+                      .set_announcement(true)
+                      .set_local_media_file(id(facotry_reset_initiated_wave_file))
+                      .perform();
+                - wait_until:
+                    binary_sensor.is_off: center_button
+                - light.turn_off: voice_assistant_leds
+                - lambda: |-
+                    id(nabu_media_player)
+                      ->make_call()
+                      .set_announcement(true)
+                      .set_local_media_file(id(facotry_reset_cancelled_wave_file))
+                      .perform();
       # Factory Reset
       - timing:
           - ON for at least 22s
         then:
-          - button.press: factory_reset_button
-
+          - if:
+              condition:
+                lambda: return !id(dial_touched);
+              then:
+                - button.press: factory_reset_button
+  # Hardware mute switch (Side of the device)
   - platform: gpio
     id: hardware_mute_switch
     internal: true
@@ -356,6 +383,7 @@ binary_sensor:
           state: OFF
 
 light:
+  # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
     id: leds_internal
     pin: GPIO21
@@ -365,7 +393,9 @@ light:
     chipset: WS2812
     default_transition_length: 0ms
     power_supply: led_power
-
+  
+  # Voice Assistant LED ring. Remapping of the internal LED.
+  # This light is not exposed. The device controls it
   - platform: partition
     id: voice_assistant_leds
     internal: true
@@ -600,6 +630,8 @@ light:
             }
             index = (index + 1) % 12;
 
+  # User facing LED ring. Remapping of the internal LEDs.
+  # Exposed to be used by the user.
   - platform: partition
     id: led_ring
     name: LED Ring
@@ -620,6 +652,7 @@ power_supply:
     pin: GPIO45
 
 sensor:
+  # The dial. Used to control volume and Hue of the LED ring.
   - platform: rotary_encoder
     id: dial
     pin_a: GPIO16
@@ -665,6 +698,7 @@ sensor:
                 id: control_hue
                 increase_hue: false
 
+  # To be removed before launch
   - platform: debug
     free:
       name: "Heap Free"
@@ -676,6 +710,8 @@ sensor:
       name: "PSRAM Free"
 
 event:
+  # Event entity exposed to the user to automate on complex center button presses. 
+  # The simple press is not exposed as it is used to control the device itself.
   - platform: template
     id: button_press_event
     name: "Button press"
@@ -687,9 +723,9 @@ event:
       - long_press
 
 script:
-  # Master script controling the LEDs, based on differente conditions : initialisation in progress, wifi and api connceted and voice assistant phase.
-  # For the sake of simplicity and re-usability, the script calls child sripts defined below.
-  # This script will be called everytime one of these conditions is changing.
+  # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
+  # For the sake of simplicity and re-usability, the script calls child scripts defined below.
+  # This script will be called every time one of these conditions is changing.
   - id: control_leds
     then:
       - if:
@@ -751,7 +787,7 @@ script:
                                   else:
                                     - script.execute: control_leds_dial_touched
                             else:
-                              - script.execute: control_leds_centrer_button_touched
+                              - script.execute: control_leds_center_button_touched
                       else:
                         - script.execute: control_leds_no_ha_connection_state
                 else:
@@ -759,7 +795,9 @@ script:
           else:
             - script.execute: control_leds_init_state
 
-  # Script executed during initialisation
+  # Script executed during initialization
+  # Blue Twinkle if Wifi is not connected
+  # Green Twinkle if Wifi is connected
   - id: control_leds_init_state
     then:
       - if:
@@ -783,6 +821,7 @@ script:
                 effect: "Twinkle"
 
   # Script executed when the device has no connection to Home Assistant
+  # Red Twinkle (This will be visible during HA updates for example)
   - id: control_leds_no_ha_connection_state
     then:
       - light.turn_on:
@@ -794,6 +833,7 @@ script:
           effect: "Twinkle"
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
+  # Nothing (Either LED ring off or LED ring on if the user decided to turn the user facing LED ring on)
   - id: control_leds_voice_assistant_idle_phase
     then:
       - light.turn_off: voice_assistant_leds
@@ -804,6 +844,7 @@ script:
             light.turn_on: led_ring
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
+  # Slow clockwise spin of the LED ring.
   - id: control_leds_voice_assistant_waiting_for_command_phase
     then:
       - light.turn_on:
@@ -811,7 +852,8 @@ script:
           id: voice_assistant_leds
           effect: "Waiting for Command"
 
-  # Script executed when the voice assistant is listenintg to a command
+  # Script executed when the voice assistant is listening to a command
+  # Fast clockwise spin of the LED ring.
   - id: control_leds_voice_assistant_listening_for_command_phase
     then:
       - light.turn_on:
@@ -820,6 +862,7 @@ script:
           effect: "Listening For Command"
 
   # Script executed when the voice assistant is thinking to a command
+  # The spin stops and the 2 LEDs that are currently on and blinking indicating the commend is being processed.
   - id: control_leds_voice_assistant_thinking_phase
     then:
       - light.turn_on:
@@ -828,6 +871,7 @@ script:
           effect: "Thinking"
 
   # Script executed when the voice assistant is thinking to a command
+  # Fast anticlockwise spin of the LED ring.
   - id: control_leds_voice_assistant_replying_phase
     then:
       - light.turn_on:
@@ -835,7 +879,9 @@ script:
           id: voice_assistant_leds
           effect: "Replying"
 
-  # Script executed when the voice assistant is thinking to a command (# TO BE DONE)
+  # Script executed when the voice assistant is in error
+  # Fast Red Pulse
+  # Note: Today on_end happens too fast after an error. This is barely visible.
   - id: control_leds_voice_assistant_error_phase
     then:
       - light.turn_on:
@@ -847,6 +893,7 @@ script:
           effect: "Fast Pulse"
 
   # Script executed when the voice assistant is muted
+  # The LED next to the 2 microphones turn red.
   - id: control_leds_muted
     then:
       - light.turn_on:
@@ -866,6 +913,7 @@ script:
           effect: "Twinkle"
 
   # Script executed when the dial is touched
+  # A number of LEDs turn on indicating a visual representation of the volume of the media player entity.
   - id: control_leds_dial_touched
     then:
       - light.turn_on:
@@ -873,8 +921,9 @@ script:
           id: voice_assistant_leds
           effect: "Volume Display"
 
-  # Script executed when the center bouton is touched
-  - id: control_leds_centrer_button_touched
+  # Script executed when the center button is touched
+  # The complete LED ring turns on
+  - id: control_leds_center_button_touched
     then:
       - light.turn_on:
           brightness: 100%
@@ -882,6 +931,7 @@ script:
           effect: "Center Button Touched"
 
   # Script executed when the timer is ringing, to control the LEDs
+  # The LED ring blinks.
   - id: control_leds_timer_ringing
     then:
       - light.turn_on:
@@ -1043,6 +1093,8 @@ media_player:
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/awake.wav
       - id: facotry_reset_initiated_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_initiated.wav
+      - id: facotry_reset_cancelled_wave_file
+        file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_cancelled.wav
 
 external_components:
   - source: github://jesserockz/esphome-components
@@ -1065,16 +1117,19 @@ micro_wake_word:
     - model: okay_nabu
   vad:
   on_wake_word_detected:
+    # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing (Just restart micro wake word)
     - if:
         condition:
           switch.is_off: master_mute_switch
         then:
+          # If a timer is ringing: Stop it, do not start the voice assistant, restart micro wake word (We can stop timer from voice!)
           - if:
               condition:
                 switch.is_on: timer_ringing
               then:
                 - switch.turn_off: timer_ringing
                 - micro_wake_word.start:
+              # Start voice assistant, stop current announcement.
               else:
                 - if:
                     condition:
@@ -1121,6 +1176,7 @@ voice_assistant:
           - delay: 1s
           - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
           - script.execute: control_leds
+  # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
     - lambda: |-
         id(nabu_media_player)
@@ -1141,6 +1197,7 @@ voice_assistant:
   on_tts_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: control_leds
+  # When the voice assistant ends: Stop ducking audio.
   on_end:
     - wait_until:
         not:
@@ -1152,17 +1209,20 @@ voice_assistant:
   on_timer_finished:
     - switch.turn_on: timer_ringing
 
-# TODO: Remove before launch, added for testing/development
+
 button:
+  # TODO: Remove before launch, added for testing/development
   - platform: restart
     name: "Restart"
     entity_category: diagnostic
 
+  # TODO: make it internal before launch
   - platform: factory_reset
     id: factory_reset_button
     name: "Factory Reset"
     entity_category: diagnostic
 
+  # TODO: Remove before launch, added for testing/development
   - platform: template
     name: "timer beep"
     entity_category: diagnostic
@@ -1173,11 +1233,15 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
+  
+  # TODO: Remove before launch, added for testing/development
   - platform: template
     name: Check for update
     entity_category: diagnostic
     on_press:
       - component.update: update_http_request
+  
+  # TODO: Remove before launch, added for testing/development
   - platform: template
     name: Perform Update
     entity_category: diagnostic
