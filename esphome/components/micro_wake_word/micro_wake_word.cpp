@@ -24,9 +24,8 @@ namespace micro_wake_word {
 
 static const char *const TAG = "micro_wake_word";
 
-static const size_t SAMPLE_RATE_HZ = 16000;  // 16 kHz
-static const size_t BUFFER_LENGTH = 64;      // 0.064 seconds
-static const size_t BUFFER_SIZE = SAMPLE_RATE_HZ / 1000 * BUFFER_LENGTH;
+static const size_t BUFFER_LENGTH = 64;  // 0.064 seconds
+static const size_t QUEUE_COUNT = 5;
 
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
@@ -92,6 +91,7 @@ void MicroWakeWord::setup() {
   this->frontend_config_.log_scale.scale_shift = 6;
 
   this->event_group_ = xEventGroupCreate();
+  this->detection_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(DetectionEvent));
 
   ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
   this->preprocessor_task_stack_buffer_ = allocator.allocate(8192);
@@ -240,17 +240,21 @@ void MicroWakeWord::inference_task_(void *params) {
           this_mww->update_model_probabilities_();
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
-          bool vad_state = this_mww->vad_model_->determine_detected();
+          DetectionEvent vad_state = this_mww->vad_model_->determine_detected();
 #endif
 
           for (auto &model : this_mww->wake_word_models_) {
-            if (model.determine_detected()) {
+            DetectionEvent wake_word_state = model.determine_detected();
+            if (wake_word_state.detected) {
 #ifdef USE_MICRO_WAKE_WORD_VAD
-              if (vad_state) {
+              if (vad_state.detected) {
 #endif
-                this_mww->detected_wake_word_ = model.get_wake_word();
+                this_mww->detected_wake_word_ = *wake_word_state.wake_word;
                 this_mww->detected_ = true;
                 model.reset_probabilities();
+                ESP_LOGD(TAG, "Detected '%s' with sliding average probability is %.2f and max probability is %.2f",
+                         wake_word_state.wake_word->c_str(), (wake_word_state.average_probability / 255.0f),
+                         (wake_word_state.max_probability / 255.0f));
 #ifdef USE_MICRO_WAKE_WORD_VAD
               } else {
                 ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", model.get_wake_word().c_str());
@@ -258,12 +262,6 @@ void MicroWakeWord::inference_task_(void *params) {
 #endif
             }
           }
-
-          // // TODO: Use a queue to send this information
-          // if (this_mww->detect_wake_words_()) {
-          //   this_mww->detected_ = true;
-          //   this_mww->reset_states_();  // TODO: Do we really want to reset *all* states?
-          // }
         }
 
         // Block to give other tasks opportunity to run

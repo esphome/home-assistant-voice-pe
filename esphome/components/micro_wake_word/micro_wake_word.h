@@ -98,7 +98,11 @@ class MicroWakeWord : public Component {
 
   inline uint16_t new_samples_to_get_() { return (this->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000)); }
 
+  // Handles managing the start/stop/state of the preprocessor and inference tasks
   EventGroupHandle_t event_group_;
+
+  // Used to send messages about the model's states to the main loop
+  QueueHandle_t detection_queue_;
 
   static void preprocessor_task_(void *params);
   TaskHandle_t preprocessor_task_handle_{nullptr};

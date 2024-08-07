@@ -14,14 +14,21 @@ namespace micro_wake_word {
 static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
 static const uint32_t STREAMING_MODEL_VARIABLE_ARENA_SIZE = 1024;
 
+struct DetectionEvent {
+  std::string *wake_word;
+  bool detected;
+  uint8_t max_probability;
+  uint8_t average_probability;
+};
+
 class StreamingModel {
  public:
   virtual void log_model_config() = 0;
-  virtual bool determine_detected() = 0;
+  virtual DetectionEvent determine_detected() = 0;
 
   bool perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]);
 
-  /// @brief Sets all recent_streaming_probabilities to 0
+  /// @brief Sets all recent_streaming_probabilities to 0 and resets the ignore window count
   void reset_probabilities();
 
   /// @brief Allocates tensor and variable arenas and sets up the model interpreter
@@ -60,7 +67,7 @@ class WakeWordModel final : public StreamingModel {
   /// @brief Checks for the wake word by comparing the mean probability in the sliding window with the probability
   /// cutoff
   /// @return True if wake word is detected, false otherwise
-  bool determine_detected() override;
+  DetectionEvent determine_detected() override;
 
   const std::string &get_wake_word() const { return this->wake_word_; }
 
@@ -78,7 +85,7 @@ class VADModel final : public StreamingModel {
   /// @brief Checks for voice activity by comparing the max probability in the sliding window with the probability
   /// cutoff
   /// @return True if voice activity is detected, false otherwise
-  bool determine_detected() override;
+  DetectionEvent determine_detected() override;
 };
 
 }  // namespace micro_wake_word

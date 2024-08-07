@@ -150,25 +150,27 @@ WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cut
   this->tensor_arena_size_ = tensor_arena_size;
 };
 
-bool WakeWordModel::determine_detected() {
+DetectionEvent WakeWordModel::determine_detected() {
+  DetectionEvent detection_event;
+  detection_event.wake_word = &this->wake_word_;
+  detection_event.max_probability = 0;
+  detection_event.average_probability = 0;
+
   if (this->ignore_windows_ < 0) {
-    return false;
+    detection_event.detected = false;
+    return detection_event;
   }
 
-  int32_t sum = 0;
+  uint32_t sum = 0;
   for (auto &prob : this->recent_streaming_probabilities_) {
+    detection_event.max_probability = std::max(detection_event.max_probability, prob);
     sum += prob;
   }
 
-  if (sum > (this->probability_cutoff_ * this->sliding_window_size_)) {
-    ESP_LOGD(TAG, "The '%s' model sliding average probability is %.2f and most recent probability is %.2f",
-             this->wake_word_.c_str(), static_cast<float>(sum) / (255 * this->sliding_window_size_),
-             this->recent_streaming_probabilities_[this->last_n_index_] / (255.0f));
+  detection_event.average_probability = sum / this->sliding_window_size_;
+  detection_event.detected = sum > this->probability_cutoff_ * this->sliding_window_size_;
 
-    return true;
-  }
-
-  return false;
+  return detection_event;
 }
 
 VADModel::VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
@@ -180,13 +182,21 @@ VADModel::VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_
   this->tensor_arena_size_ = tensor_arena_size;
 };
 
-bool VADModel::determine_detected() {
-  int32_t sum = 0;
+DetectionEvent VADModel::determine_detected() {
+  DetectionEvent detection_event;
+  detection_event.max_probability = 0;
+  detection_event.average_probability = 0;
+
+  uint32_t sum = 0;
   for (auto &prob : this->recent_streaming_probabilities_) {
+    detection_event.max_probability = std::max(detection_event.max_probability, prob);
     sum += prob;
   }
 
-  return sum > (this->probability_cutoff_ * this->sliding_window_size_);
+  detection_event.average_probability = sum / this->sliding_window_size_;
+  detection_event.detected = sum > (this->probability_cutoff_ * this->sliding_window_size_);
+
+  return detection_event;
 }
 
 }  // namespace micro_wake_word
