@@ -239,11 +239,31 @@ void MicroWakeWord::inference_task_(void *params) {
         while (this_mww->features_ring_buffer_->available() > PREPROCESSOR_FEATURE_SIZE) {
           this_mww->update_model_probabilities_();
 
-          // TODO: Use a queue to send this information
-          if (this_mww->detect_wake_words_()) {
-            this_mww->detected_ = true;
-            this_mww->reset_states_();  // TODO: Do we really want to reset *all* states?
+#ifdef USE_MICRO_WAKE_WORD_VAD
+          bool vad_state = this_mww->vad_model_->determine_detected();
+#endif
+
+          for (auto &model : this_mww->wake_word_models_) {
+            if (model.determine_detected()) {
+#ifdef USE_MICRO_WAKE_WORD_VAD
+              if (vad_state) {
+#endif
+                this_mww->detected_wake_word_ = model.get_wake_word();
+                this_mww->detected_ = true;
+                model.reset_probabilities();
+#ifdef USE_MICRO_WAKE_WORD_VAD
+              } else {
+                ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", model.get_wake_word().c_str());
+              }
+#endif
+            }
           }
+
+          // // TODO: Use a queue to send this information
+          // if (this_mww->detect_wake_words_()) {
+          //   this_mww->detected_ = true;
+          //   this_mww->reset_states_();  // TODO: Do we really want to reset *all* states?
+          // }
         }
 
         // Block to give other tasks opportunity to run
@@ -401,8 +421,6 @@ void MicroWakeWord::update_model_probabilities_() {
 
   while (this->features_ring_buffer_->available() >= PREPROCESSOR_FEATURE_SIZE) {
     this->features_ring_buffer_->read((void *) audio_features, PREPROCESSOR_FEATURE_SIZE);
-    // Increase the counter since the last positive detection
-    this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
 
     // static size_t total_inference_time = 0;
     // static size_t inference_count = 0;
@@ -423,45 +441,6 @@ void MicroWakeWord::update_model_probabilities_() {
     //   inference_count = 0;
     // }
   }
-}
-
-bool MicroWakeWord::detect_wake_words_() {
-  // Verify we have processed samples since the last positive detection
-  if (this->ignore_windows_ < 0) {
-    return false;
-  }
-
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  bool vad_state = this->vad_model_->determine_detected();
-#endif
-
-  for (auto &model : this->wake_word_models_) {
-    if (model.determine_detected()) {
-#ifdef USE_MICRO_WAKE_WORD_VAD
-      if (vad_state) {
-#endif
-        this->detected_wake_word_ = model.get_wake_word();
-        return true;
-#ifdef USE_MICRO_WAKE_WORD_VAD
-      } else {
-        ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", model.get_wake_word().c_str());
-      }
-#endif
-    }
-  }
-
-  return false;
-}
-
-void MicroWakeWord::reset_states_() {
-  ESP_LOGD(TAG, "Resetting buffers and probabilities");
-  this->ignore_windows_ = -MIN_SLICES_BEFORE_DETECTION;
-  for (auto &model : this->wake_word_models_) {
-    model.reset_probabilities();
-  }
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  this->vad_model_->reset_probabilities();
-#endif
 }
 
 bool MicroWakeWord::register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver) {

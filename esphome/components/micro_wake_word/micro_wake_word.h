@@ -26,9 +26,6 @@ enum State {
   DETECTING_WAKE_WORD,
 };
 
-// The number of audio slices to process before accepting a positive detection
-static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
-
 class MicroWakeWord : public Component {
  public:
   void setup() override;
@@ -74,10 +71,6 @@ class MicroWakeWord : public Component {
   struct FrontendConfig frontend_config_;
   struct FrontendState frontend_state_;
 
-  // When the wake word detection first starts, we ignore this many audio
-  // feature slices before accepting a positive detection
-  int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
-
   uint8_t features_step_size_;
 
   bool detected_{false};
@@ -99,17 +92,6 @@ class MicroWakeWord : public Component {
    * It then loops through and performs inference with each of the loaded models.
    */
   void update_model_probabilities_();
-
-  /** Checks every model's recent probabilities to determine if the wake word has been predicted
-   *
-   * Verifies the models have processed enough new samples for accurate predictions.
-   * Sets detected_wake_word_ to the wake word, if one is detected.
-   * @return True if a wake word is predicted, false otherwise
-   */
-  bool detect_wake_words_();
-
-  /// @brief Resets the ring buffer, ignore_windows_, and sliding window probabilities
-  void reset_states_();
 
   /// @brief Returns true if successfully registered the streaming model's TensorFlow operations
   bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);

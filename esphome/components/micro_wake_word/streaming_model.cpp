@@ -84,6 +84,7 @@ bool StreamingModel::load_model(tflite::MicroMutableOpResolver<20> &op_resolver)
     }
   }
 
+  this->reset_probabilities();
   return true;
 }
 
@@ -125,6 +126,7 @@ bool StreamingModel::perform_streaming_inference(const int8_t features[PREPROCES
         this->last_n_index_ = 0;
       this->recent_streaming_probabilities_[this->last_n_index_] = output->data.uint8[0];  // probability;
     }
+    this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
     return true;
   }
   ESP_LOGE(TAG, "Streaming interpreter is not initialized.");
@@ -135,6 +137,7 @@ void StreamingModel::reset_probabilities() {
   for (auto &prob : this->recent_streaming_probabilities_) {
     prob = 0;
   }
+  this->ignore_windows_ = -MIN_SLICES_BEFORE_DETECTION;
 }
 
 WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
@@ -148,6 +151,10 @@ WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cut
 };
 
 bool WakeWordModel::determine_detected() {
+  if (this->ignore_windows_ < 0) {
+    return false;
+  }
+
   int32_t sum = 0;
   for (auto &prob : this->recent_streaming_probabilities_) {
     sum += prob;

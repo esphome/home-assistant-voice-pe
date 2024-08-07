@@ -11,6 +11,7 @@
 namespace esphome {
 namespace micro_wake_word {
 
+static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
 static const uint32_t STREAMING_MODEL_VARIABLE_ARENA_SIZE = 1024;
 
 class StreamingModel {
@@ -33,9 +34,9 @@ class StreamingModel {
 
  protected:
   uint8_t current_stride_step_{0};
+  int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
 
-  uint8_t probability_cutoff_;  // Quantized cutoff between 0 and 255
-  //float probability_cutoff_;
+  uint8_t probability_cutoff_;  // Quantized probability cutoff mapping 0.0 - 1.0 to 0 - 255
   size_t sliding_window_size_;
   size_t last_n_index_{0};
   size_t tensor_arena_size_;
@@ -69,7 +70,8 @@ class WakeWordModel final : public StreamingModel {
 
 class VADModel final : public StreamingModel {
  public:
-  VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size, size_t tensor_arena_size);
+  VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
+           size_t tensor_arena_size);
 
   void log_model_config() override;
 
