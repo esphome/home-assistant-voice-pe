@@ -1209,7 +1209,6 @@ voice_assistant:
   on_timer_finished:
     - switch.turn_on: timer_ringing
 
-
 button:
   # TODO: Remove before launch, added for testing/development
   - platform: restart
