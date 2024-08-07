@@ -1151,7 +1151,6 @@ micro_wake_word:
         else:
           - micro_wake_word.start:
 
-
 select:
   - platform: template
     name: "Wake word select"
