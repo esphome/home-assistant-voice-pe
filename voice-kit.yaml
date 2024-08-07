@@ -1233,6 +1233,7 @@ voice_assistant:
         not:
           voice_assistant.is_running:
     - lambda: id(nabu_media_player).set_ducking_ratio(1.0);
+    - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_timer_finished:
