@@ -116,7 +116,6 @@ void MicroWakeWord::preprocessor_task_(void *params) {
     {
       // Setup preprocesor feature generator
       if (!FrontendPopulateState(&this_mww->frontend_config_, &this_mww->frontend_state_, AUDIO_SAMPLE_FREQUENCY)) {
-        // TODO: Potentially better handle failure
         FrontendFreeStateContents(&this_mww->frontend_state_);
         xEventGroupSetBits(this_mww->event_group_,
                            EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
@@ -131,7 +130,6 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       int16_t *audio_buffer = int16_allocator.allocate(new_samples_to_read);
 
       if ((audio_buffer == nullptr) || (features_buffer == nullptr)) {
-        // TODO: Potentially better handle buffer allocation failure
         xEventGroupSetBits(this_mww->event_group_,
                            EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
@@ -139,7 +137,6 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       if (this_mww->features_ring_buffer_ == nullptr) {
         this_mww->features_ring_buffer_ = RingBuffer::create(PREPROCESSOR_FEATURE_SIZE * 10);  // TODO: Tweak this
         if (this_mww->features_ring_buffer_ == nullptr) {
-          // TODO: Potentially better handle failure
           xEventGroupSetBits(this_mww->event_group_,
                              EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
         }
@@ -158,7 +155,7 @@ void MicroWakeWord::preprocessor_task_(void *params) {
           size_t bytes_read =
               this_mww->microphone_->read_secondary(audio_buffer, new_samples_to_read * sizeof(int16_t));
           if (bytes_read < new_samples_to_read * sizeof(int16_t)) {
-            // TODO: Handle not enough samples read
+            // This shouldn't ever happen, but if we somehow don't have enough samples, just drop this frame
             continue;
           }
 
@@ -230,7 +227,6 @@ void MicroWakeWord::inference_task_(void *params) {
 
     {
       if (!this_mww->load_models_()) {
-        // TODO: Potentially handle failure better
         xEventGroupSetBits(this_mww->event_group_,
                            EventGroupBits::INFERENCE_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
