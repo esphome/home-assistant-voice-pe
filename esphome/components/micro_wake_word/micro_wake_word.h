@@ -73,9 +73,6 @@ class MicroWakeWord : public Component {
 
   uint8_t features_step_size_;
 
-  bool detected_{false};
-  std::string detected_wake_word_{""};
-
   void set_state_(State state);
 
   /// @brief Loads streaming models and prepares the feature generation frontend

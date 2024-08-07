@@ -19,6 +19,7 @@ struct DetectionEvent {
   bool detected;
   uint8_t max_probability;
   uint8_t average_probability;
+  bool blocked_by_vad = false;
 };
 
 class StreamingModel {

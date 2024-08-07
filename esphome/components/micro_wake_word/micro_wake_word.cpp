@@ -249,15 +249,12 @@ void MicroWakeWord::inference_task_(void *params) {
 #ifdef USE_MICRO_WAKE_WORD_VAD
               if (vad_state.detected) {
 #endif
-                this_mww->detected_wake_word_ = *wake_word_state.wake_word;
-                this_mww->detected_ = true;
+                xQueueSend(this_mww->detection_queue_, &wake_word_state, portMAX_DELAY);
                 model.reset_probabilities();
-                ESP_LOGD(TAG, "Detected '%s' with sliding average probability is %.2f and max probability is %.2f",
-                         wake_word_state.wake_word->c_str(), (wake_word_state.average_probability / 255.0f),
-                         (wake_word_state.max_probability / 255.0f));
 #ifdef USE_MICRO_WAKE_WORD_VAD
               } else {
-                ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", model.get_wake_word().c_str());
+                wake_word_state.blocked_by_vad = true;
+                xQueueSend(this_mww->detection_queue_, &wake_word_state, portMAX_DELAY);
               }
 #endif
             }
@@ -318,12 +315,15 @@ void MicroWakeWord::loop() {
     this->set_state_(State::DETECTING_WAKE_WORD);
   }
 
-  // TODO: Move this to a queue!
-  if (this->detected_) {
-    if (this->detected_) {
-      this->wake_word_detected_trigger_->trigger(this->detected_wake_word_);
-      this->detected_ = false;
-      this->detected_wake_word_ = "";
+  DetectionEvent detection_event;
+  while (xQueueReceive(this->detection_queue_, &detection_event, 0)) {
+    if (detection_event.blocked_by_vad) {
+      ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", detection_event.wake_word->c_str());
+    } else {
+      ESP_LOGD(TAG, "Detected '%s' with sliding average probability is %.2f and max probability is %.2f",
+               detection_event.wake_word->c_str(), (detection_event.average_probability / 255.0f),
+               (detection_event.max_probability / 255.0f));
+      this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
     }
   }
 }
@@ -377,6 +377,7 @@ void MicroWakeWord::stop() {
 
   xEventGroupClearBits(this->event_group_, ALL_BITS);
   this->features_ring_buffer_->reset();
+  xQueueReset(this->detection_queue_);
 }
 
 void MicroWakeWord::set_state_(State state) {
