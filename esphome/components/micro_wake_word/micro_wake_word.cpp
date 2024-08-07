@@ -16,8 +16,12 @@
 
 #include <cmath>
 
-// Major TODOs:
-//  - Allow users, after, compilation, to set which wake words are loaded
+// TODO:
+//  - does VAD need to be a separate class?
+//  - setup protocol between micro_wake_word and voice_assistant components
+//    - voice assistant should handle all decisions, mWW should just send info
+//    - Need to be able to send the details of each available wake word to voice assistants
+//  - load trained languages from manifest to expose to voice assistant
 
 namespace esphome {
 namespace micro_wake_word {
@@ -59,7 +63,7 @@ void MicroWakeWord::dump_config() {
   ESP_LOGCONFIG(TAG, "microWakeWord:");
   ESP_LOGCONFIG(TAG, "  models:");
   for (auto &model : this->wake_word_models_) {
-    model.log_model_config();
+    model->log_model_config();
   }
 #ifdef USE_MICRO_WAKE_WORD_VAD
   this->vad_model_->log_model_config();
@@ -68,11 +72,6 @@ void MicroWakeWord::dump_config() {
 
 void MicroWakeWord::setup() {
   ESP_LOGCONFIG(TAG, "Setting up microWakeWord...");
-
-  if (!this->register_streaming_ops_(this->streaming_op_resolver_)) {
-    this->mark_failed();
-    return;
-  }
 
   this->frontend_config_.window.size_ms = FEATURE_DURATION_MS;
   this->frontend_config_.window.step_size_ms = this->features_step_size_;
@@ -226,31 +225,28 @@ void MicroWakeWord::inference_task_(void *params) {
     xEventGroupClearBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_IDLE);
 
     {
-      if (!this_mww->load_models_()) {
-        xEventGroupSetBits(this_mww->event_group_,
-                           EventGroupBits::INFERENCE_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
-      }
-
-      if (!(xEventGroupGetBits(this_mww->event_group_) & EventGroupBits::INFERENCE_MESSAGE_ERROR)) {
-        xEventGroupSetBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_STARTED);
-      }
+      xEventGroupSetBits(this_mww->event_group_, EventGroupBits::INFERENCE_MESSAGE_STARTED);
 
       while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
         while (this_mww->features_ring_buffer_->available() > PREPROCESSOR_FEATURE_SIZE) {
-          this_mww->update_model_probabilities_();
+          if (!this_mww->update_model_probabilities_()) {
+            // Ran into an issue with inference
+            xEventGroupSetBits(this_mww->event_group_,
+                               EventGroupBits::INFERENCE_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
+          }
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
           DetectionEvent vad_state = this_mww->vad_model_->determine_detected();
 #endif
 
           for (auto &model : this_mww->wake_word_models_) {
-            DetectionEvent wake_word_state = model.determine_detected();
+            DetectionEvent wake_word_state = model->determine_detected();
             if (wake_word_state.detected) {
 #ifdef USE_MICRO_WAKE_WORD_VAD
               if (vad_state.detected) {
 #endif
                 xQueueSend(this_mww->detection_queue_, &wake_word_state, portMAX_DELAY);
-                model.reset_probabilities();
+                model->reset_probabilities();
 #ifdef USE_MICRO_WAKE_WORD_VAD
               } else {
                 wake_word_state.blocked_by_vad = true;
@@ -270,12 +266,7 @@ void MicroWakeWord::inference_task_(void *params) {
   }
 }
 
-void MicroWakeWord::add_wake_word_model(const uint8_t *model_start, uint8_t probability_cutoff,
-                                        size_t sliding_window_average_size, const std::string &wake_word,
-                                        size_t tensor_arena_size) {
-  this->wake_word_models_.emplace_back(model_start, probability_cutoff, sliding_window_average_size, wake_word,
-                                       tensor_arena_size);
-}
+void MicroWakeWord::add_wake_word_model(WakeWordModel *model) { this->wake_word_models_.push_back(model); }
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
 void MicroWakeWord::add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
@@ -285,6 +276,8 @@ void MicroWakeWord::add_vad_model(const uint8_t *model_start, uint8_t probabilit
 #endif
 
 void MicroWakeWord::loop() {
+  // Determines the state of microWakeWord by monitoring the Event Group state.
+  // This is the only place where the component's state is modified
   if ((this->preprocessor_task_handle_ == nullptr) || (this->inference_task_handle_ == nullptr)) {
     this->set_state_(State::IDLE);
     return;
@@ -388,103 +381,30 @@ void MicroWakeWord::set_state_(State state) {
   }
 }
 
-bool MicroWakeWord::load_models_() {
-  // Setup streaming models
-  for (auto &model : this->wake_word_models_) {
-    if (!model.load_model(this->streaming_op_resolver_)) {
-      ESP_LOGE(TAG, "Failed to initialize a wake word model.");
-      return false;
-    }
-  }
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  if (!this->vad_model_->load_model(this->streaming_op_resolver_)) {
-    ESP_LOGE(TAG, "Failed to initialize VAD model.");
-    return false;
-  }
-#endif
-
-  return true;
-}
-
 void MicroWakeWord::unload_models_() {
   for (auto &model : this->wake_word_models_) {
-    model.unload_model();
+    model->unload_model();
   }
 #ifdef USE_MICRO_WAKE_WORD_VAD
   this->vad_model_->unload_model();
 #endif
 }
 
-void MicroWakeWord::update_model_probabilities_() {
+bool MicroWakeWord::update_model_probabilities_() {
   int8_t audio_features[PREPROCESSOR_FEATURE_SIZE];
 
-  while (this->features_ring_buffer_->available() >= PREPROCESSOR_FEATURE_SIZE) {
-    this->features_ring_buffer_->read((void *) audio_features, PREPROCESSOR_FEATURE_SIZE);
+  bool success = true;
+  this->features_ring_buffer_->read((void *) audio_features, PREPROCESSOR_FEATURE_SIZE);
 
-    // static size_t total_inference_time = 0;
-    // static size_t inference_count = 0;
-
-    // size_t start_time = millis();
-    for (auto &model : this->wake_word_models_) {
-      // Perform inference
-      model.perform_streaming_inference(audio_features);
-    }
-#ifdef USE_MICRO_WAKE_WORD_VAD
-    this->vad_model_->perform_streaming_inference(audio_features);
-#endif
-    // total_inference_time += (millis() - start_time);
-    // ++inference_count;
-    // if (inference_count > 500) {
-    //   ESP_LOGD(TAG, "average inference time=%.3f ms", static_cast<float>(total_inference_time) / inference_count);
-    //   total_inference_time = 0;
-    //   inference_count = 0;
-    // }
+  for (auto &model : this->wake_word_models_) {
+    // Perform inference
+    success = success & model->perform_streaming_inference(audio_features);
   }
-}
+#ifdef USE_MICRO_WAKE_WORD_VAD
+  success = success & this->vad_model_->perform_streaming_inference(audio_features);
+#endif
 
-bool MicroWakeWord::register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver) {
-  if (op_resolver.AddCallOnce() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddVarHandle() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddReshape() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddReadVariable() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddStridedSlice() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddConcatenation() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddAssignVariable() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddConv2D() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddMul() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddAdd() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddMean() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddFullyConnected() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddLogistic() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddQuantize() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddDepthwiseConv2D() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddAveragePool2D() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddMaxPool2D() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddPad() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddPack() != kTfLiteOk)
-    return false;
-  if (op_resolver.AddSplitV() != kTfLiteOk)
-    return false;
-
-  return true;
+  return success;
 }
 
 }  // namespace micro_wake_word

@@ -22,25 +22,42 @@ struct DetectionEvent {
   bool blocked_by_vad = false;
 };
 
+// TODO: After changing how VAD is detected, do we need a separate class? There is minimal difference
+
 class StreamingModel {
  public:
   virtual void log_model_config() = 0;
   virtual DetectionEvent determine_detected() = 0;
 
+  // Performs inference on the given features.
+  //  - Will load the model if it is enabled and needed
+  //  - Will unload the model if it is disabled but still laoded
+  // Returns true if sucessful or false if there is an error
   bool perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]);
 
   /// @brief Sets all recent_streaming_probabilities to 0 and resets the ignore window count
   void reset_probabilities();
 
-  /// @brief Allocates tensor and variable arenas and sets up the model interpreter
-  /// @param op_resolver MicroMutableOpResolver object that must exist until the model is unloaded
-  /// @return True if successful, false otherwise
-  bool load_model(tflite::MicroMutableOpResolver<20> &op_resolver);
-
   /// @brief Destroys the TFLite interpreter and frees the tensor and variable arenas' memory
   void unload_model();
 
+  /// @brief Enable the model
+  void enable() { this->enabled_ = true; }
+
+  /// @brief Disable the model
+  void disable() { this->enabled_ = false; }
+
  protected:
+  /// @brief Allocates tensor and variable arenas and sets up the model interpreter
+  /// @return True if successful, false otherwise
+  bool load_model_();
+  /// @brief Returns true if successfully registered the streaming model's TensorFlow operations
+  bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);
+
+  tflite::MicroMutableOpResolver<20> streaming_op_resolver_;
+
+  bool loaded_{false};
+  bool enabled_{true};
   uint8_t current_stride_step_{0};
   int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
 

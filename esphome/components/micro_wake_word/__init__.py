@@ -64,6 +64,8 @@ IsRunningCondition = micro_wake_word_ns.class_(
     "IsRunningCondition", automation.Condition
 )
 
+WakeWordModel_ = micro_wake_word_ns.class_("WakeWordModel")
+
 
 def _validate_json_filename(value):
     value = cv.string(value)
@@ -324,6 +326,7 @@ MODEL_SOURCE_SCHEMA = cv.Any(
 
 MODEL_SCHEMA = cv.Schema(
     {
+        cv.GenerateID(CONF_ID): cv.declare_id(WakeWordModel_),
         cv.Optional(CONF_MODEL): MODEL_SOURCE_SCHEMA,
         cv.Optional(CONF_PROBABILITY_CUTOFF): cv.percentage,
         cv.Optional(CONF_SLIDING_WINDOW_SIZE): cv.positive_int,
@@ -331,7 +334,7 @@ MODEL_SCHEMA = cv.Schema(
     }
 )
 
-# Provide a default VAD model that could be overridden
+# Provides a default VAD model that could be overridden
 VAD_MODEL_SCHEMA = MODEL_SCHEMA.extend(
     cv.Schema(
         {
@@ -493,15 +496,16 @@ async def to_code(config):
                 )
             )
         else:
-            cg.add(
-                var.add_wake_word_model(
-                    prog_arr,
-                    quantized_probability_cutoff,
-                    sliding_window_size,
-                    manifest[KEY_WAKE_WORD],
-                    manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
-                )
+            wake_word_model = cg.new_Pvariable(
+                model_parameters[CONF_ID],
+                prog_arr,
+                quantized_probability_cutoff,
+                sliding_window_size,
+                manifest[KEY_WAKE_WORD],
+                manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
             )
+
+            cg.add(var.add_wake_word_model(wake_word_model))
 
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
     cg.add_library(

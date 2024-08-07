@@ -44,8 +44,7 @@ class MicroWakeWord : public Component {
 
   Trigger<std::string> *get_wake_word_detected_trigger() const { return this->wake_word_detected_trigger_; }
 
-  void add_wake_word_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
-                           const std::string &wake_word, size_t tensor_arena_size);
+  void add_wake_word_model(WakeWordModel *model);
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
   void add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
@@ -59,13 +58,11 @@ class MicroWakeWord : public Component {
 
   std::unique_ptr<RingBuffer> features_ring_buffer_;
 
-  std::vector<WakeWordModel> wake_word_models_;
+  std::vector<WakeWordModel*> wake_word_models_;
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
   std::unique_ptr<VADModel> vad_model_;
 #endif
-
-  tflite::MicroMutableOpResolver<20> streaming_op_resolver_;
 
   // Audio frontend handles generating spectrogram features
   struct FrontendConfig frontend_config_;
@@ -74,10 +71,6 @@ class MicroWakeWord : public Component {
   uint8_t features_step_size_;
 
   void set_state_(State state);
-
-  /// @brief Loads streaming models and prepares the feature generation frontend
-  /// @return True if successful, false otherwise
-  bool load_models_();
 
   /// @brief Deletes each model's TFLite interpreters and frees tensor arena memory. Frees memory used by the feature
   /// generation frontend.
@@ -88,10 +81,7 @@ class MicroWakeWord : public Component {
    * If enough audio samples are available, it will generate one slice of new features.
    * It then loops through and performs inference with each of the loaded models.
    */
-  void update_model_probabilities_();
-
-  /// @brief Returns true if successfully registered the streaming model's TensorFlow operations
-  bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);
+  bool update_model_probabilities_();
 
   inline uint16_t new_samples_to_get_() { return (this->features_step_size_ * (AUDIO_SAMPLE_FREQUENCY / 1000)); }
 

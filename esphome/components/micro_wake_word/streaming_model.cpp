@@ -23,7 +23,7 @@ void VADModel::log_model_config() {
   ESP_LOGCONFIG(TAG, "      Sliding window size: %d", this->sliding_window_size_);
 }
 
-bool StreamingModel::load_model(tflite::MicroMutableOpResolver<20> &op_resolver) {
+bool StreamingModel::load_model_() {
   ExternalRAMAllocator<uint8_t> arena_allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
 
   if (this->tensor_arena_ == nullptr) {
@@ -52,7 +52,7 @@ bool StreamingModel::load_model(tflite::MicroMutableOpResolver<20> &op_resolver)
 
   if (this->interpreter_ == nullptr) {
     this->interpreter_ = make_unique<tflite::MicroInterpreter>(
-        tflite::GetModel(this->model_start_), op_resolver, this->tensor_arena_, this->tensor_arena_size_, this->mrv_);
+        tflite::GetModel(this->model_start_), this->streaming_op_resolver_, this->tensor_arena_, this->tensor_arena_size_, this->mrv_);
     if (this->interpreter_->AllocateTensors() != kTfLiteOk) {
       ESP_LOGE(TAG, "Failed to allocate tensors for the streaming model");
       return false;
@@ -84,6 +84,7 @@ bool StreamingModel::load_model(tflite::MicroMutableOpResolver<20> &op_resolver)
     }
   }
 
+  this->loaded_ = true;
   this->reset_probabilities();
   return true;
 }
@@ -93,14 +94,34 @@ void StreamingModel::unload_model() {
 
   ExternalRAMAllocator<uint8_t> arena_allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
 
-  arena_allocator.deallocate(this->tensor_arena_, this->tensor_arena_size_);
-  this->tensor_arena_ = nullptr;
-  arena_allocator.deallocate(this->var_arena_, STREAMING_MODEL_VARIABLE_ARENA_SIZE);
-  this->var_arena_ = nullptr;
+  if (this->tensor_arena_ != nullptr) {
+    arena_allocator.deallocate(this->tensor_arena_, this->tensor_arena_size_);
+    this->tensor_arena_ = nullptr;
+  }
+
+  if (this->var_arena_ != nullptr) {
+    arena_allocator.deallocate(this->var_arena_, STREAMING_MODEL_VARIABLE_ARENA_SIZE);
+    this->var_arena_ = nullptr;
+  }
+
+  this->loaded_ = false;
 }
 
 bool StreamingModel::perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]) {
-  if (this->interpreter_ != nullptr) {
+  if (this->enabled_ && !this->loaded_) {
+    // Model is enabled but isn't loaded
+    if (!this->load_model_()) {
+      return false;
+    }
+  }
+
+  if (!this->enabled_ && this->loaded_) {
+    // Model is disabled but still loaded
+    this->unload_model();
+    return true;
+  }
+
+  if (this->loaded_) {
     TfLiteTensor *input = this->interpreter_->input(0);
 
     std::memmove(
@@ -127,10 +148,8 @@ bool StreamingModel::perform_streaming_inference(const int8_t features[PREPROCES
       this->recent_streaming_probabilities_[this->last_n_index_] = output->data.uint8[0];  // probability;
     }
     this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
-    return true;
   }
-  ESP_LOGE(TAG, "Streaming interpreter is not initialized.");
-  return false;
+  return true;
 }
 
 void StreamingModel::reset_probabilities() {
@@ -148,6 +167,7 @@ WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cut
   this->recent_streaming_probabilities_.resize(sliding_window_average_size, 0);
   this->wake_word_ = wake_word;
   this->tensor_arena_size_ = tensor_arena_size;
+  this->register_streaming_ops_(this->streaming_op_resolver_);
 };
 
 DetectionEvent WakeWordModel::determine_detected() {
@@ -156,7 +176,7 @@ DetectionEvent WakeWordModel::determine_detected() {
   detection_event.max_probability = 0;
   detection_event.average_probability = 0;
 
-  if (this->ignore_windows_ < 0) {
+  if ((this->ignore_windows_ < 0) || !this->enabled_) {
     detection_event.detected = false;
     return detection_event;
   }
@@ -180,12 +200,19 @@ VADModel::VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_
   this->sliding_window_size_ = sliding_window_size;
   this->recent_streaming_probabilities_.resize(sliding_window_size, 0);
   this->tensor_arena_size_ = tensor_arena_size;
-};
+  this->register_streaming_ops_(this->streaming_op_resolver_);
+}
 
 DetectionEvent VADModel::determine_detected() {
   DetectionEvent detection_event;
   detection_event.max_probability = 0;
   detection_event.average_probability = 0;
+
+  if (!this->enabled_) {
+    // We disabled the VAD model for some reason... so we shouldn't block wake words from being detected
+    detection_event.detected = true;
+    return detection_event;
+  }
 
   uint32_t sum = 0;
   for (auto &prob : this->recent_streaming_probabilities_) {
@@ -197,6 +224,51 @@ DetectionEvent VADModel::determine_detected() {
   detection_event.detected = sum > (this->probability_cutoff_ * this->sliding_window_size_);
 
   return detection_event;
+}
+
+bool StreamingModel::register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver) {
+  if (op_resolver.AddCallOnce() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddVarHandle() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddReshape() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddReadVariable() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddStridedSlice() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddConcatenation() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddAssignVariable() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddConv2D() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddMul() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddAdd() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddMean() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddFullyConnected() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddLogistic() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddQuantize() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddDepthwiseConv2D() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddAveragePool2D() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddMaxPool2D() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddPad() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddPack() != kTfLiteOk)
+    return false;
+  if (op_resolver.AddSplitV() != kTfLiteOk)
+    return false;
+
+  return true;
 }
 
 }  // namespace micro_wake_word
