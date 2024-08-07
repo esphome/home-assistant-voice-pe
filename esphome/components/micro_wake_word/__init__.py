@@ -476,6 +476,8 @@ async def to_code(config):
         probability_cutoff = model_parameters.get(
             CONF_PROBABILITY_CUTOFF, manifest[KEY_MICRO][CONF_PROBABILITY_CUTOFF]
         )
+        quantized_probability_cutoff = int(probability_cutoff * 255)
+
         sliding_window_size = model_parameters.get(
             CONF_SLIDING_WINDOW_SIZE,
             manifest[KEY_MICRO][CONF_SLIDING_WINDOW_SIZE],
@@ -485,7 +487,7 @@ async def to_code(config):
             cg.add(
                 var.add_vad_model(
                     prog_arr,
-                    probability_cutoff,
+                    quantized_probability_cutoff,
                     sliding_window_size,
                     manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
                 )
@@ -494,7 +496,7 @@ async def to_code(config):
             cg.add(
                 var.add_wake_word_model(
                     prog_arr,
-                    probability_cutoff,
+                    quantized_probability_cutoff,
                     sliding_window_size,
                     manifest[KEY_WAKE_WORD],
                     manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
@@ -502,7 +504,11 @@ async def to_code(config):
             )
 
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
-    cg.add_library(None,None,"https://github.com/kahrendt/ESPMicroSpeechFeatures.git#psram-allocations")
+    cg.add_library(
+        None,
+        None,
+        "https://github.com/kahrendt/ESPMicroSpeechFeatures.git#psram-allocations",
+    )
     # cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.0.0")
 
 

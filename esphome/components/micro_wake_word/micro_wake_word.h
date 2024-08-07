@@ -47,11 +47,11 @@ class MicroWakeWord : public Component {
 
   Trigger<std::string> *get_wake_word_detected_trigger() const { return this->wake_word_detected_trigger_; }
 
-  void add_wake_word_model(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_average_size,
+  void add_wake_word_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
                            const std::string &wake_word, size_t tensor_arena_size);
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
-  void add_vad_model(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_size,
+  void add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
                      size_t tensor_arena_size);
 #endif
 

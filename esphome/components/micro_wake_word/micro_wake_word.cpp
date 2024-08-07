@@ -255,7 +255,7 @@ void MicroWakeWord::inference_task_(void *params) {
   }
 }
 
-void MicroWakeWord::add_wake_word_model(const uint8_t *model_start, float probability_cutoff,
+void MicroWakeWord::add_wake_word_model(const uint8_t *model_start, uint8_t probability_cutoff,
                                         size_t sliding_window_average_size, const std::string &wake_word,
                                         size_t tensor_arena_size) {
   this->wake_word_models_.emplace_back(model_start, probability_cutoff, sliding_window_average_size, wake_word,
@@ -263,7 +263,7 @@ void MicroWakeWord::add_wake_word_model(const uint8_t *model_start, float probab
 }
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
-void MicroWakeWord::add_vad_model(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_size,
+void MicroWakeWord::add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
                                   size_t tensor_arena_size) {
   this->vad_model_ = make_unique<VADModel>(model_start, probability_cutoff, sliding_window_size, tensor_arena_size);
 }
@@ -444,7 +444,7 @@ bool MicroWakeWord::detect_wake_words_() {
         return true;
 #ifdef USE_MICRO_WAKE_WORD_VAD
       } else {
-        ESP_LOGD(TAG, "Wake word model predicts %s, but VAD model doesn't.", model.get_wake_word().c_str());
+        ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", model.get_wake_word().c_str());
       }
 #endif
     }

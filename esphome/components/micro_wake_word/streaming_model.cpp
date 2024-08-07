@@ -13,13 +13,13 @@ namespace micro_wake_word {
 
 void WakeWordModel::log_model_config() {
   ESP_LOGCONFIG(TAG, "    - Wake Word: %s", this->wake_word_.c_str());
-  ESP_LOGCONFIG(TAG, "      Probability cutoff: %.3f", this->probability_cutoff_);
+  ESP_LOGCONFIG(TAG, "      Probability cutoff: %.2f", this->probability_cutoff_ / 255.0f);
   ESP_LOGCONFIG(TAG, "      Sliding window size: %d", this->sliding_window_size_);
 }
 
 void VADModel::log_model_config() {
   ESP_LOGCONFIG(TAG, "    - VAD Model");
-  ESP_LOGCONFIG(TAG, "      Probability cutoff: %.3f", this->probability_cutoff_);
+  ESP_LOGCONFIG(TAG, "      Probability cutoff: %.2f", this->probability_cutoff_ / 255.0f);
   ESP_LOGCONFIG(TAG, "      Sliding window size: %d", this->sliding_window_size_);
 }
 
@@ -137,7 +137,7 @@ void StreamingModel::reset_probabilities() {
   }
 }
 
-WakeWordModel::WakeWordModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_average_size,
+WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
                              const std::string &wake_word, size_t tensor_arena_size) {
   this->model_start_ = model_start;
   this->probability_cutoff_ = probability_cutoff;
@@ -153,19 +153,18 @@ bool WakeWordModel::determine_detected() {
     sum += prob;
   }
 
-  float sliding_window_average = static_cast<float>(sum) / static_cast<float>(255 * this->sliding_window_size_);
+  if (sum > (this->probability_cutoff_ * this->sliding_window_size_)) {
+    ESP_LOGD(TAG, "The '%s' model sliding average probability is %.2f and most recent probability is %.2f",
+             this->wake_word_.c_str(), static_cast<float>(sum) / (255 * this->sliding_window_size_),
+             this->recent_streaming_probabilities_[this->last_n_index_] / (255.0f));
 
-  // Detect the wake word if the sliding window average is above the cutoff
-  if (sliding_window_average > this->probability_cutoff_) {
-    ESP_LOGD(TAG, "The '%s' model sliding average probability is %.3f and most recent probability is %.3f",
-             this->wake_word_.c_str(), sliding_window_average,
-             this->recent_streaming_probabilities_[this->last_n_index_] / (255.0));
     return true;
   }
+
   return false;
 }
 
-VADModel::VADModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_size,
+VADModel::VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
                    size_t tensor_arena_size) {
   this->model_start_ = model_start;
   this->probability_cutoff_ = probability_cutoff;
@@ -180,9 +179,7 @@ bool VADModel::determine_detected() {
     sum += prob;
   }
 
-  float sliding_window_average = static_cast<float>(sum) / static_cast<float>(255 * this->sliding_window_size_);
-
-  return sliding_window_average > this->probability_cutoff_;
+  return sum > (this->probability_cutoff_ * this->sliding_window_size_);
 }
 
 }  // namespace micro_wake_word

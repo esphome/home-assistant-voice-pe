@@ -34,7 +34,8 @@ class StreamingModel {
  protected:
   uint8_t current_stride_step_{0};
 
-  float probability_cutoff_;
+  uint8_t probability_cutoff_;  // Quantized cutoff between 0 and 255
+  //float probability_cutoff_;
   size_t sliding_window_size_;
   size_t last_n_index_{0};
   size_t tensor_arena_size_;
@@ -50,7 +51,7 @@ class StreamingModel {
 
 class WakeWordModel final : public StreamingModel {
  public:
-  WakeWordModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_average_size,
+  WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
                 const std::string &wake_word, size_t tensor_arena_size);
 
   void log_model_config() override;
@@ -68,7 +69,7 @@ class WakeWordModel final : public StreamingModel {
 
 class VADModel final : public StreamingModel {
  public:
-  VADModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_size, size_t tensor_arena_size);
+  VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size, size_t tensor_arena_size);
 
   void log_model_config() override;
 
