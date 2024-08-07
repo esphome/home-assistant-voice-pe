@@ -191,7 +191,7 @@ static void stats_task(void *arg) {
 static const char *const TAG = "nabu_media_player";
 
 void NabuMediaPlayer::setup() {
-  xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
+  // xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
