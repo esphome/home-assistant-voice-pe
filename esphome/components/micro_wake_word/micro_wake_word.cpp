@@ -150,9 +150,9 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       }
 
       while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
-        while (this_mww->microphone_->available_secondary() / sizeof(int16_t) >= new_samples_to_read) {
+        while (this_mww->microphone_->available() / sizeof(int16_t) >= new_samples_to_read) {
           size_t bytes_read =
-              this_mww->microphone_->read_secondary(audio_buffer, new_samples_to_read * sizeof(int16_t));
+              this_mww->microphone_->read(audio_buffer, new_samples_to_read * sizeof(int16_t));
           if (bytes_read < new_samples_to_read * sizeof(int16_t)) {
             // This shouldn't ever happen, but if we somehow don't have enough samples, just drop this frame
             continue;
