@@ -233,8 +233,13 @@ void NabuMicrophone::read_task_(void *params) {
               }
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
-              this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(), bytes_to_write);
-              this_microphone->channel_2_->get_ring_buffer()->write((void *) channel_2_samples.data(), bytes_to_write);
+              if (this_microphone->channel_1_ != nullptr) {
+                this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
+                                                                      bytes_to_write);
+              } else {
+                this_microphone->channel_2_->get_ring_buffer()->write((void *) channel_2_samples.data(),
+                                                                      bytes_to_write);
+              }
             }
 
             event.type = i2s_audio::TaskEventType::RUNNING;
