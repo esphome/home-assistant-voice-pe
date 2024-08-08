@@ -11,30 +11,57 @@
 namespace esphome {
 namespace micro_wake_word {
 
+static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
 static const uint32_t STREAMING_MODEL_VARIABLE_ARENA_SIZE = 1024;
+
+struct DetectionEvent {
+  std::string *wake_word;
+  bool detected;
+  uint8_t max_probability;
+  uint8_t average_probability;
+  bool blocked_by_vad = false;
+};
+
+// TODO: After changing how VAD is detected, do we need a separate class? There is minimal difference
 
 class StreamingModel {
  public:
   virtual void log_model_config() = 0;
-  virtual bool determine_detected() = 0;
+  virtual DetectionEvent determine_detected() = 0;
 
+  // Performs inference on the given features.
+  //  - Will load the model if it is enabled and needed
+  //  - Will unload the model if it is disabled but still laoded
+  // Returns true if sucessful or false if there is an error
   bool perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]);
 
-  /// @brief Sets all recent_streaming_probabilities to 0
+  /// @brief Sets all recent_streaming_probabilities to 0 and resets the ignore window count
   void reset_probabilities();
-
-  /// @brief Allocates tensor and variable arenas and sets up the model interpreter
-  /// @param op_resolver MicroMutableOpResolver object that must exist until the model is unloaded
-  /// @return True if successful, false otherwise
-  bool load_model(tflite::MicroMutableOpResolver<20> &op_resolver);
 
   /// @brief Destroys the TFLite interpreter and frees the tensor and variable arenas' memory
   void unload_model();
 
- protected:
-  uint8_t current_stride_step_{0};
+  /// @brief Enable the model
+  void enable() { this->enabled_ = true; }
 
-  float probability_cutoff_;
+  /// @brief Disable the model
+  void disable() { this->enabled_ = false; }
+
+ protected:
+  /// @brief Allocates tensor and variable arenas and sets up the model interpreter
+  /// @return True if successful, false otherwise
+  bool load_model_();
+  /// @brief Returns true if successfully registered the streaming model's TensorFlow operations
+  bool register_streaming_ops_(tflite::MicroMutableOpResolver<20> &op_resolver);
+
+  tflite::MicroMutableOpResolver<20> streaming_op_resolver_;
+
+  bool loaded_{false};
+  bool enabled_{true};
+  uint8_t current_stride_step_{0};
+  int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
+
+  uint8_t probability_cutoff_;  // Quantized probability cutoff mapping 0.0 - 1.0 to 0 - 255
   size_t sliding_window_size_;
   size_t last_n_index_{0};
   size_t tensor_arena_size_;
@@ -50,7 +77,7 @@ class StreamingModel {
 
 class WakeWordModel final : public StreamingModel {
  public:
-  WakeWordModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_average_size,
+  WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
                 const std::string &wake_word, size_t tensor_arena_size);
 
   void log_model_config() override;
@@ -58,7 +85,7 @@ class WakeWordModel final : public StreamingModel {
   /// @brief Checks for the wake word by comparing the mean probability in the sliding window with the probability
   /// cutoff
   /// @return True if wake word is detected, false otherwise
-  bool determine_detected() override;
+  DetectionEvent determine_detected() override;
 
   const std::string &get_wake_word() const { return this->wake_word_; }
 
@@ -68,14 +95,15 @@ class WakeWordModel final : public StreamingModel {
 
 class VADModel final : public StreamingModel {
  public:
-  VADModel(const uint8_t *model_start, float probability_cutoff, size_t sliding_window_size, size_t tensor_arena_size);
+  VADModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
+           size_t tensor_arena_size);
 
   void log_model_config() override;
 
   /// @brief Checks for voice activity by comparing the max probability in the sliding window with the probability
   /// cutoff
   /// @return True if voice activity is detected, false otherwise
-  bool determine_detected() override;
+  DetectionEvent determine_detected() override;
 };
 
 }  // namespace micro_wake_word

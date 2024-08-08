@@ -1104,8 +1104,8 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
-    components: [i2s_audio, nabu, voice_assistant, media_player, micro_wake_word]
+      ref: kahrendt-20240805-audio-in
+    components: [i2s_audio, microphone, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
   - source: github://esphome/esphome@dev
@@ -1115,6 +1115,11 @@ external_components:
 micro_wake_word:
   models:
     - model: okay_nabu
+      id: okay_nabu
+    - model: hey_jarvis
+      id: hey_jarvis
+    - model: hey_mycroft
+      id: hey_mycroft
   vad:
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing (Just restart micro wake word)
@@ -1146,6 +1151,31 @@ micro_wake_word:
         else:
           - micro_wake_word.start:
 
+select:
+  - platform: template
+    name: "Wake word select"
+    options:
+      - "OK Nabu"
+      - "Hey Jarvis"
+      - "Hey Mycroft"
+    optimistic: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "OK Nabu") {
+              id(okay_nabu).enable();
+              id(hey_mycroft).disable();
+              id(hey_jarvis).disable();
+            } else if (x == "Hey Mycroft") {
+              id(okay_nabu).disable();
+              id(hey_mycroft).enable();
+              id(hey_jarvis).disable();
+            } else if (x == "Hey Jarvis") {
+              id(okay_nabu).disable();
+              id(hey_mycroft).disable();
+              id(hey_jarvis).enable();
+            }
+
 voice_assistant:
   id: va
   microphone: kit_mic
@@ -1157,6 +1187,7 @@ voice_assistant:
   on_client_connected:
     - wait_until:
         not: ble.enabled
+    - delay: 2s
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
