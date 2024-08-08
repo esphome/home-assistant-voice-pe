@@ -221,9 +221,15 @@ void NabuMicrophone::read_task_(void *params) {
               size_t samples_read = (bytes_read / sizeof(int32_t)) / (sample_rate_factor);
               size_t frames_read = samples_read / CHANNELS;  // Left and right channel samples combine into 1 frame
 
+              uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
+              uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
+
               for (size_t i = 0; i < frames_read; i++) {
-                channel_1_samples[i] = buffer[CHANNELS * sample_rate_factor * i] >> 16;
-                channel_2_samples[i] = buffer[CHANNELS * sample_rate_factor * i + 1] >> 16;
+                int32_t channel_1_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_1_shift;
+                int32_t channel_2_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_2_shift;
+
+                channel_1_samples[i] = clamp<int16_t>(channel_1_sample, INT16_MIN, INT16_MAX);
+                channel_2_samples[i] = clamp<int16_t>(channel_2_sample, INT16_MIN, INT16_MAX);
               }
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 

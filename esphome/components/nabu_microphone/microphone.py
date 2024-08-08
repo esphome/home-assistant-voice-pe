@@ -27,6 +27,7 @@ CONF_SAMPLE_RATE = "sample_rate"
 CONF_USE_APLL = "use_apll"
 CONF_CHANNEL_1 = "channel_1"
 CONF_CHANNEL_2 = "channel_2"
+CONF_AMPLIFY = "amplify"
 
 nabu_microphone_ns = cg.esphome_ns.namespace("nabu_microphone")
 
@@ -71,11 +72,13 @@ BASE_SCHEMA = cv.Schema(
         cv.Optional(CONF_CHANNEL_1): microphone.MICROPHONE_SCHEMA.extend(
             {
                 cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
+                cv.Optional(CONF_AMPLIFY, default=True): cv.boolean,
             }
         ),
         cv.Optional(CONF_CHANNEL_2): microphone.MICROPHONE_SCHEMA.extend(
             {
                 cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
+                cv.Optional(CONF_AMPLIFY, default=True): cv.boolean,
             }
         ),
     }
@@ -114,6 +117,7 @@ async def to_code(config):
         await cg.register_parented(channel_1, config[CONF_ID])
         await microphone.register_microphone(channel_1, channel_1_config)
         cg.add(var.set_channel_1(channel_1))
+        cg.add(channel_1.set_amplify(channel_1_config[CONF_AMPLIFY]))
 
     if channel_2_config := config.get(CONF_CHANNEL_2):
         channel_2 = cg.new_Pvariable(channel_2_config[CONF_ID])
@@ -121,6 +125,7 @@ async def to_code(config):
         await cg.register_parented(channel_2, config[CONF_ID])
         await microphone.register_microphone(channel_2, channel_2_config)
         cg.add(var.set_channel_2(channel_2))
+        cg.add(channel_2.set_amplify(channel_2_config[CONF_AMPLIFY]))
 
     if config[CONF_ADC_TYPE] == "internal":
         variant = esp32.get_esp32_variant()
