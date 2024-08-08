@@ -37,6 +37,24 @@ enum TaskNotificationBits : uint32_t {
   COMMAND_STOP = (1 << 1),   // stops the main task
 };
 
+void NabuMicrophoneChannel::setup() {
+  const size_t ring_buffer_size = RING_BUFFER_LENGTH * this->parent_->get_sample_rate() / 1000 * sizeof(int16_t);
+  this->ring_buffer_ = RingBuffer::create(ring_buffer_size);
+  if (this->ring_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Could not allocate ring buffer");
+    this->mark_failed();
+    return;
+  }
+}
+
+void NabuMicrophoneChannel::loop() {
+  if (this->parent_->is_running()) {
+    this->state_ = microphone::STATE_RUNNING;
+  } else {
+    this->state_ = microphone::STATE_STOPPED;
+  }
+}
+
 void NabuMicrophone::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Microphone...");
 #if SOC_I2S_SUPPORTS_ADC
@@ -57,22 +75,6 @@ void NabuMicrophone::setup() {
   }
 
   this->event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(i2s_audio::TaskEvent));
-
-  const size_t ring_buffer_size = RING_BUFFER_LENGTH * this->sample_rate_ / 1000 * sizeof(int16_t);
-
-  this->asr_ring_buffer_ = RingBuffer::create(ring_buffer_size);
-  if (this->asr_ring_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Could not allocate ASR ring buffer");
-    this->mark_failed();
-    return;
-  }
-
-  this->comm_ring_buffer_ = RingBuffer::create(ring_buffer_size);
-  if (this->comm_ring_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Could not allocate COMM ring buffer");
-    this->mark_failed();
-    return;
-  }
 }
 
 esp_err_t NabuMicrophone::start_i2s_driver_() {
@@ -86,7 +88,7 @@ esp_err_t NabuMicrophone::start_i2s_driver_() {
       .mode = (i2s_mode_t) (this->parent_->get_i2s_mode() | I2S_MODE_RX),
       .sample_rate = this->sample_rate_,
       .bits_per_sample = this->bits_per_sample_,
-      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,  // this->channel_,
+      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
       .dma_buf_count = DMA_BUF_COUNT,
@@ -152,17 +154,32 @@ void NabuMicrophone::read_task_(void *params) {
       event.type = i2s_audio::TaskEventType::STARTING;
       xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
+      if ((this_microphone->channel_1_ != nullptr) && this_microphone->channel_1_->is_failed()) {
+        event.type = i2s_audio::TaskEventType::WARNING;
+        event.err = ESP_ERR_INVALID_STATE;
+        xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
+        continue;
+      }
+
+      if ((this_microphone->channel_2_ != nullptr) && this_microphone->channel_2_->is_failed()) {
+        event.type = i2s_audio::TaskEventType::WARNING;
+        event.err = ESP_ERR_INVALID_STATE;
+        xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
+        continue;
+      }
+
       // Note, if we have 16 bit samples incoming, this requires modification
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
       int32_t *buffer = allocator.allocate(DMA_SAMPLES);
 
-      std::vector<int16_t, ExternalRAMAllocator<int16_t>> asr_samples;
-      std::vector<int16_t, ExternalRAMAllocator<int16_t>> comm_samples;
+      std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
+      std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_2_samples;
 
-      asr_samples.reserve(DMA_SAMPLES);
-      comm_samples.reserve(DMA_SAMPLES);
+      channel_1_samples.reserve(DMA_SAMPLES);
+      channel_2_samples.reserve(DMA_SAMPLES);
 
-      if ((buffer == nullptr) || (asr_samples.capacity() < DMA_SAMPLES) || (comm_samples.capacity() < DMA_SAMPLES)) {
+      if ((buffer == nullptr) || (channel_1_samples.capacity() < DMA_SAMPLES) ||
+          (channel_2_samples.capacity() < DMA_SAMPLES)) {
         event.type = i2s_audio::TaskEventType::WARNING;
         event.err = ESP_ERR_NO_MEM;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -174,8 +191,8 @@ void NabuMicrophone::read_task_(void *params) {
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         } else {
           // TODO: Is this the ideal spot to reset the ring buffers?
-          this_microphone->asr_ring_buffer_->reset();
-          this_microphone->comm_ring_buffer_->reset();
+          this_microphone->channel_1_->get_ring_buffer()->reset();
+          this_microphone->channel_2_->get_ring_buffer()->reset();
 
           event.type = i2s_audio::TaskEventType::STARTED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -205,13 +222,13 @@ void NabuMicrophone::read_task_(void *params) {
               size_t frames_read = samples_read / CHANNELS;  // Left and right channel samples combine into 1 frame
 
               for (size_t i = 0; i < frames_read; i++) {
-                asr_samples[i] = buffer[CHANNELS * sample_rate_factor * i] >> 16;
-                comm_samples[i] = buffer[CHANNELS * sample_rate_factor * i + 1] >> 16;
+                channel_1_samples[i] = buffer[CHANNELS * sample_rate_factor * i] >> 16;
+                channel_2_samples[i] = buffer[CHANNELS * sample_rate_factor * i + 1] >> 16;
               }
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
-              this_microphone->asr_ring_buffer_->write((void *) asr_samples.data(), bytes_to_write);
-              this_microphone->comm_ring_buffer_->write((void *) comm_samples.data(), bytes_to_write);
+              this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(), bytes_to_write);
+              this_microphone->channel_2_->get_ring_buffer()->write((void *) channel_2_samples.data(), bytes_to_write);
             }
 
             event.type = i2s_audio::TaskEventType::RUNNING;
@@ -259,12 +276,6 @@ void NabuMicrophone::stop() {
   xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
 }
 
-size_t NabuMicrophone::read(int16_t *buf, size_t len) { return this->asr_ring_buffer_->read((void *) buf, len, 0); }
-
-size_t NabuMicrophone::read_secondary(int16_t *buf, size_t len) {
-  return this->comm_ring_buffer_->read((void *) buf, len, 0);
-}
-
 void NabuMicrophone::loop() {
   // Note this->state_ is only modified here based on the status of the task
 
@@ -300,7 +311,7 @@ void NabuMicrophone::loop() {
   }
 }
 
-}  // namespace i2s_audio
+}  // namespace nabu_microphone
 }  // namespace esphome
 
 #endif  // USE_ESP32
