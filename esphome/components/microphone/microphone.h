@@ -24,6 +24,8 @@ class Microphone {
 
   virtual size_t available() { return 0; }
 
+  virtual void reset() {}
+
   bool is_running() const { return this->state_ == STATE_RUNNING; }
   bool is_stopped() const { return this->state_ == STATE_STOPPED; }
 

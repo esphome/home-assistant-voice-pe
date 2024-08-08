@@ -87,6 +87,7 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
 
   size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len, 0); };
   size_t available() override { return this->ring_buffer_->available(); }
+  void reset() override { this->ring_buffer_->reset(); }
 
   RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
 
