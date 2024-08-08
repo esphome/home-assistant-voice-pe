@@ -226,7 +226,7 @@ void NabuMicrophone::read_task_(void *params) {
 
               for (size_t i = 0; i < frames_read; i++) {
                 int32_t channel_1_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_1_shift;
-                int32_t channel_2_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_2_shift;
+                int32_t channel_2_sample = buffer[CHANNELS * sample_rate_factor * i + 1] >> channel_2_shift;
 
                 channel_1_samples[i] = clamp<int16_t>(channel_1_sample, INT16_MIN, INT16_MAX);
                 channel_2_samples[i] = clamp<int16_t>(channel_2_sample, INT16_MIN, INT16_MAX);
