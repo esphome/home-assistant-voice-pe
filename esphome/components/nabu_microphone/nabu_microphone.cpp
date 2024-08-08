@@ -236,7 +236,8 @@ void NabuMicrophone::read_task_(void *params) {
               if (this_microphone->channel_1_ != nullptr) {
                 this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
                                                                       bytes_to_write);
-              } else {
+              }
+              if (this_microphone->channel_2_ != nullptr) {
                 this_microphone->channel_2_->get_ring_buffer()->write((void *) channel_2_samples.data(),
                                                                       bytes_to_write);
               }
