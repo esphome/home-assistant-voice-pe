@@ -1187,6 +1187,7 @@ voice_assistant:
   on_client_connected:
     - wait_until:
         not: ble.enabled
+    - delay: 2s
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
