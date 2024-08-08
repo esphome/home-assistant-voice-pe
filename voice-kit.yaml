@@ -224,7 +224,6 @@ binary_sensor:
                                   - not:
                                       voice_assistant.is_running
                               then:
-                                - micro_wake_word.stop:
                                 - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
