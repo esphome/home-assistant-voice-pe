@@ -38,7 +38,6 @@ enum FLACDecoderResult {
   FLAC_DECODER_ERROR_BAD_FIXED_PREDICTION_ORDER = 10,
   FLAC_DECODER_ERROR_RESERVED_RESIDUAL_CODING_METHOD = 11,
   FLAC_DECODER_ERROR_BLOCK_SIZE_NOT_DIVISIBLE_RICE = 12,
-  FLAC_DECODER_ERROR_UNSUPPORTED_BITS_PER_SAMPLE = 13,
 };
 
 // Coefficients for fixed linear prediction
@@ -161,10 +160,10 @@ class FLACDecoder {
   uint32_t num_samples_ = 0;
 
   /* Buffer of decoded samples at full precision (all channels). */
-  int16_t *block_samples_ = nullptr;
+  int32_t *block_samples_ = nullptr;
 
   /* Buffer of decoded samples at full precision (single channel). */
-  std::vector<int16_t, esphome::ExternalRAMAllocator<int16_t>> block_result_;
+  std::vector<int32_t, esphome::ExternalRAMAllocator<int32_t>> block_result_;
 
   bool partial_header_read_{false};
   bool partial_header_last_{false};
