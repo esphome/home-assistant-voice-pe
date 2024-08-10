@@ -30,16 +30,15 @@ enum class FileDecoderState : uint8_t {
 
 class AudioDecoder {
  public:
-  AudioDecoder(esphome::RingBuffer *input_ring_buffer, esphome::RingBuffer *output_ring_buffer, size_t internal_buffer_size);
+  AudioDecoder(esphome::RingBuffer *input_ring_buffer, esphome::RingBuffer *output_ring_buffer,
+               size_t internal_buffer_size);
   ~AudioDecoder();
 
   void start(media_player::MediaFileType media_file_type);
 
   AudioDecoderState decode(bool stop_gracefully);
 
-  const optional<uint8_t> &get_channels() const { return this->channels_; }
-  const optional<uint8_t> &get_sample_depth() const { return this->sample_depth_; }
-  const optional<uint32_t> &get_sample_rate() const { return this->sample_rate_; }
+  const optional<media_player::StreamInfo> &get_stream_info() const { return this->stream_info_; }
 
  protected:
   FileDecoderState decode_wav_();
@@ -66,9 +65,7 @@ class AudioDecoder {
   flac::FLACDecoder *flac_decoder_{nullptr};
 
   media_player::MediaFileType media_file_type_{media_player::MediaFileType::NONE};
-  optional<uint8_t> channels_;
-  optional<uint8_t> sample_depth_;
-  optional<uint32_t> sample_rate_;
+  optional<media_player::StreamInfo> stream_info_{};
 
   size_t potentially_failed_count_{0};
   bool end_of_file_{false};

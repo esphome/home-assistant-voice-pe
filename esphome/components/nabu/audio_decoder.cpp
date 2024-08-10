@@ -168,7 +168,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
 }
 
 FileDecoderState AudioDecoder::decode_wav_() {
-  if (!this->channels_.has_value() && (this->input_buffer_length_ > 44)) {
+  if (!this->stream_info_.has_value() && (this->input_buffer_length_ > 44)) {
     // Header hasn't been processed
 
     size_t original_buffer_length = this->input_buffer_length_;
@@ -192,13 +192,15 @@ FileDecoderState AudioDecoder::decode_wav_() {
           // Header parsing is complete
 
           // Assume PCM
-          this->channels_ = this->wav_decoder_->num_channels();
-          this->sample_rate_ = this->wav_decoder_->sample_rate();
-          this->sample_depth_ = this->wav_decoder_->bits_per_sample();
+          media_player::StreamInfo stream_info;
+          stream_info.channels = this->wav_decoder_->num_channels();
+          stream_info.sample_rate = this->wav_decoder_->sample_rate();
+          stream_info.bits_per_sample = this->wav_decoder_->bits_per_sample();
+          this->stream_info_ = stream_info;
 
-          printf("sample channels: %d\n", this->channels_.value());
-          printf("sample rate: %" PRId32 "\n", this->sample_rate_.value());
-          printf("bits per sample: %d\n", this->sample_depth_.value());
+          printf("sample channels: %d\n", this->stream_info_.value().channels);
+          printf("sample rate: %" PRId32 "\n", this->stream_info_.value().sample_rate);
+          printf("bits per sample: %d\n", this->stream_info_.value().bits_per_sample);
           this->wav_bytes_left_ = this->wav_decoder_->chunk_bytes_left();
           header_finished = true;
         } else if (result == wav_decoder::WAV_DECODER_SUCCESS_NEXT) {
@@ -270,9 +272,11 @@ FileDecoderState AudioDecoder::decode_mp3_() {
       this->output_buffer_length_ = mp3_frame_info.outputSamps * bytes_per_sample;
       this->output_buffer_current_ = this->output_buffer_;
 
-      this->sample_rate_ = mp3_frame_info.samprate;
-      this->channels_ = mp3_frame_info.nChans;
-      this->sample_depth_ = mp3_frame_info.bitsPerSample;
+      media_player::StreamInfo stream_info;
+      stream_info.channels = mp3_frame_info.nChans;
+      stream_info.sample_rate = mp3_frame_info.samprate;
+      stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
+      this->stream_info_ = stream_info;
     }
   }
   // }
@@ -280,7 +284,7 @@ FileDecoderState AudioDecoder::decode_mp3_() {
 }
 
 FileDecoderState AudioDecoder::decode_flac_() {
-  if (!this->channels_.has_value()) {
+  if (!this->stream_info_.has_value()) {
     // Header hasn't been read
     auto result = this->flac_decoder_->read_header(this->input_buffer_length_);
 
@@ -297,9 +301,10 @@ FileDecoderState AudioDecoder::decode_flac_() {
       return FileDecoderState::FAILED;
     }
 
-    this->channels_ = this->flac_decoder_->get_num_channels();
-    this->sample_rate_ = this->flac_decoder_->get_sample_rate();
-    this->sample_depth_ = this->flac_decoder_->get_sample_depth();
+    media_player::StreamInfo stream_info;
+    stream_info.channels = this->flac_decoder_->get_num_channels();
+    stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
+    stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
 
     size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
     if (this->internal_buffer_size_ < flac_decoder_output_buffer_min_size * sizeof(int16_t)) {

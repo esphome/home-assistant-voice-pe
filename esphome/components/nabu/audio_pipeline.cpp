@@ -93,12 +93,12 @@ AudioPipelineState AudioPipeline::get_state() {
   if (!this->read_task_handle_ && !this->decode_task_handle_ && !this->resample_task_handle_) {
     return AudioPipelineState::STOPPED;
   }
-  
+
   if ((event_bits & READER_MESSAGE_ERROR)) {
     xEventGroupClearBits(this->event_group_, READER_MESSAGE_ERROR);
     return AudioPipelineState::ERROR_READING;
   }
-  
+
   if ((event_bits & DECODER_MESSAGE_ERROR)) {
     xEventGroupClearBits(this->event_group_, DECODER_MESSAGE_ERROR);
     return AudioPipelineState::ERROR_DECODING;
@@ -110,7 +110,7 @@ AudioPipelineState AudioPipeline::get_state() {
   }
 
   if ((event_bits & READER_MESSAGE_FINISHED) && (event_bits & DECODER_MESSAGE_FINISHED) &&
-             (event_bits & RESAMPLER_MESSAGE_FINISHED)) {
+      (event_bits & RESAMPLER_MESSAGE_FINISHED)) {
     return AudioPipelineState::STOPPED;
   }
 
@@ -243,12 +243,10 @@ void AudioPipeline::decode_task_(void *params) {
           break;
         }
 
-        if (!has_stream_info && decoder.get_channels().has_value()) {
+        if (!has_stream_info && decoder.get_stream_info().has_value()) {
           has_stream_info = true;
 
-          this_pipeline->current_stream_info_.channels = decoder.get_channels().value();
-          this_pipeline->current_stream_info_.bits_per_sample = decoder.get_sample_depth().value();
-          this_pipeline->current_stream_info_.sample_rate = decoder.get_sample_rate().value();
+          this_pipeline->current_stream_info_ = decoder.get_stream_info().value();
 
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
