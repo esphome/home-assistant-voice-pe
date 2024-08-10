@@ -53,8 +53,8 @@ size_t AudioMixer::write_announcement(uint8_t *buffer, size_t length) {
 
 void AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
   if (this->task_handle_ == nullptr) {
-    this->task_handle_ = xTaskCreateStatic(AudioMixer::mix_task_, task_name.c_str(), 3072, (void *) this,
-                                           priority, this->stack_buffer_, &this->task_stack_);
+    this->task_handle_ = xTaskCreateStatic(AudioMixer::mix_task_, task_name.c_str(), 3072, (void *) this, priority,
+                                           this->stack_buffer_, &this->task_stack_);
   }
 }
 
@@ -70,9 +70,6 @@ void AudioMixer::mix_task_(void *params) {
   TaskEvent event;
   CommandEvent command_event;
 
-  //  ?big? assumption here is that incoming stream is 16 bits per sample... TODO: Check and verify this
-  // TODO: doesn't handle different sample rates
-  // TODO: doesn't handle different amount of channels
   ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
   int16_t *media_buffer = allocator.allocate(BUFFER_SIZE);
   int16_t *announcement_buffer = allocator.allocate(BUFFER_SIZE);
@@ -186,17 +183,8 @@ void AudioMixer::mix_task_(void *params) {
           bytes_written = this_mixer->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
 
         } else if (announcement_bytes_read > 0) {
-          bytes_written =
-              this_mixer->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
+          bytes_written = this_mixer->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
         }
-
-        // if (bytes_written) {
-        //   event.type = EventType::RUNNING;
-        //   xQueueSend(this_mixer->event_queue_, &event, portMAX_DELAY);
-        // } else if (this_mixer->output_ring_buffer_->available() == 0) {
-        //   event.type = EventType::IDLE;
-        //   xQueueSend(this_mixer->event_queue_, &event, portMAX_DELAY);
-        // }
       }
     }
   }

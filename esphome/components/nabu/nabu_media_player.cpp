@@ -172,8 +172,6 @@ static esp_err_t print_real_time_stats(TickType_t xTicksToWait) {
 }
 
 static void stats_task(void *arg) {
-  // xSemaphoreTake(sync_stats_task, portMAX_DELAY);
-
   // Print real time stats periodically
   while (1) {
     printf("\n\nGetting real time stats over %" PRIu32 " ticks\n", STATS_TICKS);
@@ -184,7 +182,6 @@ static void stats_task(void *arg) {
       printf("Error getting real time stats\n");
       printf("Error: %s", esp_err_to_name(err));
     }
-    // vTaskDelay(STATS_TICKS);
   }
 }
 
@@ -214,16 +211,6 @@ void NabuMediaPlayer::setup() {
     ESP_LOGE(TAG, "Couldn't communicate with DAC");
     this->mark_failed();
   }
-
-  // if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, 0x01)) {
-  //   ESP_LOGE(TAG, "DAC failed to switch register page");
-  //   return;
-  // }
-
-  // if (!this->write_byte(0x7B, 0b00000001)) {  // 40 ms reference start up time on page 1, didn't help
-  //                                             // if (!this->write_byte(0x40, 0b00010000)) { // auto mute...
-  //   return;
-  // }
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }
@@ -331,11 +318,6 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
     size_t delay_ms = 10;
     size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * 2;  // *2 for stereo
-    // if (event.type != TaskEventType::RUNNING) {
-    //   // Fill the entire DMA buffer if there is audio being outputed
-    //   bytes_to_read = DMA_BUFFER_COUNT*DMA_BUFFER_SIZE*sizeof(int16_t);
-    // }
-
     size_t bytes_read = 0;
 
     bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
@@ -556,7 +538,7 @@ void NabuMediaPlayer::loop() {
 
   if (this->announcement_pipeline_ != nullptr)
     this->announcement_pipeline_state_ = this->announcement_pipeline_->get_state();
-  
+
   if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
     ESP_LOGE(TAG, "Encountered an error reading the announcement file");
   }
@@ -583,9 +565,9 @@ void NabuMediaPlayer::loop() {
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
-      // this->unmute_();
+      // TODO: Idle muting can cut off parts of the audio. Replace with eventual XMOS command to cut power to speaker
+      // amp this->unmute_();
       this->is_idle_muted_ = false;
-      ESP_LOGD(TAG, "Unmuting as output is not idle");
     }
   } else {
     if (this->is_paused_) {
