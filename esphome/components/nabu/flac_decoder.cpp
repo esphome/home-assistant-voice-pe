@@ -5,9 +5,6 @@
 #include <vector>
 
 #include "flac_decoder.h"
-
-#include "esp_dsp.h"
-
 namespace flac {
 
 FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
@@ -69,12 +66,6 @@ FLACDecoderResult FLACDecoder::read_header(size_t buffer_length) {
     return FLAC_DECODER_ERROR_BAD_HEADER;
   }
 
-  if (this->sample_depth_ > 16) {
-    // This decoder can support higher sample depths, but it would require using int32s throughout. We limit to 16 bits
-    // per sample for the sake of speed, as we can then use a quick esp-dsp function for the dot product calculation
-    return FLAC_DECODER_ERROR_UNSUPPORTED_BITS_PER_SAMPLE;
-  }
-
   // Successfully read header
   return FLAC_DECODER_SUCCESS;
 }  // read_header
@@ -88,7 +79,7 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
 
   if (!this->block_samples_) {
     // freed in free_buffers()
-    esphome::ExternalRAMAllocator<int16_t> allocator(esphome::ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+    esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
     this->block_samples_ = allocator.allocate(this->max_block_size_ * this->num_channels_);
   }
 
@@ -185,7 +176,7 @@ FLACDecoderResult FLACDecoder::decode_frame(size_t buffer_length, int16_t *outpu
 void FLACDecoder::free_buffers() {
   if (this->block_samples_) {
     // delete this->block_samples_;
-    esphome::ExternalRAMAllocator<int16_t> allocator(esphome::ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+    esphome::ExternalRAMAllocator<int32_t> allocator(esphome::ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
     allocator.deallocate(this->block_samples_, this->max_block_size_ * this->num_channels_);
     this->block_samples_ = nullptr;
   }
@@ -384,19 +375,13 @@ FLACDecoderResult FLACDecoder::decode_residuals(uint32_t block_size) {
 }  // decode_residuals
 
 void FLACDecoder::restore_linear_prediction(const std::vector<int16_t> &coefs, int32_t shift) {
-  // The esp-dsp dot product code has a round factor built-in that can cause small differences (at most 1) in the
-  // decoding compared to the original implementation
   for (std::size_t i = 0; i < this->block_result_.size() - coefs.size() + 1; i++) {
-    dsps_dotprod_s16_ae32(&this->block_result_.data()[i], coefs.data(),
-                          &this->block_result_.data()[i + coefs.size() - 1], coefs.size(), 15 - shift);
+    int32_t sum = 0;
+    for (std::size_t j = 0; j < coefs.size(); ++j) {
+      sum += (this->block_result_[i + j] * coefs[j]);
+    }
+    this->block_result_[i + coefs.size() - 1] = (sum >> shift);
   }
-  // for (std::size_t i = coefs.size(); i < this->block_result_.size(); i++) {
-  //   int32_t sum = 0;
-  //   for (std::size_t j = 0; j < coefs.size(); j++) {
-  //     sum += (this->block_result_[i - 1 - j] * coefs[j]);
-  //   }
-  //   this->block_result_[i] += (sum >> shift);
-  // }
 }  // restore_linear_prediction
 
 uint32_t FLACDecoder::read_uint(std::size_t num_bits) {
