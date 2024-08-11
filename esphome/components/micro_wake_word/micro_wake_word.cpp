@@ -151,8 +151,7 @@ void MicroWakeWord::preprocessor_task_(void *params) {
 
       while (!(xEventGroupGetBits(this_mww->event_group_) & COMMAND_STOP)) {
         while (this_mww->microphone_->available() / sizeof(int16_t) >= new_samples_to_read) {
-          size_t bytes_read =
-              this_mww->microphone_->read(audio_buffer, new_samples_to_read * sizeof(int16_t));
+          size_t bytes_read = this_mww->microphone_->read(audio_buffer, new_samples_to_read * sizeof(int16_t));
           if (bytes_read < new_samples_to_read * sizeof(int16_t)) {
             // This shouldn't ever happen, but if we somehow don't have enough samples, just drop this frame
             continue;
@@ -237,6 +236,9 @@ void MicroWakeWord::inference_task_(void *params) {
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
           DetectionEvent vad_state = this_mww->vad_model_->determine_detected();
+
+          // Atomic write, so thread safe
+          this_mww->vad_status_ = vad_state.detected;
 #endif
 
           for (auto &model : this_mww->wake_word_models_) {
