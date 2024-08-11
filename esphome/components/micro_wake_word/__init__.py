@@ -176,12 +176,11 @@ def _convert_manifest_v1_to_v2(v1_manifest):
         CONF_SLIDING_WINDOW_AVERAGE_SIZE
     ]
     del v2_manifest[KEY_MICRO][CONF_SLIDING_WINDOW_AVERAGE_SIZE]
-    v2_manifest[KEY_MICRO][
-        CONF_TENSOR_ARENA_SIZE
-    ] = 45672  # Original Inception-based V1 manifest models require a minimum of 45672 bytes
-    v2_manifest[KEY_MICRO][
-        CONF_FEATURE_STEP_SIZE
-    ] = 20  # Original Inception-based V1 manifest models use a 20 ms feature step size
+
+    # Original Inception-based V1 manifest models require a minimum of 45672 bytes
+    v2_manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE] = 45672
+    # Original Inception-based V1 manifest models use a 20 ms feature step size
+    v2_manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE] = 20
 
     return v2_manifest
 
@@ -508,12 +507,7 @@ async def to_code(config):
             cg.add(var.add_wake_word_model(wake_word_model))
 
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
-    cg.add_library(
-        None,
-        None,
-        "https://github.com/kahrendt/ESPMicroSpeechFeatures.git#psram-allocations",
-    )
-    # cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.0.0")
+    cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.1.0")
 
 
 MICRO_WAKE_WORD_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(MicroWakeWord)})
