@@ -91,9 +91,14 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
 
   RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
 
+  void set_amplify(bool amplify) { this->amplify_ = amplify; }
+  bool get_amplify() { return this->amplify_; }
+
  protected:
   NabuMicrophone *parent_;
   std::unique_ptr<RingBuffer> ring_buffer_;
+
+  bool amplify_;
 };
 
 }  // namespace nabu_microphone

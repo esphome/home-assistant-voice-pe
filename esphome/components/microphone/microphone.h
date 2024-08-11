@@ -29,13 +29,8 @@ class Microphone {
   bool is_running() const { return this->state_ == STATE_RUNNING; }
   bool is_stopped() const { return this->state_ == STATE_STOPPED; }
 
-  void set_amplify(bool amplify) { this->amplify_ = amplify; }
-  bool get_amplify() { return this->amplify_; }
-
  protected:
   State state_{STATE_STOPPED};
-
-  bool amplify_;
 
   CallbackManager<void(const std::vector<int16_t> &)> data_callbacks_{};
 };
