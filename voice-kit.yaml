@@ -1066,7 +1066,7 @@ microphone:
     i2s_din_pin: GPIO11
     adc_type: external
     pdm: false
-    sample_rate: 48000
+    sample_rate: 16000  # use 48000 for beta firmware
     bits_per_sample: 32bit
     i2s_audio_id: i2s_input
     channel_1:
@@ -1074,14 +1074,14 @@ microphone:
       amplify: false
     channel_2:
       id: comm_mic
-      amplify: true
+      amplify: false  # should be true for firmware with two different streams
 
 media_player:
   - platform: nabu
     id: nabu_media_player
     name: Media Player
     internal: false
-    sample_rate: 48000
+    sample_rate: 16000  # use 48000 for beta firmware
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
@@ -1109,7 +1109,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: kahrendt-20240808-microphone-cleanup
     components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
