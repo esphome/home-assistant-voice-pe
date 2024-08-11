@@ -89,8 +89,12 @@ class WakeWordModel final : public StreamingModel {
 
   const std::string &get_wake_word() const { return this->wake_word_; }
 
+  void add_trained_language(const std::string &language) { this->trained_languages_.push_back(language); }
+  const std::vector<std::string> &get_trained_languages() const { return this->trained_languages_; }
+
  protected:
   std::string wake_word_;
+  std::vector<std::string> trained_languages_;
 };
 
 class VADModel final : public StreamingModel {
