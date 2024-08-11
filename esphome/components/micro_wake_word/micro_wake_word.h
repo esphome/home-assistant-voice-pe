@@ -49,6 +49,7 @@ class MicroWakeWord : public Component {
 #ifdef USE_MICRO_WAKE_WORD_VAD
   void add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
                      size_t tensor_arena_size);
+  bool get_vad_status() { return this->vad_status_; }
 #endif
 
  protected:
@@ -58,10 +59,11 @@ class MicroWakeWord : public Component {
 
   std::unique_ptr<RingBuffer> features_ring_buffer_;
 
-  std::vector<WakeWordModel*> wake_word_models_;
+  std::vector<WakeWordModel *> wake_word_models_;
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
   std::unique_ptr<VADModel> vad_model_;
+  bool vad_status_{false};
 #endif
 
   // Audio frontend handles generating spectrogram features
