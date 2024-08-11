@@ -238,6 +238,7 @@ void VoiceAssistant::loop() {
     case State::STARTING_MICROPHONE: {
       if (this->mic_->is_running()) {
         this->set_state_(this->desired_state_);
+        // this->mic_->reset();
       }
       break;
     }

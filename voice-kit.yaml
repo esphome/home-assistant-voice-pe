@@ -1062,20 +1062,26 @@ i2s_audio:
   # yamllint enable rule:comments-indentation
 
 microphone:
-  - platform: i2s_audio
-    id: kit_mic
+  - platform: nabu_microphone
     i2s_din_pin: GPIO11
     adc_type: external
     pdm: false
+    sample_rate: 16000  # use 48000 for beta firmware
     bits_per_sample: 32bit
-    channel: left
     i2s_audio_id: i2s_input
+    channel_1:
+      id: asr_mic
+      amplify: false
+    channel_2:
+      id: comm_mic
+      amplify: false  # should be true for firmware with two different streams
 
 media_player:
   - platform: nabu
     id: nabu_media_player
     name: Media Player
     internal: false
+    sample_rate: 16000  # use 48000 for beta firmware
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
@@ -1103,8 +1109,8 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
-    components: [i2s_audio, microphone, nabu, voice_assistant, media_player, micro_wake_word]
+      ref: kahrendt-20240808-microphone-cleanup
+    components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
   - source: github://esphome/esphome@dev
@@ -1120,6 +1126,7 @@ micro_wake_word:
     - model: hey_mycroft
       id: hey_mycroft
   vad:
+  microphone: comm_mic
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing (Just restart micro wake word)
     - if:
@@ -1145,6 +1152,19 @@ micro_wake_word:
                           .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
                           .set_announcement(true)
                           .perform();
+                - lambda: |-
+                    id(nabu_media_player)
+                      ->make_call()
+                      .set_announcement(true)
+                      .set_local_media_file(id(awake_wave_file))
+                      .perform();
+                - wait_until:
+                    lambda: |-
+                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                - wait_until:
+                    not:
+                      lambda: |-
+                        return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
         else:
@@ -1177,7 +1197,7 @@ select:
 
 voice_assistant:
   id: va
-  microphone: kit_mic
+  microphone: asr_mic
   media_player: nabu_media_player
   use_wake_word: false
   noise_suppression_level: 0
@@ -1208,12 +1228,6 @@ voice_assistant:
           - script.execute: control_leds
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
-    - lambda: |-
-        id(nabu_media_player)
-          ->make_call()
-          .set_announcement(true)
-          .set_local_media_file(id(awake_wave_file))
-          .perform();
     - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
