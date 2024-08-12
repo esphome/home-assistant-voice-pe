@@ -49,10 +49,20 @@ class MicroWakeWord : public Component {
 #ifdef USE_MICRO_WAKE_WORD_VAD
   void add_vad_model(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_size,
                      size_t tensor_arena_size);
+
+  // Intended for the voice assistant component to fetch VAD status
   bool get_vad_status() { return this->vad_status_; }
 #endif
 
+  // Intended for the voice assistant component to know which wake words are available
+  // Since these are pointers to the actual WakeWordModel object, the voice assistant component can enable or disable it
   const std::vector<WakeWordModel *> &get_wake_words() const { return this->wake_word_models_; }
+
+  // Intended for the voice assistant component to poll for wake word events
+  // Returns an empty optional state if there is no wake word detection event in the queue
+  // TODO: This is how the VA will know a wake word has been said rather than calling a start pipeline action
+  // during the on_detected event
+  optional<DetectionEvent> get_wake_word_detection_event();
 
  protected:
   microphone::Microphone *microphone_{nullptr};
@@ -94,6 +104,9 @@ class MicroWakeWord : public Component {
 
   // Used to send messages about the model's states to the main loop
   QueueHandle_t detection_queue_;
+
+  // Used for storing most recent wake word event for the VA component to read
+  QueueHandle_t wake_word_queue_;
 
   static void preprocessor_task_(void *params);
   TaskHandle_t preprocessor_task_handle_{nullptr};
