@@ -52,6 +52,8 @@ class MicroWakeWord : public Component {
   bool get_vad_status() { return this->vad_status_; }
 #endif
 
+  const std::vector<WakeWordModel *> &get_wake_words() const { return this->wake_word_models_; }
+
  protected:
   microphone::Microphone *microphone_{nullptr};
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
