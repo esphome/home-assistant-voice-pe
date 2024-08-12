@@ -51,7 +51,7 @@ class MicroWakeWord : public Component {
                      size_t tensor_arena_size);
 
   // Intended for the voice assistant component to fetch VAD status
-  bool get_vad_status() { return this->vad_status_; }
+  bool get_vad_state() { return this->vad_state_; }
 #endif
 
   // Intended for the voice assistant component to know which wake words are available
@@ -75,7 +75,7 @@ class MicroWakeWord : public Component {
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
   std::unique_ptr<VADModel> vad_model_;
-  bool vad_status_{false};
+  bool vad_state_{false};
 #endif
 
   // Audio frontend handles generating spectrogram features
