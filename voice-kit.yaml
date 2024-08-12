@@ -161,6 +161,14 @@ switch:
       - script.execute: control_leds
     on_turn_off:
       - script.execute: control_leds
+  # Wake Word Sound Switch.
+  - platform: template
+    id: wake_sound
+    name: Wake sound
+    icon: "mdi:bullhorn"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
@@ -1128,18 +1136,17 @@ micro_wake_word:
   vad:
   microphone: comm_mic
   on_wake_word_detected:
-    # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing (Just restart micro wake word)
+    # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
           switch.is_off: master_mute_switch
         then:
-          # If a timer is ringing: Stop it, do not start the voice assistant, restart micro wake word (We can stop timer from voice!)
+          # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
               condition:
                 switch.is_on: timer_ringing
               then:
                 - switch.turn_off: timer_ringing
-                - micro_wake_word.start:
               # Start voice assistant, stop current announcement.
               else:
                 - if:
@@ -1152,23 +1159,25 @@ micro_wake_word:
                           .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
                           .set_announcement(true)
                           .perform();
-                - lambda: |-
-                    id(nabu_media_player)
-                      ->make_call()
-                      .set_announcement(true)
-                      .set_local_media_file(id(awake_wave_file))
-                      .perform();
-                - wait_until:
-                    lambda: |-
-                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                - wait_until:
-                    not:
-                      lambda: |-
-                        return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                - if:
+                    condition:
+                      switch.is_on: wake_sound
+                    then:
+                      - lambda: |-
+                          id(nabu_media_player)
+                            ->make_call()
+                            .set_announcement(true)
+                            .set_local_media_file(id(awake_wave_file))
+                            .perform();
+                      - wait_until:
+                          lambda: |-
+                            return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      - wait_until:
+                          not:
+                            lambda: |-
+                              return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
-        else:
-          - micro_wake_word.start:
 
 select:
   - platform: template
@@ -1212,7 +1221,6 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
-    - micro_wake_word.stop:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
@@ -1247,7 +1255,6 @@ voice_assistant:
         not:
           voice_assistant.is_running:
     - lambda: id(nabu_media_player).set_ducking_ratio(1.0);
-    - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_timer_finished:
