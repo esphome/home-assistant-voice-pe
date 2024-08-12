@@ -197,19 +197,16 @@ void NabuMediaPlayer::setup() {
   this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
 
-  this->audio_mixer_ = make_unique<AudioMixer>();
-  this->audio_mixer_->start("mixer", 10);
-
   if (!this->parent_->try_lock()) {
+    ESP_LOGE(TAG, "Couldn't lock I2S port");
     this->mark_failed();
     return;
   }
 
-  xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
-
   if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
     ESP_LOGE(TAG, "Couldn't communicate with DAC");
     this->mark_failed();
+    return;
   }
 
   ESP_LOGI(TAG, "Set up nabu media player");
@@ -363,6 +360,46 @@ void NabuMediaPlayer::speaker_task(void *params) {
   }
 }
 
+void NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
+  if (this->audio_mixer_ == nullptr) {
+    this->audio_mixer_ = make_unique<AudioMixer>();
+    this->audio_mixer_->start("mixer", 10);
+  }
+
+  if (type == AudioPipelineType::MEDIA) {
+    if (this->media_pipeline_ == nullptr) {
+      this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), type);
+    }
+
+    if (url) {
+      this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", 2);
+    } else {
+      this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media", 2);
+    }
+
+    if (this->is_paused_) {
+      CommandEvent command_event;
+      command_event.command = CommandEventType::RESUME_MEDIA;
+      this->audio_mixer_->send_command(&command_event);
+    }
+    this->is_paused_ = false;
+  } else if (type == AudioPipelineType::ANNOUNCEMENT) {
+    if (this->announcement_pipeline_ == nullptr) {
+      this->announcement_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), type);
+    }
+
+    if (url) {
+      this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann", 7);
+    } else {
+      this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann", 7);
+    }
+  }
+
+  if (this->speaker_task_handle_ == nullptr) {
+    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
+  }
+}
+
 void NabuMediaPlayer::watch_media_commands_() {
   MediaCallCommand media_command;
   CommandEvent command_event;
@@ -370,49 +407,17 @@ void NabuMediaPlayer::watch_media_commands_() {
   if (xQueueReceive(this->media_control_command_queue_, &media_command, 0) == pdTRUE) {
     if (media_command.new_url.has_value() && media_command.new_url.value()) {
       if (media_command.announce.has_value() && media_command.announce.value()) {
-        if (this->announcement_pipeline_ == nullptr) {
-          this->announcement_pipeline_ =
-              make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
-        }
-
-        this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann", 7);
+        this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, true);
       } else {
-        if (this->media_pipeline_ == nullptr) {
-          this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
-        }
-
-        this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", 2);
-
-        if (this->is_paused_) {
-          CommandEvent command_event;
-          command_event.command = CommandEventType::RESUME_MEDIA;
-          this->audio_mixer_->send_command(&command_event);
-        }
-        this->is_paused_ = false;
+        this->start_pipeline_(AudioPipelineType::MEDIA, true);
       }
     }
 
     if (media_command.new_file.has_value() && media_command.new_file.value()) {
       if (media_command.announce.has_value() && media_command.announce.value()) {
-        if (this->announcement_pipeline_ == nullptr) {
-          this->announcement_pipeline_ =
-              make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::ANNOUNCEMENT);
-        }
-
-        this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann", 7);
+        this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, false);
       } else {
-        if (this->media_pipeline_ == nullptr) {
-          this->media_pipeline_ = make_unique<AudioPipeline>(this->audio_mixer_.get(), AudioPipelineType::MEDIA);
-        }
-
-        this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media", 5);
-
-        if (this->is_paused_) {
-          CommandEvent command_event;
-          command_event.command = CommandEventType::RESUME_MEDIA;
-          this->audio_mixer_->send_command(&command_event);
-        }
-        this->is_paused_ = false;
+        this->start_pipeline_(AudioPipelineType::MEDIA, false);
       }
     }
 
@@ -566,7 +571,8 @@ void NabuMediaPlayer::loop() {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
       // TODO: Idle muting can cut off parts of the audio. Replace with eventual XMOS command to cut power to speaker
-      // amp this->unmute_();
+      // amp 
+      //this->unmute_();
       this->is_idle_muted_ = false;
     }
   } else {
