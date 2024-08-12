@@ -30,8 +30,8 @@ class StreamingModel {
   virtual DetectionEvent determine_detected() = 0;
 
   // Performs inference on the given features.
-  //  - Will load the model if it is enabled and needed
-  //  - Will unload the model if it is disabled but still laoded
+  //  - If the model is enabled but not loaded, it will load it
+  //  - If the model is disabled but loaded, it will unload it
   // Returns true if sucessful or false if there is an error
   bool perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]);
 
@@ -41,10 +41,10 @@ class StreamingModel {
   /// @brief Destroys the TFLite interpreter and frees the tensor and variable arenas' memory
   void unload_model();
 
-  /// @brief Enable the model
+  /// @brief Enable the model. The next performing_streaming_inference call will load it.
   void enable() { this->enabled_ = true; }
 
-  /// @brief Disable the model
+  /// @brief Disable the model. The next performing_streaming_inference call will unload it.
   void disable() { this->enabled_ = false; }
 
  protected:
