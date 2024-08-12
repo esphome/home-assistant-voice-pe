@@ -241,7 +241,7 @@ void MicroWakeWord::inference_task_(void *params) {
           DetectionEvent vad_state = this_mww->vad_model_->determine_detected();
 
           // Atomic write, so thread safe
-          this_mww->vad_status_ = vad_state.detected;
+          this_mww->vad_state_ = vad_state.detected;
 #endif
 
           for (auto &model : this_mww->wake_word_models_) {
