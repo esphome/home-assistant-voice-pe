@@ -281,6 +281,13 @@ void VoiceAssistant::loop() {
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_WAKE_WORD;
       if (this->silence_detection_)
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_VAD;
+      else {
+        this->speech_ms_left_ = this->speech_ms_;
+        this->silence_ms_left_ = this->silence_ms_;
+        this->timeout_ms_left_ = this->timeout_ms_;
+        this->last_loop_ms_ = {};
+      }
+
       api::VoiceAssistantAudioSettings audio_settings;
       audio_settings.noise_suppression_level = this->noise_suppression_level_;
       audio_settings.auto_gain = this->auto_gain_;
@@ -329,6 +336,40 @@ void VoiceAssistant::loop() {
                                 sizeof(this->dest_addr_));
         }
         available = this->ring_buffer_->available();
+      }
+
+#ifdef USE_MICRO_WAKE_WORD_VAD
+      if (!this->silence_detection_) {
+        bool new_vad_state = false;
+        if (this->micro_wake_word_ != nullptr) {
+          new_vad_state = this->micro_wake_word_->get_vad_state();
+        }
+
+        uint32_t new_loop_ms = millis();
+        if (this->last_loop_ms_.has_value()) {
+          uint32_t since_last_loop_ms = new_loop_ms - this->last_loop_ms_.value();
+
+          if (new_vad_state && this->last_vad_state_) {
+            // Speech
+            this->speech_ms_left_ -= since_last_loop_ms;
+            this->silence_ms_left_ = this->silence_ms_;
+          } else if (!new_vad_state && !this->last_vad_state_) {
+            // No speech
+            this->silence_ms_left_ -= since_last_loop_ms;
+          }
+
+          this->timeout_ms_left_ -= since_last_loop_ms;
+        }
+        this->last_loop_ms_ = new_loop_ms;
+        this->last_vad_state_ = new_vad_state;
+
+        if ((this->timeout_ms_left_ < 0) || ((this->speech_ms_left_ < 0) && (this->silence_ms_left_ < 0))) {
+          this->signal_stop_();
+          // TODO: Both of these are hacky... protocol needs to be updated to handle this properly?
+          this->set_state_(State::STOP_MICROPHONE, State::IDLE);
+          // this->set_state_(State::STOP_MICROPHONE, State::AWAITING_RESPONSE);
+        }
+#endif
       }
 
       break;
@@ -800,17 +841,17 @@ void VoiceAssistant::on_audio(const api::VoiceAssistantAudio &msg) {
   // TODO: Fix this hack! HomeAssistant thinks we have a speaker, so it sends the TTS response as a wav (good)
   // It will also send the audio over the protobuf and call this function to try to output directly to the speaker (bad)
 
-// #ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
-//   if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
-//     memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
-//     this->speaker_buffer_index_ += msg.data.length();
-//     this->speaker_buffer_size_ += msg.data.length();
-//     this->speaker_bytes_received_ += msg.data.length();
-//     ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
-//   } else {
-//     ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
-//   }
-// #endif
+  // #ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
+  //   if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
+  //     memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
+  //     this->speaker_buffer_index_ += msg.data.length();
+  //     this->speaker_buffer_size_ += msg.data.length();
+  //     this->speaker_bytes_received_ += msg.data.length();
+  //     ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
+  //   } else {
+  //     ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
+  //   }
+  // #endif
 }
 
 void VoiceAssistant::on_timer_event(const api::VoiceAssistantTimerEventResponse &msg) {
