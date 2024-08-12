@@ -182,7 +182,7 @@ def _convert_manifest_v1_to_v2(v1_manifest):
     # Original Inception-based V1 manifest models use a 20 ms feature step size
     v2_manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE] = 20
     # Original Inception-based V1 manifest models were trained only on TTS English samples
-    v2_manifest[KEY_TRAINED_LANGUAGES] = ['en']
+    v2_manifest[KEY_TRAINED_LANGUAGES] = ["en"]
 
     return v2_manifest
 
@@ -446,6 +446,8 @@ async def to_code(config):
     mic = await cg.get_variable(config[CONF_MICROPHONE])
     cg.add(var.set_microphone(mic))
 
+    cg.add_define("USE_MICRO_WAKE_WORD")
+
     esp32.add_idf_component(
         name="esp-tflite-micro",
         repo="https://github.com/espressif/esp-tflite-micro",
@@ -505,7 +507,7 @@ async def to_code(config):
                 manifest[KEY_WAKE_WORD],
                 manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
             )
-            
+
             for lang in manifest[KEY_TRAINED_LANGUAGES]:
                 cg.add(wake_word_model.add_trained_language(lang))
 
