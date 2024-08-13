@@ -35,28 +35,48 @@ size_t AudioMixer::write_announcement(uint8_t *buffer, size_t length) {
   return 0;
 }
 
-esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
-  this->media_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
-  this->announcement_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
-  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
+esp_err_t AudioMixer::allocate_buffers_() {
+  if (this->media_ring_buffer_ == nullptr)
+    this->media_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
+
+  if (this->announcement_ring_buffer_ == nullptr)
+    this->announcement_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
+
+  if (this->output_ring_buffer_ == nullptr)
+    this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
 
   if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
       ((this->output_ring_buffer_ == nullptr))) {
     return ESP_ERR_NO_MEM;
   }
 
-  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-  this->stack_buffer_ = allocator.allocate(TASK_STACK_SIZE);
+  ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
+
+  if (this->stack_buffer_ == nullptr)
+    this->stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
 
   if (this->stack_buffer_ == nullptr) {
     return ESP_ERR_NO_MEM;
   }
 
-  this->event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
-  this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
+  if (this->event_queue_ == nullptr)
+    this->event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
+
+  if (this->command_queue_ == nullptr)
+    this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
 
   if ((this->event_queue_ == nullptr) || (this->command_queue_ == nullptr)) {
     return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
+esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
+  esp_err_t err = this->allocate_buffers_();
+
+  if (err != ESP_OK) {
+    return err;
   }
 
   if (this->task_handle_ == nullptr) {

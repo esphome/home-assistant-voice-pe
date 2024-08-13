@@ -99,6 +99,9 @@ class AudioMixer {
   RingBuffer *get_announcement_ring_buffer() { return this->announcement_ring_buffer_.get(); }
 
  protected:
+  esp_err_t allocate_buffers_();
+
+  static void mix_task_(void *params);
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *stack_buffer_{nullptr};
@@ -106,8 +109,6 @@ class AudioMixer {
   std::unique_ptr<RingBuffer> output_ring_buffer_;
   QueueHandle_t event_queue_;
   QueueHandle_t command_queue_;
-
-  static void mix_task_(void *params);
 
   std::unique_ptr<RingBuffer> media_ring_buffer_;
   std::unique_ptr<RingBuffer> announcement_ring_buffer_;
