@@ -46,6 +46,21 @@ const char *media_player_command_to_string(MediaPlayerCommand command) {
   }
 }
 
+const char *media_player_file_type_to_string(MediaFileType file_type) {
+  switch (file_type) {
+    // case MediaFileType::NONE:
+    //   return "unknown";
+    case MediaFileType::FLAC:
+      return "FLAC";
+    case MediaFileType::MP3:
+      return "MP3";
+    case MediaFileType::WAV:
+      return "WAV";
+    default:
+      return "unknonw";
+  }
+}
+
 void MediaPlayerCall::validate_() {
   if (this->media_url_.has_value()) {
     if (this->command_.has_value()) {

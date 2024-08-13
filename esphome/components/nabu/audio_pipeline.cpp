@@ -3,6 +3,7 @@
 #include "audio_pipeline.h"
 
 #include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
 
 namespace esphome {
 namespace nabu {
@@ -16,6 +17,10 @@ static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 static const uint32_t READER_TASK_STACK_SIZE = 8192;
 static const uint32_t DECODER_TASK_STACK_SIZE = 8192;
 static const uint32_t RESAMPLER_TASK_STACK_SIZE = 8192;
+
+static const size_t INFO_ERROR_QUEUE_COUNT = 5;
+
+static const char *const TAG = "nabu_media_player.pipeline";
 
 enum EventGroupBits : uint32_t {
   PIPELINE_COMMAND_STOP = (1 << 0),  // Stops all activity in the pipeline elements
@@ -104,6 +109,12 @@ esp_err_t AudioPipeline::allocate_buffers_() {
     return ESP_ERR_NO_MEM;
   }
 
+  if (this->info_error_queue_ == nullptr)
+    this->info_error_queue_ = xQueueCreate(INFO_ERROR_QUEUE_COUNT, sizeof(InfoErrorEvent));
+
+  if (this->info_error_queue_ == nullptr)
+    return ESP_ERR_NO_MEM;
+
   return ESP_OK;
 }
 
@@ -141,6 +152,44 @@ esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::s
 }
 
 AudioPipelineState AudioPipeline::get_state() {
+  InfoErrorEvent event;
+  if (this->info_error_queue_ != nullptr) {
+    while (xQueueReceive(this->info_error_queue_, &event, 0)) {
+      switch (event.source) {
+        case InfoErrorSource::READER:
+          if (event.err.has_value()) {
+            ESP_LOGE(TAG, "Media reader encountered an error: %s", esp_err_to_name(event.err.value()));
+          } else if (event.file_type.has_value()) {
+            ESP_LOGD(TAG, "Reading %s file type",
+                      media_player::media_player_file_type_to_string(event.file_type.value()));
+          }
+
+          break;
+        case InfoErrorSource::DECODER:
+          if (event.err.has_value()) {
+            ESP_LOGE(TAG, "Decoder encountered an error: %s", esp_err_to_name(event.err.value()));
+          } else if (event.stream_info.has_value()) {
+            ESP_LOGD(TAG, "Decoded audio has %d channels, %d Hz sample rate, and %d bits per sample",
+                     event.stream_info.value().channels, event.stream_info.value().sample_rate,
+                     event.stream_info.value().bits_per_sample);
+          }
+          break;
+        case InfoErrorSource::RESAMPLER:
+          if (event.err.has_value()) {
+            ESP_LOGE(TAG, "Resampler encountered an error: %s", esp_err_to_name(event.err.has_value()));
+          } else if (event.resample_info.has_value()) {
+            if (event.resample_info.value().resample) {
+              ESP_LOGD(TAG, "Converting the audio sample rate");
+            }
+            if (event.resample_info.value().mono_to_stereo) {
+              ESP_LOGD(TAG, "Converting mono channel audio to stereo channel audio");
+            }
+          }
+          break;
+      }
+    }
+  }
+
   EventBits_t event_bits = xEventGroupGetBits(this->event_group_);
   if (!this->read_task_handle_ && !this->decode_task_handle_ && !this->resample_task_handle_) {
     return AudioPipelineState::STOPPED;
@@ -222,41 +271,53 @@ void AudioPipeline::read_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::READER_MESSAGE_FINISHED);
 
     {
-      AudioReader reader = AudioReader(this_pipeline->raw_file_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+      InfoErrorEvent event;
+      event.source = InfoErrorSource::READER;
       esp_err_t err = ESP_OK;
+
+      AudioReader reader = AudioReader(this_pipeline->raw_file_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+
       if (event_bits & READER_COMMAND_INIT_FILE) {
         err = reader.start(this_pipeline->current_media_file_, this_pipeline->current_media_file_type_);
       } else {
         err = reader.start(this_pipeline->current_uri_, this_pipeline->current_media_file_type_);
       }
       if (err != ESP_OK) {
-        // Couldn't load the file or it is an unknown type!
+        // Send specific error message
+        event.err = err;
+        xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+
+        // Setting up the reader failed, stop the pipeline
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
       } else {
+        // Send the file type to the pipeline
+        event.file_type = this_pipeline->current_media_file_type_;
+        xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+
         // Inform the decoder that the media type is available
         xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE);
+      }
 
-        while (true) {
-          event_bits = xEventGroupGetBits(this_pipeline->event_group_);
+      while (true) {
+        event_bits = xEventGroupGetBits(this_pipeline->event_group_);
 
-          if (event_bits & PIPELINE_COMMAND_STOP) {
-            break;
-          }
-
-          AudioReaderState reader_state = reader.read();
-
-          if (reader_state == AudioReaderState::FINISHED) {
-            break;
-          } else if (reader_state == AudioReaderState::FAILED) {
-            xEventGroupSetBits(this_pipeline->event_group_,
-                               EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
-            break;
-          }
-
-          // Block to give other tasks opportunity to run
-          delay(10);
+        if (event_bits & PIPELINE_COMMAND_STOP) {
+          break;
         }
+
+        AudioReaderState reader_state = reader.read();
+
+        if (reader_state == AudioReaderState::FINISHED) {
+          break;
+        } else if (reader_state == AudioReaderState::FAILED) {
+          xEventGroupSetBits(this_pipeline->event_group_,
+                             EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+          break;
+        }
+
+        // Block to give other tasks opportunity to run
+        delay(10);
       }
     }
   }
@@ -278,12 +339,19 @@ void AudioPipeline::decode_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_FINISHED);
 
     {
+      InfoErrorEvent event;
+      event.source = InfoErrorSource::DECODER;
+
       std::unique_ptr<AudioDecoder> decoder = make_unique<AudioDecoder>(
           this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
       esp_err_t err = decoder->start(this_pipeline->current_media_file_type_);
 
       if (err != ESP_OK) {
-        // Setting up the decoder failed
+        // Send specific error message
+        event.err = err;
+        xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+
+        // Setting up the decoder failed, stop the pipeline
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
       }
@@ -313,6 +381,10 @@ void AudioPipeline::decode_task_(void *params) {
 
           this_pipeline->current_stream_info_ = decoder->get_stream_info().value();
 
+          // Send the stream information to the pipeline
+          event.stream_info = this_pipeline->current_stream_info_;
+          xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
         }
@@ -340,6 +412,9 @@ void AudioPipeline::resample_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::RESAMPLER_MESSAGE_FINISHED);
 
     {
+      InfoErrorEvent event;
+      event.source = InfoErrorSource::RESAMPLER;
+
       RingBuffer *output_ring_buffer = nullptr;
 
       if (this_pipeline->pipeline_type_ == AudioPipelineType::MEDIA) {
@@ -351,12 +426,20 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      esp_err_t err = resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_);
+      esp_err_t err = resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_,
+                                      this_pipeline->current_resample_info_);
 
       if (err != ESP_OK) {
-        // Unsupported incoming audio stream or other failure
+        // Send specific error message
+        event.err = err;
+        xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+
+        // Setting up the resampler failed, stop the pipeline
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+      } else {
+        event.resample_info = this_pipeline->current_resample_info_;
+        xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
       }
 
       while (true) {

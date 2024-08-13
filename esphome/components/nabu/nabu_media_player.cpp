@@ -14,9 +14,7 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Have better logging outputs
-//    - Output file type and stream information + any resampling processes
-//    - Remove printf
+//  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
 //  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Ducking improvements
@@ -572,28 +570,8 @@ void NabuMediaPlayer::loop() {
   if (this->announcement_pipeline_ != nullptr)
     this->announcement_pipeline_state_ = this->announcement_pipeline_->get_state();
 
-  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
-    ESP_LOGE(TAG, "Encountered an error reading the announcement file");
-  }
-  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
-    ESP_LOGE(TAG, "Encountered an error decoding the announcement file");
-  }
-  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
-    ESP_LOGE(TAG, "Encountered an error resampling the announcement file");
-  }
-
   if (this->media_pipeline_ != nullptr)
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
-
-  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
-    ESP_LOGE(TAG, "Encountered an error reading the media file");
-  }
-  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
-    ESP_LOGE(TAG, "Encountered an error decoding the media file");
-  }
-  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
-    ESP_LOGE(TAG, "Encountered an error resampling the media file");
-  }
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;

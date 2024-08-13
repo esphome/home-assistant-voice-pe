@@ -192,27 +192,29 @@ FileDecoderState AudioDecoder::decode_flac_() {
     // Header hasn't been read
     auto result = this->flac_decoder_->read_header(this->input_buffer_length_);
 
-    size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
-    this->input_buffer_current_ += bytes_consumed;
-    this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
-
     if (result == flac::FLAC_DECODER_HEADER_OUT_OF_DATA) {
       return FileDecoderState::POTENTIALLY_FAILED;
     }
 
     if (result != flac::FLAC_DECODER_SUCCESS) {
-      printf("failed to read flac header. Error: %d\n", result);
+      // Couldn't read FLAC header
       return FileDecoderState::FAILED;
     }
+
+    size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
+    this->input_buffer_current_ += bytes_consumed;
+    this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
 
     media_player::StreamInfo stream_info;
     stream_info.channels = this->flac_decoder_->get_num_channels();
     stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
     stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
+    
+    this->stream_info_ = stream_info;
 
     size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
     if (this->internal_buffer_size_ < flac_decoder_output_buffer_min_size * sizeof(int16_t)) {
-      printf("output buffer is not big enough\n");
+      // Output buffer is not big enough
       return FileDecoderState::FAILED;
     }
 
@@ -228,7 +230,6 @@ FileDecoderState AudioDecoder::decode_flac_() {
     return FileDecoderState::POTENTIALLY_FAILED;
   } else if (result > flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Serious error, can't recover
-    printf("FLAC Decoder Error %d\n", result);
     return FileDecoderState::FAILED;
   }
 
@@ -321,10 +322,6 @@ FileDecoderState AudioDecoder::decode_wav_() {
           stream_info.sample_rate = this->wav_decoder_->sample_rate();
           stream_info.bits_per_sample = this->wav_decoder_->bits_per_sample();
           this->stream_info_ = stream_info;
-
-          printf("sample channels: %d\n", this->stream_info_.value().channels);
-          printf("sample rate: %" PRId32 "\n", this->stream_info_.value().sample_rate);
-          printf("bits per sample: %d\n", this->stream_info_.value().bits_per_sample);
           this->wav_bytes_left_ = this->wav_decoder_->chunk_bytes_left();
           header_finished = true;
         } else if (result == wav_decoder::WAV_DECODER_SUCCESS_NEXT) {
@@ -332,7 +329,7 @@ FileDecoderState AudioDecoder::decode_wav_() {
           wav_bytes_to_skip = this->wav_decoder_->bytes_to_skip();
           wav_bytes_to_read = this->wav_decoder_->bytes_needed();
         } else {
-          printf("Unexpected error while parsing WAV header: %d\n", result);
+          // Unexpected error parsing the wav header
           return FileDecoderState::FAILED;
         }
       } else {

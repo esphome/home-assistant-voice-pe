@@ -2,8 +2,6 @@
 
 #ifdef USE_ESP_IDF
 
-#include "audio_pipeline.h"
-
 #include "biquad.h"
 #include "resampler.h"
 
@@ -24,6 +22,11 @@ enum class AudioResamplerState : uint8_t {
   FAILED,
 };
 
+struct ResampleInfo {
+  bool resample;
+  bool mono_to_stereo;
+};
+
 class AudioResampler {
  public:
   AudioResampler(esphome::RingBuffer *input_ring_buffer, esphome::RingBuffer *output_ring_buffer,
@@ -34,7 +37,7 @@ class AudioResampler {
   /// @param stream_info the incoming sample rate, bits per sample, and number of channels
   /// @param target_sample_rate the necessary sample rate to convert to
   /// @return ESP_OK if it is able to convert the incoming stream or an error otherwise
-  esp_err_t start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate);
+  esp_err_t start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate, ResampleInfo &resample_info);
 
   AudioResamplerState resample(bool stop_gracefully);
 
@@ -62,8 +65,9 @@ class AudioResampler {
   size_t float_output_buffer_length_;
 
   media_player::StreamInfo stream_info_;
-  bool needs_resampling_{false};
-  bool needs_mono_to_stereo_{false};
+  ResampleInfo resample_info_;
+  // bool needs_resampling_{false};
+  // bool needs_mono_to_stereo_{false};
 
   Resample *resampler_{nullptr};
 
@@ -87,7 +91,6 @@ class AudioResampler {
 
   int16_t float_to_q15_(float q, uint32_t shift);
   int8_t generate_q15_fir_coefficients_(int16_t *fir_coeffs, const unsigned int fir_len, const float ft);
-
 };
 }  // namespace nabu
 }  // namespace esphome
