@@ -334,7 +334,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
       if (bytes_written != bytes_read) {
         event.type = EventType::WARNING;
-        event.err = ESP_ERR_TIMEOUT;  // TODO: not the correct error...
+        event.err = ESP_ERR_INVALID_SIZE;
         xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
       } else {
         event.type = EventType::RUNNING;
