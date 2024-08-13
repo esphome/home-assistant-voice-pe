@@ -72,6 +72,10 @@ static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
 static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
+static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
+static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
+
 #define STATS_TASK_PRIO 3
 #define STATS_TICKS pdMS_TO_TICKS(5000)
 #define ARRAY_SIZE_OFFSET 5  // Increase this if print_real_time_stats returns ESP_ERR_INVALID_SIZE
@@ -372,9 +376,10 @@ void NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     }
 
     if (url) {
-      this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", 2);
+      this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", MEDIA_PIPELINE_TASK_PRIORITY);
     } else {
-      this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media", 2);
+      this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media",
+                                   MEDIA_PIPELINE_TASK_PRIORITY);
     }
 
     if (this->is_paused_) {
@@ -389,14 +394,17 @@ void NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     }
 
     if (url) {
-      this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann", 7);
+      this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann",
+                                          ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
     } else {
-      this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann", 7);
+      this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann",
+                                          ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
     }
   }
 
   if (this->speaker_task_handle_ == nullptr) {
-    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, 23, &this->speaker_task_handle_);
+    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
+                &this->speaker_task_handle_);
   }
 }
 
@@ -571,8 +579,8 @@ void NabuMediaPlayer::loop() {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
       // TODO: Idle muting can cut off parts of the audio. Replace with eventual XMOS command to cut power to speaker
-      // amp 
-      //this->unmute_();
+      // amp
+      // this->unmute_();
       this->is_idle_muted_ = false;
     }
   } else {
