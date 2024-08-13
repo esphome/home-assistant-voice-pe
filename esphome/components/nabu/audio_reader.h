@@ -22,8 +22,8 @@ class AudioReader {
   AudioReader(esphome::RingBuffer *output_ring_buffer, size_t transfer_buffer_size);
   ~AudioReader();
 
-  media_player::MediaFileType start(const std::string &uri);
-  media_player::MediaFileType start(media_player::MediaFile *media_file);
+  esp_err_t start(const std::string &uri, media_player::MediaFileType &file_type);
+  esp_err_t start(media_player::MediaFile *media_file, media_player::MediaFileType &file_type);
 
   AudioReaderState read();
 

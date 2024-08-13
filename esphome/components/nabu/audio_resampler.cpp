@@ -65,10 +65,10 @@ esp_err_t AudioResampler::allocate_buffers_() {
   return ESP_OK;
 }
 
-bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
+esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
   esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
-    return false;
+    return err;
   }
 
   this->stream_info_ = stream_info;
@@ -87,7 +87,7 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
 
   if ((stream_info.channels > 2) || (stream_info_.bits_per_sample != 16)) {
     // TODO: Make these values configurable
-    return false;
+    return ESP_ERR_NOT_SUPPORTED;
   }
 
   if (stream_info.channels > 0) {
@@ -167,7 +167,7 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
     this->needs_resampling_ = false;
   }
 
-  return true;
+  return ESP_OK;
 }
 
 AudioResamplerState AudioResampler::resample(bool stop_gracefully) {

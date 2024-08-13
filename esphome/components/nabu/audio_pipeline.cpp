@@ -218,12 +218,13 @@ void AudioPipeline::read_task_(void *params) {
 
     {
       AudioReader reader = AudioReader(this_pipeline->raw_file_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+      esp_err_t err = ESP_OK;
       if (event_bits & READER_COMMAND_INIT_FILE) {
-        this_pipeline->current_media_file_type_ = reader.start(this_pipeline->current_media_file_);
+        err = reader.start(this_pipeline->current_media_file_, this_pipeline->current_media_file_type_);
       } else {
-        this_pipeline->current_media_file_type_ = reader.start(this_pipeline->current_uri_);
+        err = reader.start(this_pipeline->current_uri_, this_pipeline->current_media_file_type_);
       }
-      if (this_pipeline->current_media_file_type_ == media_player::MediaFileType::NONE) {
+      if (err != ESP_OK) {
         // Couldn't load the file or it is an unknown type!
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
@@ -274,7 +275,9 @@ void AudioPipeline::decode_task_(void *params) {
     {
       AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
                                           this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
-      if (decoder.start(this_pipeline->current_media_file_type_) != ESP_OK) {
+      esp_err_t err = decoder.start(this_pipeline->current_media_file_type_);
+
+      if (err != ESP_OK) {
         // Setting up the decoder failed
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
@@ -343,8 +346,10 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      if (!resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_)) {
-        // Unsupported incoming audio stream
+      esp_err_t err = resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_);
+
+      if (err != ESP_OK) {
+        // Unsupported incoming audio stream or other failure
         xEventGroupSetBits(this_pipeline->event_group_,
                            EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
       }

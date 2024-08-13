@@ -32,32 +32,35 @@ esp_err_t AudioReader::allocate_buffers_() {
   return ESP_OK;
 }
 
-media_player::MediaFileType AudioReader::start(media_player::MediaFile *media_file) {
-  esp_err_t err = this->allocate_buffers_();
+esp_err_t AudioReader::start(media_player::MediaFile *media_file, media_player::MediaFileType &file_type) {
+  file_type = media_player::MediaFileType::NONE;
 
+  esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
-    return media_player::MediaFileType::NONE;
+    return err;
   }
 
   this->current_media_file_ = media_file;
 
   this->media_file_data_current_ = media_file->data;
   this->media_file_bytes_left_ = media_file->length;
+  file_type = media_file->file_type;
 
-  return media_file->file_type;
+  return ESP_OK;
 }
 
-media_player::MediaFileType AudioReader::start(const std::string &uri) {
-  esp_err_t err = this->allocate_buffers_();
+esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType &file_type) {
+  file_type = media_player::MediaFileType::NONE;
 
+  esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
-    return media_player::MediaFileType::NONE;
+    return err;
   }
 
   this->cleanup_connection_();
 
   if (uri.empty()) {
-    return media_player::MediaFileType::NONE;
+    return ESP_ERR_INVALID_ARG;
   }
 
   esp_http_client_config_t config = {
@@ -69,42 +72,34 @@ media_player::MediaFileType AudioReader::start(const std::string &uri) {
   this->client_ = esp_http_client_init(&config);
 
   if (this->client_ == nullptr) {
-    printf("Failed to initialize HTTP connection");
-    return media_player::MediaFileType::NONE;
+    return ESP_FAIL;
   }
 
   if ((err = esp_http_client_open(this->client_, 0)) != ESP_OK) {
-    printf("Failed to open HTTP connection");
     this->cleanup_connection_();
-    return media_player::MediaFileType::NONE;
+    return err;
   }
 
   int content_length = esp_http_client_fetch_headers(this->client_);
 
-  // TODO: Figure out how to handle this better! Music Assistant streams don't send a content length
-  // if (content_length <= 0) {
-  //   printf("Fialed to get content length");
-  //   this->cleanup_connection_(client);
-  //   return media_player::MediaFileType::NONE;
-  // }
-
   char url[500];
-  if (esp_http_client_get_url(this->client_, url, 500) != ESP_OK) {
+  err = esp_http_client_get_url(this->client_, url, 500);
+  if (err != ESP_OK) {
     this->cleanup_connection_();
-    return media_player::MediaFileType::NONE;
+    return err;
   }
 
   std::string url_string = url;
 
   if (str_endswith(url_string, ".wav")) {
-    return media_player::MediaFileType::WAV;
+    file_type = media_player::MediaFileType::WAV;
   } else if (str_endswith(url_string, ".mp3")) {
-    return media_player::MediaFileType::MP3;
+    file_type = media_player::MediaFileType::MP3;
   } else if (str_endswith(url_string, ".flac")) {
-    return media_player::MediaFileType::FLAC;
+    file_type = media_player::MediaFileType::FLAC;
   }
 
-  return media_player::MediaFileType::NONE;
+  return ESP_OK;
 }
 
 AudioReaderState AudioReader::read() {

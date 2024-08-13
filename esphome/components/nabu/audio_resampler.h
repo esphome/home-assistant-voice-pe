@@ -33,8 +33,8 @@ class AudioResampler {
   /// @brief Sets up the various bits necessary to resample
   /// @param stream_info the incoming sample rate, bits per sample, and number of channels
   /// @param target_sample_rate the necessary sample rate to convert to
-  /// @return True if it convert the incoming stream, false otherwise
-  bool start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate);
+  /// @return ESP_OK if it is able to convert the incoming stream or an error otherwise
+  esp_err_t start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate);
 
   AudioResamplerState resample(bool stop_gracefully);
 
