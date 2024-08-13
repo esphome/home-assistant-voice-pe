@@ -8,11 +8,12 @@
 
 // resampler.c
 
+#ifdef USE_ESP_IDF
+
 #include "resampler.h"
 
 #include "esphome/core/helpers.h"
 #include "esp_dsp.h"
-
 
 static void init_filter(Resample *cxt, float *filter, float fraction, float lowpass_ratio);
 static float subsample(Resample *cxt, float *source, float offset);
@@ -377,7 +378,7 @@ void resampleFree(Resample *cxt) {
 static float apply_filter(float *A, float *B, int num_taps) {
   float sum;
   dsps_dotprod_f32_aes3(A, B, &sum, num_taps);
-//   dsps_dotprod_f32_ansi(A, B, &sum, num_taps);
+  //   dsps_dotprod_f32_ansi(A, B, &sum, num_taps);
   return sum;
 }
 #endif
@@ -511,3 +512,5 @@ static float subsample(Resample *cxt, float *source, float offset) {
   else
     return subsample_no_interpolate(cxt, source, offset);
 }
+
+#endif

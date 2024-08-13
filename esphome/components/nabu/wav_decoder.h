@@ -1,3 +1,5 @@
+#ifdef USE_ESP_IDF
+
 // Very basic WAV file decoder that parses format information and gets to the
 // data portion of the file.
 // Skips over extraneous chunks like LIST and INFO.
@@ -52,10 +54,9 @@ enum WAVDecoderResult {
 };
 
 class WAVDecoder {
-
-public:
-  WAVDecoder(uint8_t **buffer) : buffer_(buffer){};
-  ~WAVDecoder(){};
+ public:
+  WAVDecoder(uint8_t **buffer) : buffer_(buffer) {};
+  ~WAVDecoder() {};
 
   WAVDecoderState state() { return this->state_; }
   std::size_t bytes_to_skip() { return this->bytes_to_skip_; }
@@ -85,10 +86,10 @@ public:
     this->bits_per_sample_ = 0;
   }
 
-protected:
+ protected:
   uint8_t **buffer_;
   WAVDecoderState state_ = WAV_DECODER_BEFORE_RIFF;
-  std::size_t bytes_needed_ = 8; // chunk name + size
+  std::size_t bytes_needed_ = 8;  // chunk name + size
   std::size_t bytes_to_skip_ = 0;
   std::string chunk_name_;
   std::size_t chunk_bytes_left_ = 0;
@@ -97,6 +98,7 @@ protected:
   uint16_t num_channels_ = 0;
   uint16_t bits_per_sample_ = 0;
 };
-} // namespace wav_decoder
+}  // namespace wav_decoder
 
-#endif // WAV_DECODER_H_
+#endif  // WAV_DECODER_H_
+#endif
