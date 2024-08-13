@@ -13,10 +13,6 @@ AudioDecoder::AudioDecoder(RingBuffer *input_ring_buffer, RingBuffer *output_rin
   this->input_ring_buffer_ = input_ring_buffer;
   this->output_ring_buffer_ = output_ring_buffer;
   this->internal_buffer_size_ = internal_buffer_size;
-
-  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  this->input_buffer_ = allocator.allocate(internal_buffer_size);
-  this->output_buffer_ = allocator.allocate(internal_buffer_size);
 }
 
 AudioDecoder::~AudioDecoder() {
@@ -44,7 +40,29 @@ AudioDecoder::~AudioDecoder() {
   }
 }
 
-void AudioDecoder::start(media_player::MediaFileType media_file_type) {
+esp_err_t AudioDecoder::allocate_buffers_() {
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+
+  if (this->input_buffer_ == nullptr)
+    this->input_buffer_ = allocator.allocate(this->internal_buffer_size_);
+
+  if (this->output_buffer_ == nullptr)
+    this->output_buffer_ = allocator.allocate(this->internal_buffer_size_);
+
+  if ((this->input_buffer_ == nullptr) || (this->output_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
+esp_err_t AudioDecoder::start(media_player::MediaFileType media_file_type) {
+  esp_err_t err = this->allocate_buffers_();
+
+  if (err != ESP_OK) {
+    return err;
+  }
+
   this->media_file_type_ = media_file_type;
 
   this->input_buffer_current_ = this->input_buffer_;
@@ -69,6 +87,8 @@ void AudioDecoder::start(media_player::MediaFileType media_file_type) {
     case media_player::MediaFileType::NONE:
       break;
   }
+
+  return ESP_OK;
 }
 
 AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {

@@ -116,8 +116,8 @@ esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::s
 
   if (this->read_task_handle_ == nullptr) {
     this->read_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), READER_TASK_STACK_SIZE, (void *) this,
-                          priority, this->read_task_stack_buffer_, &this->read_task_stack_);
+        xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), READER_TASK_STACK_SIZE,
+                          (void *) this, priority, this->read_task_stack_buffer_, &this->read_task_stack_);
   }
   if (this->decode_task_handle_ == nullptr) {
     this->decode_task_handle_ =
@@ -272,10 +272,13 @@ void AudioPipeline::decode_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_FINISHED);
 
     {
-      AudioDecoder decoder =
-          AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(),
-                       HTTP_BUFFER_SIZE);  // BUFFER_SIZE_BYTES);
-      decoder.start(this_pipeline->current_media_file_type_);
+      AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
+                                          this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+      if (decoder.start(this_pipeline->current_media_file_type_) != ESP_OK) {
+        // Setting up the decoder failed
+        xEventGroupSetBits(this_pipeline->event_group_,
+                           EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+      }
 
       bool has_stream_info = false;
 

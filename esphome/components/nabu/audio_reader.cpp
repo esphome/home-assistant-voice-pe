@@ -9,9 +9,6 @@ namespace nabu {
 
 AudioReader::AudioReader(esphome::RingBuffer *output_ring_buffer, size_t transfer_buffer_size) {
   this->output_ring_buffer_ = output_ring_buffer;
-
-  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-  this->transfer_buffer_ = allocator.allocate(transfer_buffer_size);
   this->transfer_buffer_size_ = transfer_buffer_size;
 }
 
@@ -24,7 +21,24 @@ AudioReader::~AudioReader() {
   this->cleanup_connection_();
 }
 
+esp_err_t AudioReader::allocate_buffers_() {
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+  if (this->transfer_buffer_ == nullptr)
+    this->transfer_buffer_ = allocator.allocate(this->transfer_buffer_size_);
+
+  if (this->transfer_buffer_ == nullptr)
+    return ESP_ERR_NO_MEM;
+
+  return ESP_OK;
+}
+
 media_player::MediaFileType AudioReader::start(media_player::MediaFile *media_file) {
+  esp_err_t err = this->allocate_buffers_();
+
+  if (err != ESP_OK) {
+    return media_player::MediaFileType::NONE;
+  }
+
   this->current_media_file_ = media_file;
 
   this->media_file_data_current_ = media_file->data;
@@ -34,6 +48,12 @@ media_player::MediaFileType AudioReader::start(media_player::MediaFile *media_fi
 }
 
 media_player::MediaFileType AudioReader::start(const std::string &uri) {
+  esp_err_t err = this->allocate_buffers_();
+
+  if (err != ESP_OK) {
+    return media_player::MediaFileType::NONE;
+  }
+
   this->cleanup_connection_();
 
   if (uri.empty()) {
@@ -53,7 +73,6 @@ media_player::MediaFileType AudioReader::start(const std::string &uri) {
     return media_player::MediaFileType::NONE;
   }
 
-  esp_err_t err;
   if ((err = esp_http_client_open(this->client_, 0)) != ESP_OK) {
     printf("Failed to open HTTP connection");
     this->cleanup_connection_();

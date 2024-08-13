@@ -34,13 +34,15 @@ class AudioDecoder {
                size_t internal_buffer_size);
   ~AudioDecoder();
 
-  void start(media_player::MediaFileType media_file_type);
+  esp_err_t start(media_player::MediaFileType media_file_type);
 
   AudioDecoderState decode(bool stop_gracefully);
 
   const optional<media_player::StreamInfo> &get_stream_info() const { return this->stream_info_; }
 
  protected:
+  esp_err_t allocate_buffers_();
+
   FileDecoderState decode_wav_();
   FileDecoderState decode_mp3_();
   FileDecoderState decode_flac_();
@@ -49,12 +51,12 @@ class AudioDecoder {
   esphome::RingBuffer *output_ring_buffer_;
   size_t internal_buffer_size_;
 
-  uint8_t *input_buffer_;
-  uint8_t *input_buffer_current_;
+  uint8_t *input_buffer_{nullptr};
+  uint8_t *input_buffer_current_{nullptr};
   size_t input_buffer_length_;
 
-  uint8_t *output_buffer_;
-  uint8_t *output_buffer_current_;
+  uint8_t *output_buffer_{nullptr};
+  uint8_t *output_buffer_current_{nullptr};
   size_t output_buffer_length_;
 
   HMP3Decoder mp3_decoder_;

@@ -16,14 +16,6 @@ AudioResampler::AudioResampler(RingBuffer *input_ring_buffer, RingBuffer *output
   this->input_ring_buffer_ = input_ring_buffer;
   this->output_ring_buffer_ = output_ring_buffer;
   this->internal_buffer_samples_ = internal_buffer_samples;
-
-  ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  this->input_buffer_ = int16_allocator.allocate(internal_buffer_samples);
-  this->output_buffer_ = int16_allocator.allocate(internal_buffer_samples);
-
-  ExternalRAMAllocator<float> float_allocator(ExternalRAMAllocator<float>::ALLOW_FAILURE);
-  this->float_input_buffer_ = float_allocator.allocate(internal_buffer_samples);
-  this->float_output_buffer_ = float_allocator.allocate(internal_buffer_samples);
 }
 
 AudioResampler::~AudioResampler() {
@@ -50,7 +42,35 @@ AudioResampler::~AudioResampler() {
   // dsps_fird_s16_aexx_free(&this->fir_filter_);
 }
 
+esp_err_t AudioResampler::allocate_buffers_() {
+  ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+  ExternalRAMAllocator<float> float_allocator(ExternalRAMAllocator<float>::ALLOW_FAILURE);
+
+  if (this->input_buffer_ == nullptr)
+    this->input_buffer_ = int16_allocator.allocate(this->internal_buffer_samples_);
+  if (this->output_buffer_ == nullptr)
+    this->output_buffer_ = int16_allocator.allocate(this->internal_buffer_samples_);
+
+  if (this->float_input_buffer_ == nullptr)
+    this->float_input_buffer_ = float_allocator.allocate(this->internal_buffer_samples_);
+
+  if (this->float_output_buffer_ == nullptr)
+    this->float_output_buffer_ = float_allocator.allocate(this->internal_buffer_samples_);
+
+  if ((this->input_buffer_ == nullptr) || (this->output_buffer_ == nullptr) || (this->float_input_buffer_ == nullptr) ||
+      (this->float_output_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
 bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
+  esp_err_t err = this->allocate_buffers_();
+  if (err != ESP_OK) {
+    return false;
+  }
+
   this->stream_info_ = stream_info;
 
   this->input_buffer_current_ = this->input_buffer_;
