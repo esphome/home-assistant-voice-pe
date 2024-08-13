@@ -177,7 +177,7 @@ esp_err_t AudioPipeline::stop() {
       (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED),  // Bit message to read
       pdTRUE,                                                                             // Clear the bits on exit
       true,                                                                               // Wait for all the bits,
-      pdMS_TO_TICKS(200));  // Duration to block/wait
+      pdMS_TO_TICKS(200));                                                                // Duration to block/wait
 
   if (!(event_group_bits & (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED))) {
     // Not all bits were set, so it timed out
@@ -278,9 +278,9 @@ void AudioPipeline::decode_task_(void *params) {
     xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_FINISHED);
 
     {
-      AudioDecoder decoder = AudioDecoder(this_pipeline->raw_file_ring_buffer_.get(),
-                                          this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
-      esp_err_t err = decoder.start(this_pipeline->current_media_file_type_);
+      std::unique_ptr<AudioDecoder> decoder = make_unique<AudioDecoder>(
+          this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+      esp_err_t err = decoder->start(this_pipeline->current_media_file_type_);
 
       if (err != ESP_OK) {
         // Setting up the decoder failed
@@ -298,7 +298,7 @@ void AudioPipeline::decode_task_(void *params) {
         }
 
         // Stop gracefully if the reader has finished
-        AudioDecoderState decoder_state = decoder.decode(event_bits & READER_MESSAGE_FINISHED);
+        AudioDecoderState decoder_state = decoder->decode(event_bits & READER_MESSAGE_FINISHED);
 
         if (decoder_state == AudioDecoderState::FINISHED) {
           break;
@@ -308,10 +308,10 @@ void AudioPipeline::decode_task_(void *params) {
           break;
         }
 
-        if (!has_stream_info && decoder.get_stream_info().has_value()) {
+        if (!has_stream_info && decoder->get_stream_info().has_value()) {
           has_stream_info = true;
 
-          this_pipeline->current_stream_info_ = decoder.get_stream_info().value();
+          this_pipeline->current_stream_info_ = decoder->get_stream_info().value();
 
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);

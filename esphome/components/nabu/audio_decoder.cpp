@@ -26,34 +26,18 @@ AudioDecoder::~AudioDecoder() {
 
   if (this->flac_decoder_ != nullptr) {
     this->flac_decoder_->free_buffers();
-    delete this->flac_decoder_;
+    this->flac_decoder_.reset();  // Free the unique_ptr
     this->flac_decoder_ = nullptr;
-  }
-
-  if (this->wav_decoder_ != nullptr) {
-    delete this->wav_decoder_;
-    this->wav_decoder_ = nullptr;
   }
 
   if (this->media_file_type_ == media_player::MediaFileType::MP3) {
     MP3FreeDecoder(this->mp3_decoder_);
   }
-}
 
-esp_err_t AudioDecoder::allocate_buffers_() {
-  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-
-  if (this->input_buffer_ == nullptr)
-    this->input_buffer_ = allocator.allocate(this->internal_buffer_size_);
-
-  if (this->output_buffer_ == nullptr)
-    this->output_buffer_ = allocator.allocate(this->internal_buffer_size_);
-
-  if ((this->input_buffer_ == nullptr) || (this->output_buffer_ == nullptr)) {
-    return ESP_ERR_NO_MEM;
+  if (this->wav_decoder_ != nullptr) {
+    this->wav_decoder_.reset();  // Free the unique_ptr
+    this->wav_decoder_ = nullptr;
   }
-
-  return ESP_OK;
 }
 
 esp_err_t AudioDecoder::start(media_player::MediaFileType media_file_type) {
@@ -74,15 +58,15 @@ esp_err_t AudioDecoder::start(media_player::MediaFileType media_file_type) {
   this->end_of_file_ = false;
 
   switch (this->media_file_type_) {
-    case media_player::MediaFileType::WAV:
-      this->wav_decoder_ = new wav_decoder::WAVDecoder(&this->input_buffer_current_);
-      this->wav_decoder_->reset();
+    case media_player::MediaFileType::FLAC:
+      this->flac_decoder_ = make_unique<flac::FLACDecoder>(this->input_buffer_);
       break;
     case media_player::MediaFileType::MP3:
       this->mp3_decoder_ = MP3InitDecoder();
       break;
-    case media_player::MediaFileType::FLAC:
-      this->flac_decoder_ = new flac::FLACDecoder(this->input_buffer_);
+    case media_player::MediaFileType::WAV:
+      this->wav_decoder_ = make_unique<wav_decoder::WAVDecoder>(&this->input_buffer_current_);
+      this->wav_decoder_->reset();
       break;
     case media_player::MediaFileType::NONE:
       break;
@@ -159,14 +143,14 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
         state = FileDecoderState::IDLE;
       } else {
         switch (this->media_file_type_) {
-          case media_player::MediaFileType::WAV:
-            state = this->decode_wav_();
+          case media_player::MediaFileType::FLAC:
+            state = this->decode_flac_();
             break;
           case media_player::MediaFileType::MP3:
             state = this->decode_mp3_();
             break;
-          case media_player::MediaFileType::FLAC:
-            state = this->decode_flac_();
+          case media_player::MediaFileType::WAV:
+            state = this->decode_wav_();
             break;
           case media_player::MediaFileType::NONE:
             state = FileDecoderState::IDLE;
@@ -185,6 +169,126 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     }
   }
   return AudioDecoderState::DECODING;
+}
+
+esp_err_t AudioDecoder::allocate_buffers_() {
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+
+  if (this->input_buffer_ == nullptr)
+    this->input_buffer_ = allocator.allocate(this->internal_buffer_size_);
+
+  if (this->output_buffer_ == nullptr)
+    this->output_buffer_ = allocator.allocate(this->internal_buffer_size_);
+
+  if ((this->input_buffer_ == nullptr) || (this->output_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
+FileDecoderState AudioDecoder::decode_flac_() {
+  if (!this->stream_info_.has_value()) {
+    // Header hasn't been read
+    auto result = this->flac_decoder_->read_header(this->input_buffer_length_);
+
+    size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
+    this->input_buffer_current_ += bytes_consumed;
+    this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
+
+    if (result == flac::FLAC_DECODER_HEADER_OUT_OF_DATA) {
+      return FileDecoderState::POTENTIALLY_FAILED;
+    }
+
+    if (result != flac::FLAC_DECODER_SUCCESS) {
+      printf("failed to read flac header. Error: %d\n", result);
+      return FileDecoderState::FAILED;
+    }
+
+    media_player::StreamInfo stream_info;
+    stream_info.channels = this->flac_decoder_->get_num_channels();
+    stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
+    stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
+
+    size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
+    if (this->internal_buffer_size_ < flac_decoder_output_buffer_min_size * sizeof(int16_t)) {
+      printf("output buffer is not big enough\n");
+      return FileDecoderState::FAILED;
+    }
+
+    return FileDecoderState::MORE_TO_PROCESS;
+  }
+
+  uint32_t output_samples = 0;
+  auto result =
+      this->flac_decoder_->decode_frame(this->input_buffer_length_, (int16_t *) this->output_buffer_, &output_samples);
+
+  if (result == flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
+    // Not an issue, just needs more data that we'll get next time.
+    return FileDecoderState::POTENTIALLY_FAILED;
+  } else if (result > flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
+    // Serious error, can't recover
+    printf("FLAC Decoder Error %d\n", result);
+    return FileDecoderState::FAILED;
+  }
+
+  // We have successfully decoded some input data and have new output data
+  size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
+  this->input_buffer_current_ += bytes_consumed;
+  this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
+
+  this->output_buffer_current_ = this->output_buffer_;
+  this->output_buffer_length_ = output_samples * sizeof(int16_t);
+
+  if (result == flac::FLAC_DECODER_NO_MORE_FRAMES) {
+    return FileDecoderState::END_OF_FILE;
+  }
+
+  return FileDecoderState::MORE_TO_PROCESS;
+}
+
+FileDecoderState AudioDecoder::decode_mp3_() {
+  // Look for the next sync word
+  int32_t offset = MP3FindSyncWord(this->input_buffer_current_, this->input_buffer_length_);
+  if (offset < 0) {
+    // We may recover if we have more data
+    return FileDecoderState::POTENTIALLY_FAILED;
+  }
+
+  // Advance read pointer
+  this->input_buffer_current_ += offset;
+  this->input_buffer_length_ -= offset;
+
+  int err = MP3Decode(this->mp3_decoder_, &this->input_buffer_current_, (int *) &this->input_buffer_length_,
+                      (int16_t *) this->output_buffer_, 0);
+  if (err) {
+    switch (err) {
+      case ERR_MP3_MAINDATA_UNDERFLOW:
+        // Not a problem. Next call to decode will provide more data.
+        return FileDecoderState::POTENTIALLY_FAILED;
+        break;
+      default:
+        // TODO: Better handle mp3 decoder errors
+        return FileDecoderState::FAILED;
+        break;
+    }
+  } else {
+    MP3FrameInfo mp3_frame_info;
+    MP3GetLastFrameInfo(this->mp3_decoder_, &mp3_frame_info);
+    if (mp3_frame_info.outputSamps > 0) {
+      int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8);
+      this->output_buffer_length_ = mp3_frame_info.outputSamps * bytes_per_sample;
+      this->output_buffer_current_ = this->output_buffer_;
+
+      media_player::StreamInfo stream_info;
+      stream_info.channels = mp3_frame_info.nChans;
+      stream_info.sample_rate = mp3_frame_info.samprate;
+      stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
+      this->stream_info_ = stream_info;
+    }
+  }
+  // }
+  return FileDecoderState::MORE_TO_PROCESS;
 }
 
 FileDecoderState AudioDecoder::decode_wav_() {
@@ -257,110 +361,6 @@ FileDecoderState AudioDecoder::decode_wav_() {
   }
 
   return FileDecoderState::END_OF_FILE;
-}
-
-FileDecoderState AudioDecoder::decode_mp3_() {
-  // Look for the next sync word
-  int32_t offset = MP3FindSyncWord(this->input_buffer_current_, this->input_buffer_length_);
-  if (offset < 0) {
-    // We may recover if we have more data
-    return FileDecoderState::POTENTIALLY_FAILED;
-  }
-
-  // Advance read pointer
-  this->input_buffer_current_ += offset;
-  this->input_buffer_length_ -= offset;
-
-  int err = MP3Decode(this->mp3_decoder_, &this->input_buffer_current_, (int *) &this->input_buffer_length_,
-                      (int16_t *) this->output_buffer_, 0);
-  if (err) {
-    switch (err) {
-      case ERR_MP3_MAINDATA_UNDERFLOW:
-        // Not a problem. Next call to decode will provide more data.
-        return FileDecoderState::POTENTIALLY_FAILED;
-        break;
-      default:
-        // TODO: Better handle mp3 decoder errors
-        return FileDecoderState::FAILED;
-        break;
-    }
-  } else {
-    MP3FrameInfo mp3_frame_info;
-    MP3GetLastFrameInfo(this->mp3_decoder_, &mp3_frame_info);
-    if (mp3_frame_info.outputSamps > 0) {
-      int bytes_per_sample = (mp3_frame_info.bitsPerSample / 8);
-      this->output_buffer_length_ = mp3_frame_info.outputSamps * bytes_per_sample;
-      this->output_buffer_current_ = this->output_buffer_;
-
-      media_player::StreamInfo stream_info;
-      stream_info.channels = mp3_frame_info.nChans;
-      stream_info.sample_rate = mp3_frame_info.samprate;
-      stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
-      this->stream_info_ = stream_info;
-    }
-  }
-  // }
-  return FileDecoderState::MORE_TO_PROCESS;
-}
-
-FileDecoderState AudioDecoder::decode_flac_() {
-  if (!this->stream_info_.has_value()) {
-    // Header hasn't been read
-    auto result = this->flac_decoder_->read_header(this->input_buffer_length_);
-
-    size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
-    this->input_buffer_current_ += bytes_consumed;
-    this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
-
-    if (result == flac::FLAC_DECODER_HEADER_OUT_OF_DATA) {
-      return FileDecoderState::POTENTIALLY_FAILED;
-    }
-
-    if (result != flac::FLAC_DECODER_SUCCESS) {
-      printf("failed to read flac header. Error: %d\n", result);
-      return FileDecoderState::FAILED;
-    }
-
-    media_player::StreamInfo stream_info;
-    stream_info.channels = this->flac_decoder_->get_num_channels();
-    stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
-    stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
-
-    size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
-    if (this->internal_buffer_size_ < flac_decoder_output_buffer_min_size * sizeof(int16_t)) {
-      printf("output buffer is not big enough\n");
-      return FileDecoderState::FAILED;
-    }
-
-    return FileDecoderState::MORE_TO_PROCESS;
-  }
-
-  uint32_t output_samples = 0;
-  auto result =
-      this->flac_decoder_->decode_frame(this->input_buffer_length_, (int16_t *) this->output_buffer_, &output_samples);
-
-  if (result == flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
-    // Not an issue, just needs more data that we'll get next time.
-    return FileDecoderState::POTENTIALLY_FAILED;
-  } else if (result > flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
-    // Serious error, can't recover
-    printf("FLAC Decoder Error %d\n", result);
-    return FileDecoderState::FAILED;
-  }
-
-  // We have successfully decoded some input data and have new output data
-  size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
-  this->input_buffer_current_ += bytes_consumed;
-  this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
-
-  this->output_buffer_current_ = this->output_buffer_;
-  this->output_buffer_length_ = output_samples * sizeof(int16_t);
-
-  if (result == flac::FLAC_DECODER_NO_MORE_FRAMES) {
-    return FileDecoderState::END_OF_FILE;
-  }
-
-  return FileDecoderState::MORE_TO_PROCESS;
 }
 
 }  // namespace nabu

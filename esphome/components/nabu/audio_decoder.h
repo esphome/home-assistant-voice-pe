@@ -43,9 +43,9 @@ class AudioDecoder {
  protected:
   esp_err_t allocate_buffers_();
 
-  FileDecoderState decode_wav_();
-  FileDecoderState decode_mp3_();
   FileDecoderState decode_flac_();
+  FileDecoderState decode_mp3_();
+  FileDecoderState decode_wav_();
 
   esphome::RingBuffer *input_ring_buffer_;
   esphome::RingBuffer *output_ring_buffer_;
@@ -59,12 +59,12 @@ class AudioDecoder {
   uint8_t *output_buffer_current_{nullptr};
   size_t output_buffer_length_;
 
+  std::unique_ptr<flac::FLACDecoder> flac_decoder_;
+
   HMP3Decoder mp3_decoder_;
 
-  wav_decoder::WAVDecoder *wav_decoder_{nullptr};
+  std::unique_ptr<wav_decoder::WAVDecoder> wav_decoder_;
   size_t wav_bytes_left_;
-
-  flac::FLACDecoder *flac_decoder_{nullptr};
 
   media_player::MediaFileType media_file_type_{media_player::MediaFileType::NONE};
   optional<media_player::StreamInfo> stream_info_{};
