@@ -47,6 +47,7 @@ TYPE_WEB = "web"
 
 CONF_FILES = "files"
 CONF_SAMPLE_RATE = "sample_rate"
+CONF_VOLUME_INCREMENT = "volume_increment"
 
 nabu_ns = cg.esphome_ns.namespace("nabu")
 NabuMediaPlayer = nabu_ns.class_("NabuMediaPlayer")
@@ -181,6 +182,7 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
         ),
+        cv.Optional(CONF_VOLUME_INCREMENT, default=0.05): cv.percentage,
         cv.Optional(CONF_FILES): cv.ensure_list(MEDIA_FILE_TYPE_SCHEMA),
     }
 ).extend(i2c.i2c_device_schema(0x18))
@@ -206,9 +208,10 @@ async def to_code(config):
     cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
+    
+    cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
 
     if files_list := config.get(CONF_FILES):
-        media_files = []
         for file_config in files_list:
             conf_file = file_config[CONF_FILE]
             file_source = conf_file[CONF_TYPE]

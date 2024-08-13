@@ -484,11 +484,11 @@ void NabuMediaPlayer::watch_media_commands_() {
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
-          this->set_volume_(std::min(1.0f, this->volume + 0.05f));
+          this->set_volume_(std::min(1.0f, this->volume + this->volume_increment_));
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN:
-          this->set_volume_(std::max(0.0f, this->volume - 0.05f));
+          this->set_volume_(std::max(0.0f, this->volume - this->volume_increment_));
           this->publish_state();
           break;
         default:

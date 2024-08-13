@@ -59,6 +59,8 @@ class NabuMediaPlayer : public Component,
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
+  void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
+
  protected:
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
@@ -117,6 +119,9 @@ class NabuMediaPlayer : public Component,
 
   // We mute the DAC whenever there is no audio playback to avoid speaker hiss
   bool is_idle_muted_{false};
+
+  // The amount to change the volume on volume up/down commands
+  float volume_increment_;
 };
 
 }  // namespace nabu
