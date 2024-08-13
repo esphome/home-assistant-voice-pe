@@ -42,7 +42,7 @@ class AudioPipeline {
   esp_err_t start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
   esp_err_t start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
 
-  void stop();
+  esp_err_t stop();
 
   AudioPipelineState get_state();
 

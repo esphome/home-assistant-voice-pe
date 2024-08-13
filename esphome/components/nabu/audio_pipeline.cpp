@@ -135,11 +135,9 @@ esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::s
     return ESP_FAIL;
   }
 
-  this->stop();
-
   this->target_sample_rate_ = target_sample_rate;
 
-  return ESP_OK;
+  return this->stop();
 }
 
 AudioPipelineState AudioPipeline::get_state() {
@@ -171,15 +169,20 @@ AudioPipelineState AudioPipeline::get_state() {
   return AudioPipelineState::PLAYING;
 }
 
-void AudioPipeline::stop() {
+esp_err_t AudioPipeline::stop() {
   xEventGroupSetBits(this->event_group_, PIPELINE_COMMAND_STOP);
 
-  xEventGroupWaitBits(
+  uint32_t event_group_bits = xEventGroupWaitBits(
       this->event_group_,
       (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED),  // Bit message to read
-      pdTRUE,                                                                             // Clear the bit on exit
+      pdTRUE,                                                                             // Clear the bits on exit
       true,                                                                               // Wait for all the bits,
-      pdMS_TO_TICKS(200));  // Block temporarily before deleting each task
+      pdMS_TO_TICKS(200));  // Duration to block/wait
+
+  if (!(event_group_bits & (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED))) {
+    // Not all bits were set, so it timed out
+    return ESP_ERR_TIMEOUT;
+  }
 
   // Clear the ring buffer in the mixer; avoids playing incorrect audio when starting a new file while paused
   CommandEvent command_event;
@@ -192,6 +195,8 @@ void AudioPipeline::stop() {
 
   xEventGroupClearBits(this->event_group_, ALL_BITS);
   this->reset_ring_buffers();
+
+  return ESP_OK;
 }
 
 void AudioPipeline::reset_ring_buffers() {
