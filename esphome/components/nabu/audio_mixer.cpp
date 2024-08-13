@@ -14,23 +14,7 @@ static const size_t INPUT_RING_BUFFER_SIZE = 32768;  // Audio samples
 static const size_t BUFFER_SIZE = 4096;              // Audio samples - keep small for fast pausing
 static const size_t QUEUE_COUNT = 20;
 
-AudioMixer::AudioMixer() {
-  this->media_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
-  this->announcement_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
-  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
-
-  // TODO: Handle not being able to allocate these...
-  if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
-      ((this->output_ring_buffer_ == nullptr))) {
-    return;
-  }
-
-  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-  this->stack_buffer_ = allocator.allocate(8192);
-
-  this->event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
-  this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
-}
+static const uint32_t TASK_STACK_SIZE = 3072;
 
 size_t AudioMixer::write_media(uint8_t *buffer, size_t length) {
   size_t free_bytes = this->media_free();
@@ -51,11 +35,40 @@ size_t AudioMixer::write_announcement(uint8_t *buffer, size_t length) {
   return 0;
 }
 
-void AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
-  if (this->task_handle_ == nullptr) {
-    this->task_handle_ = xTaskCreateStatic(AudioMixer::mix_task_, task_name.c_str(), 3072, (void *) this, priority,
-                                           this->stack_buffer_, &this->task_stack_);
+esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
+  this->media_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
+  this->announcement_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SIZE);
+  this->output_ring_buffer_ = RingBuffer::create(BUFFER_SIZE);
+
+  if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
+      ((this->output_ring_buffer_ == nullptr))) {
+    return ESP_ERR_NO_MEM;
   }
+
+  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
+  this->stack_buffer_ = allocator.allocate(TASK_STACK_SIZE);
+
+  if (this->stack_buffer_ == nullptr) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  this->event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
+  this->command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
+
+  if ((this->event_queue_ == nullptr) || (this->command_queue_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  if (this->task_handle_ == nullptr) {
+    this->task_handle_ = xTaskCreateStatic(AudioMixer::mix_task_, task_name.c_str(), TASK_STACK_SIZE, (void *) this,
+                                           priority, this->stack_buffer_, &this->task_stack_);
+  }
+
+  if (this->task_handle_ == nullptr) {
+    return ESP_FAIL;
+  }
+
+  return ESP_OK;
 }
 
 void AudioMixer::reset_ring_buffers() {

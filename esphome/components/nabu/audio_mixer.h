@@ -46,8 +46,6 @@ struct CommandEvent {
 
 class AudioMixer {
  public:
-  AudioMixer();
-
   /// @brief Returns the number of bytes available to read from the ring buffer
   size_t available() { return this->output_ring_buffer_->available(); }
 
@@ -59,7 +57,7 @@ class AudioMixer {
     return xQueueReceive(this->event_queue_, event, ticks_to_wait);
   }
 
-  void start(const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(const std::string &task_name, UBaseType_t priority = 1);
 
   void stop() {
     vTaskDelete(this->task_handle_);

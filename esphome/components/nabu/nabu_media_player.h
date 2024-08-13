@@ -99,7 +99,7 @@ class NabuMediaPlayer : public Component,
 
   // Starts the ``type`` pipeline with a ``url`` or file. Starts the mixer, pipeline, and speaker tasks if necessary.
   // Unpauses if starting media in paused state
-  void start_pipeline_(AudioPipelineType type, bool url);
+  esp_err_t start_pipeline_(AudioPipelineType type, bool url);
 
   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
   AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};

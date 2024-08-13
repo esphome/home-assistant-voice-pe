@@ -74,6 +74,7 @@ static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 
 static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
+static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
 #define STATS_TASK_PRIO 3
@@ -364,10 +365,13 @@ void NabuMediaPlayer::speaker_task(void *params) {
   }
 }
 
-void NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
+esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   if (this->audio_mixer_ == nullptr) {
     this->audio_mixer_ = make_unique<AudioMixer>();
-    this->audio_mixer_->start("mixer", 10);
+    esp_err_t mixer_error = this->audio_mixer_->start("mixer", MIXER_TASK_PRIORITY);
+    if (mixer_error != ESP_OK) {
+      return mixer_error;
+    }
   }
 
   if (type == AudioPipelineType::MEDIA) {
@@ -406,27 +410,37 @@ void NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
                 &this->speaker_task_handle_);
   }
+
+  return ESP_OK;
 }
 
 void NabuMediaPlayer::watch_media_commands_() {
   MediaCallCommand media_command;
   CommandEvent command_event;
+  esp_err_t err = ESP_OK;
 
   if (xQueueReceive(this->media_control_command_queue_, &media_command, 0) == pdTRUE) {
     if (media_command.new_url.has_value() && media_command.new_url.value()) {
       if (media_command.announce.has_value() && media_command.announce.value()) {
-        this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, true);
+        err = this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, true);
       } else {
-        this->start_pipeline_(AudioPipelineType::MEDIA, true);
+        err = this->start_pipeline_(AudioPipelineType::MEDIA, true);
       }
     }
 
     if (media_command.new_file.has_value() && media_command.new_file.value()) {
       if (media_command.announce.has_value() && media_command.announce.value()) {
-        this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, false);
+        err = this->start_pipeline_(AudioPipelineType::ANNOUNCEMENT, false);
       } else {
-        this->start_pipeline_(AudioPipelineType::MEDIA, false);
+        err = this->start_pipeline_(AudioPipelineType::MEDIA, false);
       }
+    }
+
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Error starting the audio pipeline: %s", esp_err_to_name(err));
+      this->status_set_error();
+    } else {
+      this->status_clear_error();
     }
 
     if (media_command.volume.has_value()) {
