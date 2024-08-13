@@ -366,13 +366,23 @@ void NabuMediaPlayer::speaker_task(void *params) {
 }
 
 esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
+  esp_err_t err = ESP_OK;
+
   if (this->audio_mixer_ == nullptr) {
     this->audio_mixer_ = make_unique<AudioMixer>();
-    esp_err_t mixer_error = this->audio_mixer_->start("mixer", MIXER_TASK_PRIORITY);
-    if (mixer_error != ESP_OK) {
-      return mixer_error;
+    err = this->audio_mixer_->start("mixer", MIXER_TASK_PRIORITY);
+    if (err != ESP_OK) {
+      return err;
     }
   }
+
+  if (this->speaker_task_handle_ == nullptr) {
+    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
+                &this->speaker_task_handle_);
+  }
+
+  if (this->speaker_task_handle_ == nullptr)
+    return ESP_FAIL;
 
   if (type == AudioPipelineType::MEDIA) {
     if (this->media_pipeline_ == nullptr) {
@@ -380,10 +390,11 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     }
 
     if (url) {
-      this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media", MEDIA_PIPELINE_TASK_PRIORITY);
+      err = this->media_pipeline_->start(this->media_url_.value(), this->sample_rate_, "media",
+                                         MEDIA_PIPELINE_TASK_PRIORITY);
     } else {
-      this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media",
-                                   MEDIA_PIPELINE_TASK_PRIORITY);
+      err = this->media_pipeline_->start(this->media_file_.value(), this->sample_rate_, "media",
+                                         MEDIA_PIPELINE_TASK_PRIORITY);
     }
 
     if (this->is_paused_) {
@@ -398,20 +409,15 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     }
 
     if (url) {
-      this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann",
-                                          ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
+      err = this->announcement_pipeline_->start(this->announcement_url_.value(), this->sample_rate_, "ann",
+                                                ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
     } else {
-      this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann",
-                                          ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
+      err = this->announcement_pipeline_->start(this->announcement_file_.value(), this->sample_rate_, "ann",
+                                                ANNOUNCEMENT_PIPELINE_TASK_PRIORITY);
     }
   }
 
-  if (this->speaker_task_handle_ == nullptr) {
-    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
-                &this->speaker_task_handle_);
-  }
-
-  return ESP_OK;
+  return err;
 }
 
 void NabuMediaPlayer::watch_media_commands_() {

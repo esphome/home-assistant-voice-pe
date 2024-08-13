@@ -39,8 +39,8 @@ class AudioPipeline {
  public:
   AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type);
 
-  void start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
-  void start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority = 1);
 
   void stop();
 
@@ -49,7 +49,8 @@ class AudioPipeline {
   void reset_ring_buffers();
 
  protected:
-  void common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority);
+  esp_err_t allocate_buffers_();
+  esp_err_t common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority);
 
   uint32_t target_sample_rate_;
 
@@ -67,7 +68,7 @@ class AudioPipeline {
   std::unique_ptr<RingBuffer> decoded_ring_buffer_;
   std::unique_ptr<RingBuffer> resampled_ring_buffer_;
 
-  EventGroupHandle_t event_group_;
+  EventGroupHandle_t event_group_{nullptr};
 
   static void read_task_(void *params);
   TaskHandle_t read_task_handle_{nullptr};

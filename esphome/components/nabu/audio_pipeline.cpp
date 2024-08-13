@@ -13,6 +13,10 @@ static const size_t HTTP_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
+static const uint32_t READER_TASK_STACK_SIZE = 8192;
+static const uint32_t DECODER_TASK_STACK_SIZE = 8192;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 8192;
+
 enum EventGroupBits : uint32_t {
   PIPELINE_COMMAND_STOP = (1 << 0),  // Stops all activity in the pipeline elements
 
@@ -34,58 +38,108 @@ enum EventGroupBits : uint32_t {
 };
 
 AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type) {
-  this->raw_file_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE);
-  this->decoded_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
-  this->resampled_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
-
   this->mixer_ = mixer;
   this->pipeline_type_ = pipeline_type;
-
-  ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-
-  this->read_task_stack_buffer_ = allocator.allocate(8192);
-  this->decode_task_stack_buffer_ = allocator.allocate(8192);
-  this->resample_task_stack_buffer_ = allocator.allocate(8192);
-
-  this->event_group_ = xEventGroupCreate();
 }
 
-void AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
-                          UBaseType_t priority) {
-  this->common_start_(target_sample_rate, task_name, priority);
+esp_err_t AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
+                               UBaseType_t priority) {
+  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority);
 
-  this->current_uri_ = uri;
-  xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_HTTP);
+  if (err == ESP_OK) {
+    this->current_uri_ = uri;
+    xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_HTTP);
+  }
+
+  return err;
 }
 
-void AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate,
-                          const std::string &task_name, UBaseType_t priority) {
-  this->common_start_(target_sample_rate, task_name, priority);
+esp_err_t AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate,
+                               const std::string &task_name, UBaseType_t priority) {
+  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority);
 
-  this->current_media_file_ = media_file;
-  xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_FILE);
+  if (err == ESP_OK) {
+    this->current_media_file_ = media_file;
+    xEventGroupSetBits(this->event_group_, READER_COMMAND_INIT_FILE);
+  }
+
+  return err;
 }
 
-void AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority) {
+esp_err_t AudioPipeline::allocate_buffers_() {
+  if (this->raw_file_ring_buffer_ == nullptr)
+    this->raw_file_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE);
+
+  if (this->decoded_ring_buffer_ == nullptr)
+    this->decoded_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
+
+  if (this->resampled_ring_buffer_ == nullptr)
+    this->resampled_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
+
+  if ((this->raw_file_ring_buffer_ == nullptr) || (this->decoded_ring_buffer_ == nullptr) ||
+      (this->resampled_ring_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
+
+  if (this->read_task_stack_buffer_ == nullptr)
+    this->read_task_stack_buffer_ = stack_allocator.allocate(READER_TASK_STACK_SIZE);
+
+  if (this->decode_task_stack_buffer_ == nullptr)
+    this->decode_task_stack_buffer_ = stack_allocator.allocate(DECODER_TASK_STACK_SIZE);
+
+  if (this->resample_task_stack_buffer_ == nullptr)
+    this->resample_task_stack_buffer_ = stack_allocator.allocate(RESAMPLER_TASK_STACK_SIZE);
+
+  if ((this->read_task_stack_buffer_ == nullptr) || (this->decode_task_stack_buffer_ == nullptr) ||
+      (this->resample_task_stack_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  if (this->event_group_ == nullptr)
+    this->event_group_ = xEventGroupCreate();
+
+  if (this->event_group_ == nullptr) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
+esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name,
+                                       UBaseType_t priority) {
+  esp_err_t err = this->allocate_buffers_();
+  if (err != ESP_OK) {
+    return err;
+  }
+
   if (this->read_task_handle_ == nullptr) {
     this->read_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), 8192, (void *) this, priority,
-                          this->read_task_stack_buffer_, &this->read_task_stack_);
+        xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), READER_TASK_STACK_SIZE, (void *) this,
+                          priority, this->read_task_stack_buffer_, &this->read_task_stack_);
   }
   if (this->decode_task_handle_ == nullptr) {
     this->decode_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::decode_task_, (task_name + "_decode").c_str(), 8192, (void *) this, priority,
-                          this->decode_task_stack_buffer_, &this->decode_task_stack_);
+        xTaskCreateStatic(AudioPipeline::decode_task_, (task_name + "_decode").c_str(), DECODER_TASK_STACK_SIZE,
+                          (void *) this, priority, this->decode_task_stack_buffer_, &this->decode_task_stack_);
   }
   if (this->resample_task_handle_ == nullptr) {
     this->resample_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::resample_task_, (task_name + "_resample").c_str(), 8192, (void *) this,
-                          priority, this->resample_task_stack_buffer_, &this->resample_task_stack_);
+        xTaskCreateStatic(AudioPipeline::resample_task_, (task_name + "_resample").c_str(), RESAMPLER_TASK_STACK_SIZE,
+                          (void *) this, priority, this->resample_task_stack_buffer_, &this->resample_task_stack_);
+  }
+
+  if ((this->read_task_handle_ == nullptr) || (this->decode_task_handle_ == nullptr) ||
+      (this->resample_task_handle_ == nullptr)) {
+    return ESP_FAIL;
   }
 
   this->stop();
 
   this->target_sample_rate_ = target_sample_rate;
+
+  return ESP_OK;
 }
 
 AudioPipelineState AudioPipeline::get_state() {
