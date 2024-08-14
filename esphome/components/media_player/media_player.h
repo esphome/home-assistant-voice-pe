@@ -112,7 +112,7 @@ class MediaPlayer : public EntityBase {
 
   virtual MediaPlayerTraits get_traits() = 0;
 
-  virtual void set_ducking_ratio(float ducking_ratio) { return; }
+  virtual void set_ducking_ratio(float ducking_ratio, uint8_t steps) { return; }
 
  protected:
   friend MediaPlayerCall;
