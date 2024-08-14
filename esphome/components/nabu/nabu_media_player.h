@@ -51,17 +51,19 @@ class NabuMediaPlayer : public Component,
 
   // MediaPlayer implementations
   media_player::MediaPlayerTraits get_traits() override;
+
   bool is_muted() const override { return this->is_muted_; }
 
-  void set_ducking_ratio(float ducking_ratio) override;
+  void set_ducking_ratio(float ducking_ratio, uint8_t steps = 15) override;
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
-
+  void reconfigure_dac_new_settings();
  protected:
+
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
