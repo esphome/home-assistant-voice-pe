@@ -14,9 +14,10 @@ static const size_t HTTP_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
-static const uint32_t READER_TASK_STACK_SIZE = 8192;
-static const uint32_t DECODER_TASK_STACK_SIZE = 8192;
-static const uint32_t RESAMPLER_TASK_STACK_SIZE = 8192;
+static const uint32_t READER_TASK_STACK_SIZE = 4096;
+static const uint32_t DECODER_TASK_STACK_SIZE = 4096;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 4096;
+static const size_t DURATION_TASK_DELAY_MS = 10;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 
@@ -161,7 +162,7 @@ AudioPipelineState AudioPipeline::get_state() {
             ESP_LOGE(TAG, "Media reader encountered an error: %s", esp_err_to_name(event.err.value()));
           } else if (event.file_type.has_value()) {
             ESP_LOGD(TAG, "Reading %s file type",
-                      media_player::media_player_file_type_to_string(event.file_type.value()));
+                     media_player::media_player_file_type_to_string(event.file_type.value()));
           }
 
           break;
@@ -317,7 +318,7 @@ void AudioPipeline::read_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -390,7 +391,7 @@ void AudioPipeline::decode_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -461,7 +462,7 @@ void AudioPipeline::resample_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
