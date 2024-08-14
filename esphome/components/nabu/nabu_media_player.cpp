@@ -1023,7 +1023,19 @@ void NabuMediaPlayer::reconfigure_dac_new_settings(){
 		// Enable Master Analog Power Control
 		this->write_byte(AIC3204_LDO_CTRL, 0x01);
 		// Set Common Mode voltages: Full Chip CM to 0.9V and Output Common Mode for Headphone to 1.65V and HP powered from LDOin @ 3.3V.
+
+    /*** MODIFICATION HERE! ***
+     * All page changes refer to the TLV320AIC3204 Application Reference Guide
+     * 
+     * Page 125: Common mode control register, set d6 to 1 to make the full chip common mode = 0.75 v
+     * We are using the internal AVdd regulator with a nominal output of 1.72 V (see LDO_CTRL_REGISTER on page 123)
+     * Page 86 says to only set the common mode voltage to 0.9 v if AVdd >= 1.8... but it isn't
+     * We do need to tweak the HPL and HPR gain settings further down, as page 47 says we have to compensate with a -2 gain
+     */
 		this->write_byte(AIC3204_CM_CTRL, 0b01000000);//0x33);
+
+
+    
 		// Set PowerTune Modes
 		// Set the Left & Right DAC PowerTune mode to PTM_P3/4. Use Class-AB driver.
 		this->write_byte(AIC3204_PLAY_CFG1, 0x00);
@@ -1060,11 +1072,19 @@ void NabuMediaPlayer::reconfigure_dac_new_settings(){
 		// this->write_byte(AIC3204_RPGA_P_ROUTE, 0x80);
 		// // Route IN1_L to RIGHT_M with 20K input impedance
 		// this->write_byte(AIC3204_RPGA_N_ROUTE, 0x20);
+
+    /**** MODIFICATION HERE
+     * 
+     * We compensate for the gain from modifying the common voltage
+     */
+
 		// Unmute HPL and set gain to 0dB
 		this->write_byte(AIC3204_HPL_GAIN, 0b00111110); // -2dB gain per page 47 of TLV320AIC3204 Application Reference Guide //0x00);
 		// Unmute HPR and set gain to 0dB
 		this->write_byte(AIC3204_HPR_GAIN, 0b00111110); // -2dB gain per page 47 of TLV320AIC3204 Application Reference Guide //0x00);
-		// Unmute LOL and set gain to 0dB
+		
+    
+    // Unmute LOL and set gain to 0dB
 		this->write_byte(0x12, 0x00);
 		// Unmute LOR and set gain to 0dB
 		this->write_byte(0x13, 0x00);
