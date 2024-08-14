@@ -65,6 +65,7 @@ class NabuMediaPlayer : public Component,
   void reconfigure_dac_old_settings();
   void reconfigure_dac_new_settings_more_filters();
   void reconfigure_dac_new_settings_less_filters();
+  void reconfigure_dac_new_settings_less_filters_alt();
  protected:
 
   // Receives commands from HA or from the voice assistant component
