@@ -62,6 +62,7 @@ class NabuMediaPlayer : public Component,
 
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
   void reconfigure_dac_new_settings();
+  void reconfigure_dac_old_settings();
  protected:
 
   // Receives commands from HA or from the voice assistant component
