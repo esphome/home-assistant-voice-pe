@@ -53,7 +53,7 @@ class NabuMediaPlayer : public Component,
   media_player::MediaPlayerTraits get_traits() override;
   bool is_muted() const override { return this->is_muted_; }
 
-  void set_ducking_ratio(float ducking_ratio) override;
+  void set_ducking_ratio(float ducking_ratio, float duration = 1.0f);
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }

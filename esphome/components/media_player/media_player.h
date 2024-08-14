@@ -112,8 +112,6 @@ class MediaPlayer : public EntityBase {
 
   virtual MediaPlayerTraits get_traits() = 0;
 
-  virtual void set_ducking_ratio(float ducking_ratio) { return; }
-
  protected:
   friend MediaPlayerCall;
 

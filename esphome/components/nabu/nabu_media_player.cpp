@@ -608,11 +608,12 @@ void NabuMediaPlayer::loop() {
   }
 }
 
-void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio) {
+void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio, float duration) {
   if (this->audio_mixer_ != nullptr) {
     CommandEvent command_event;
     command_event.command = CommandEventType::DUCK;
     command_event.ducking_ratio = ducking_ratio;
+    command_event.samples = 48000*2;
     this->audio_mixer_->send_command(&command_event);
   }
 }
