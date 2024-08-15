@@ -677,6 +677,18 @@ void NabuMediaPlayer::control(const media_player::MediaPlayerCall &call) {
 media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   auto traits = media_player::MediaPlayerTraits();
   traits.set_supports_pause(true);
+  traits.get_supported_formats().push_back({
+    .format = "flac",
+    .sample_rate = this->sample_rate_,
+    .num_channels = 2,
+    .purpose = media_player::MediaPlayerFormatPurpose::DEFAULT,
+  });
+  traits.get_supported_formats().push_back({
+    .format = "flac",
+    .sample_rate = this->sample_rate_,
+    .num_channels = 1,
+    .purpose = media_player::MediaPlayerFormatPurpose::ANNOUNCEMENT,
+  });
   return traits;
 };
 

@@ -51,6 +51,22 @@ struct MediaFile {
   MediaFileType file_type;
 };
 
+<<<<<<< Updated upstream
+=======
+enum class MediaPlayerFormatPurpose : uint8_t {
+  DEFAULT = 0,
+  ANNOUNCEMENT,
+};
+
+struct MediaPlayerSupportedFormat {
+  std::string format;
+  uint32_t sample_rate;
+  uint32_t num_channels;
+  MediaPlayerFormatPurpose purpose;
+};
+
+
+>>>>>>> Stashed changes
 class MediaPlayer;
 
 class MediaPlayerTraits {
@@ -61,8 +77,13 @@ class MediaPlayerTraits {
 
   bool get_supports_pause() const { return this->supports_pause_; }
 
+  std::vector<MediaPlayerSupportedFormat>& get_supported_formats() {
+    return this->supported_formats_;
+  }
+
  protected:
   bool supports_pause_{false};
+  std::vector<MediaPlayerSupportedFormat> supported_formats_{};
 };
 
 class MediaPlayerCall {
