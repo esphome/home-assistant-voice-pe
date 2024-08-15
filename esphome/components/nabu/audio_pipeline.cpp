@@ -24,23 +24,40 @@ static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 static const char *const TAG = "nabu_media_player.pipeline";
 
 enum EventGroupBits : uint32_t {
-  PIPELINE_COMMAND_STOP = (1 << 0),  // Stops all activity in the pipeline elements
+  // The stop() function clears all unfinished bits
+  // MESSAGE_* bits are only set by their respective tasks
 
-  READER_COMMAND_INIT_HTTP = (1 << 4),  // Read audio from an HTTP source
-  READER_COMMAND_INIT_FILE = (1 << 5),  // Read audio from an audio file from the flash
+  // Stops all activity in the pipeline elements and set by stop() or by each task
+  PIPELINE_COMMAND_STOP = (1 << 0),
 
-  READER_MESSAGE_LOADED_MEDIA_TYPE = (1 << 6),  // Audio file type is read after checking it is supported
-  READER_MESSAGE_FINISHED = (1 << 7),           // Reader is done (either through a failure or just end of the stream)
-  READER_MESSAGE_ERROR = (1 << 8),              // Error reading the file
+  // Read audio from an HTTP source; cleared by reader task and set by start(uri,...)
+  READER_COMMAND_INIT_HTTP = (1 << 4),
+  // Read audio from an audio file from the flash; cleared by reader task and set by start(media_file,...)
+  READER_COMMAND_INIT_FILE = (1 << 5),
 
-  DECODER_MESSAGE_LOADED_STREAM_INFO = (1 << 11),  // Decoder has determined the stream information
-  DECODER_MESSAGE_FINISHED = (1 << 12),  // Decoder is done (either through a faiilure or the end of the stream)
-  DECODER_MESSAGE_ERROR = (1 << 13),     // Error decoding the file
+  // Audio file type is read after checking it is supported; cleared by decoder task
+  READER_MESSAGE_LOADED_MEDIA_TYPE = (1 << 6),
+  // Reader is done (either through a failure or just end of the stream); cleared by reader task
+  READER_MESSAGE_FINISHED = (1 << 7),
+  // Error reading the file; cleared by get_state()
+  READER_MESSAGE_ERROR = (1 << 8),
 
-  RESAMPLER_MESSAGE_FINISHED = (1 << 17),  // Resampler is done (either through a failure or the end of the stream)
-  RESAMPLER_MESSAGE_ERROR = (1 << 18),     // Error resampling the file
+  // Decoder has determined the stream information; cleared by resampler
+  DECODER_MESSAGE_LOADED_STREAM_INFO = (1 << 11),
+  // Decoder is done (either through a faiilure or the end of the stream); cleared by decoder task
+  DECODER_MESSAGE_FINISHED = (1 << 12),
+  // Error decoding the file; cleared by get_state() by decoder task
+  DECODER_MESSAGE_ERROR = (1 << 13),
 
-  ALL_BITS = 0xfffff,  // 24 total bits available in an event group
+  // Resampler is done (either through a failure or the end of the stream); cleared by resampler task
+  RESAMPLER_MESSAGE_FINISHED = (1 << 17),
+  // Error resampling the file; cleared by get_state()
+  RESAMPLER_MESSAGE_ERROR = (1 << 18),
+
+  // Cleared by respective tasks
+  FINISHED_BITS = READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED,
+  UNFINISHED_BITS = ~(FINISHED_BITS | 0xff000000),  // Only 24 bits are valid for the event group, so make sure first 8
+                                                    // bits of uint32 are not set; cleared by stop()
 };
 
 AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type) {
@@ -222,14 +239,13 @@ AudioPipelineState AudioPipeline::get_state() {
 esp_err_t AudioPipeline::stop() {
   xEventGroupSetBits(this->event_group_, PIPELINE_COMMAND_STOP);
 
-  uint32_t event_group_bits = xEventGroupWaitBits(
-      this->event_group_,
-      (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED),  // Bit message to read
-      pdTRUE,                                                                             // Clear the bits on exit
-      true,                                                                               // Wait for all the bits,
-      pdMS_TO_TICKS(200));                                                                // Duration to block/wait
+  uint32_t event_group_bits = xEventGroupWaitBits(this->event_group_,
+                                                  FINISHED_BITS,        // Bit message to read
+                                                  pdFALSE,              // Clear the bits on exit
+                                                  pdTRUE,               // Wait for all the bits,
+                                                  pdMS_TO_TICKS(200));  // Duration to block/wait
 
-  if (!(event_group_bits & (READER_MESSAGE_FINISHED | DECODER_MESSAGE_FINISHED | RESAMPLER_MESSAGE_FINISHED))) {
+  if (!(event_group_bits & FINISHED_BITS)) {
     // Not all bits were set, so it timed out
     return ESP_ERR_TIMEOUT;
   }
@@ -243,7 +259,7 @@ esp_err_t AudioPipeline::stop() {
   }
   this->mixer_->send_command(&command_event);
 
-  xEventGroupClearBits(this->event_group_, ALL_BITS);
+  xEventGroupClearBits(this->event_group_, UNFINISHED_BITS);
   this->reset_ring_buffers();
 
   return ESP_OK;
