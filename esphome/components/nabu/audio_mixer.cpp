@@ -140,8 +140,9 @@ void AudioMixer::mix_task_(void *params) {
   bool transfer_media = true;
 
   // Parameters to control the ducking dB reduction and its transitions
-  uint8_t target_ducking_db_reduction = 0;
-  uint8_t current_ducking_db_reduction = 0;
+  // There is a built in negative sign; e.g., reducing by 5 dB is changing the gain by -5 dB
+  int8_t target_ducking_db_reduction = 0;
+  int8_t current_ducking_db_reduction = 0;
 
   // Each step represents a change in 1 dB. Positive 1 means the dB reduction is increasing. Negative 1 means the dB
   // reduction is decreasing.
@@ -159,20 +160,24 @@ void AudioMixer::mix_task_(void *params) {
           current_ducking_db_reduction = target_ducking_db_reduction;
 
           target_ducking_db_reduction = command_event.decibel_reduction;
-          ducking_transition_samples_remaining = command_event.transition_samples;
 
           uint8_t total_ducking_steps = 0;
           if (target_ducking_db_reduction > current_ducking_db_reduction) {
             // The dB reduction level is increasing (which results in quiter audio)
-            total_ducking_steps = target_ducking_db_reduction - current_ducking_db_reduction;
+            total_ducking_steps = target_ducking_db_reduction - current_ducking_db_reduction - 1;
             db_change_per_ducking_step = 1;
           } else {
             // The dB reduction level is decreasing (which results in louder audio)
-            total_ducking_steps = current_ducking_db_reduction - target_ducking_db_reduction;
+            total_ducking_steps = current_ducking_db_reduction - target_ducking_db_reduction - 1;
             db_change_per_ducking_step = -1;
           }
+          if (total_ducking_steps > 0) {
+            ducking_transition_samples_remaining = command_event.transition_samples;
 
-          samples_per_ducking_step = ducking_transition_samples_remaining / total_ducking_steps;
+            samples_per_ducking_step = ducking_transition_samples_remaining / total_ducking_steps;
+          } else {
+            ducking_transition_samples_remaining = 0;
+          }
         }
       } else if (command_event.command == CommandEventType::PAUSE_MEDIA) {
         transfer_media = false;
@@ -223,10 +228,12 @@ void AudioMixer::mix_task_(void *params) {
               }
               size_t samples_left_to_duck = std::min(samples_left_in_step, samples_read);
 
+              size_t total_samples_ducked = 0;
+
               while (samples_left_to_duck > 0) {
+                // Ensure we only point to valid index for our Q15 int16 scaling factor table
                 uint8_t safe_db_reduction_index =
                     clamp<uint8_t>(current_ducking_db_reduction, 0, decibel_reduction_q15_table.size() - 1);
-
 #if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
                 dsps_mulc_s16_ae32(current_media_buffer, current_combination_buffer, samples_left_to_duck,
                                    decibel_reduction_q15_table[safe_db_reduction_index], 1, 1);
@@ -240,6 +247,8 @@ void AudioMixer::mix_task_(void *params) {
                 samples_read -= samples_left_to_duck;
                 samples_left -= samples_left_to_duck;
 
+                total_samples_ducked += samples_left_to_duck;
+
                 samples_left_in_step = samples_left % samples_per_ducking_step;
                 if (samples_left_in_step == 0) {
                   // Start of a new step
@@ -249,7 +258,7 @@ void AudioMixer::mix_task_(void *params) {
                 samples_left_to_duck = std::min(samples_left_in_step, samples_read);
               }
 
-              std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
+              std::memcpy((void *) media_buffer, (void *) combination_buffer, total_samples_ducked * sizeof(int16_t));
             } else if (target_ducking_db_reduction > 0) {
               // Ducking reduction, but we are done transitioning
               uint8_t safe_db_reduction_index =
