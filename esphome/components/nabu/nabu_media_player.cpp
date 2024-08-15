@@ -17,10 +17,7 @@ namespace nabu {
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
 //  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
 //    speaker amp
-//  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Ducking improvements
-//    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - What do I need to give them an ESPHome id?
@@ -609,13 +606,14 @@ void NabuMediaPlayer::loop() {
   }
 }
 
-void NabuMediaPlayer::set_ducking_reduction(uint8_t decibel_reduction, float transition_duration) {
+void NabuMediaPlayer::set_ducking_reduction(uint8_t decibel_reduction, float duration) {
   if (this->audio_mixer_ != nullptr) {
     CommandEvent command_event;
     command_event.command = CommandEventType::DUCK;
     command_event.decibel_reduction = decibel_reduction;
-    command_event.transition_samples =
-        static_cast<size_t>(transition_duration * this->sample_rate_ * NUMBER_OF_CHANNELS);
+
+    // Convert the duration in seconds to number of samples, accounting for the sample rate and number of channels
+    command_event.transition_samples = static_cast<size_t>(duration * this->sample_rate_ * NUMBER_OF_CHANNELS);
     this->audio_mixer_->send_command(&command_event);
   }
 }

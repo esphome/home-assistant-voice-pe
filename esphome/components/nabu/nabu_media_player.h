@@ -56,8 +56,8 @@ class NabuMediaPlayer : public Component,
 
   /// @brief Sets the ducking level for the media stream in the mixer
   /// @param decibel_reduction (uint8_t) The dB reduction level. For example, 0 is no change, 10 is a reduction by 10 dB
-  /// @param transition_duration (float) The duration (in seconds) for transitioning to the new ducking level
-  void set_ducking_reduction(uint8_t decibel_reduction, float transition_duration = 0.0f);
+  /// @param duration (float) The duration (in seconds) for transitioning to the new ducking level
+  void set_ducking_reduction(uint8_t decibel_reduction, float duration);
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
@@ -130,9 +130,9 @@ class NabuMediaPlayer : public Component,
 
 template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
   TEMPLATABLE_VALUE(uint8_t, decibel_reduction)
-  TEMPLATABLE_VALUE(float, transition_duration)
+  TEMPLATABLE_VALUE(float, duration)
   void play(Ts... x) override {
-    this->parent_->set_ducking_reduction(this->decibel_reduction_.value(x...), this->transition_duration_.value(x...));
+    this->parent_->set_ducking_reduction(this->decibel_reduction_.value(x...), this->duration_.value(x...));
   }
 };
 
