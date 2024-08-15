@@ -2,20 +2,21 @@
 
 #ifdef USE_ESP_IDF
 
-#include "esphome/components/media_player/media_player.h"
-#include "esphome/components/i2s_audio/i2s_audio.h"
-#include "esphome/core/component.h"
-#include "esphome/core/ring_buffer.h"
-
 #include "audio_mixer.h"
 #include "audio_pipeline.h"
+
+#include "esphome/components/media_player/media_player.h"
+#include "esphome/components/i2c/i2c.h"
+#include "esphome/components/i2s_audio/i2s_audio.h"
+
+#include "esphome/core/automation.h"
+#include "esphome/core/component.h"
+#include "esphome/core/ring_buffer.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
 #include <esp_http_client.h>
-
-#include "esphome/components/i2c/i2c.h"
 
 namespace esphome {
 namespace nabu {
@@ -125,6 +126,14 @@ class NabuMediaPlayer : public Component,
 
   // The amount to change the volume on volume up/down commands
   float volume_increment_;
+};
+
+template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
+  TEMPLATABLE_VALUE(uint8_t, decibel_reduction)
+  TEMPLATABLE_VALUE(float, transition_duration)
+  void play(Ts... x) override {
+    this->parent_->set_ducking_reduction(this->decibel_reduction_.value(x...), this->transition_duration_.value(x...));
+  }
 };
 
 }  // namespace nabu
