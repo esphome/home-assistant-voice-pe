@@ -41,8 +41,8 @@ enum class CommandEventType : uint8_t {
 
 struct CommandEvent {
   CommandEventType command;
-  float ducking_ratio = 0.0;
-  size_t samples = 1;
+  uint8_t decibel_reduction;
+  size_t transition_samples = 0;
 };
 
 class AudioMixer {
@@ -103,15 +103,8 @@ class AudioMixer {
   RingBuffer *get_media_ring_buffer() { return this->media_ring_buffer_.get(); }
   RingBuffer *get_announcement_ring_buffer() { return this->announcement_ring_buffer_.get(); }
 
-  float get_ducking_ratio() { return this->ducking_ratio_; }
-
  protected:
   esp_err_t allocate_buffers_();
-
-  float ducking_ratio_{1.0f};
-  // float target_ducking_ratio_{1.0f};
-  // float starting_ducking_ratio_{1.0f};
-  // size_t ducking_transition_samples_remaining_;
 
   static void mix_task_(void *params);
   TaskHandle_t task_handle_{nullptr};

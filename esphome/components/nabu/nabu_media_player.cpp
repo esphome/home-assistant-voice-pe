@@ -15,10 +15,11 @@ namespace nabu {
 
 // TODO:
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
+//  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
+//    speaker amp
 //  - Block media commands until the bluetooth stack is disabled (will run out of memory otherwise)
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Ducking improvements
-//    - Ducking ratio probably isn't the best way to specify, as volume perception is not linear
 //    - Add a YAML action for setting the ducking level instead of requiring a lambda
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
@@ -29,7 +30,7 @@ namespace nabu {
 // Framework:
 //  - Media player that can handle two streams; one for media and one for announcements
 //    - If played together, they are mixed with the announcement stream staying at full volume
-//    - The media audio can be further ducked via the ``set_ducking_ratio`` function
+//    - The media audio can be further ducked via the ``set_ducking_reduction`` function
 //  - Each stream is handled by an ``AudioPipeline`` object with three parts/tasks
 //    - ``AudioReader`` handles reading from an HTTP source or from a PROGMEM flash set at compile time
 //    - ``AudioDecoder`` handles decoding the audio file. All formats are limited to two channels and 16 bits per sample
@@ -69,6 +70,8 @@ static const size_t QUEUE_COUNT = 20;
 static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
 static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
+
+static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
 
 static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
@@ -225,7 +228,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
   xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
   ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *buffer = allocator.allocate(2 * BUFFER_SIZE);
+  int16_t *buffer = allocator.allocate(NUMBER_OF_CHANNELS * BUFFER_SIZE);
 
   if (buffer == nullptr) {
     event.type = EventType::WARNING;
@@ -317,7 +320,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
     }
 
     size_t delay_ms = 10;
-    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * 2;  // *2 for stereo
+    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * NUMBER_OF_CHANNELS;
     size_t bytes_read = 0;
 
     bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
@@ -576,8 +579,6 @@ void NabuMediaPlayer::loop() {
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
     if (this->is_idle_muted_ && !this->is_muted_) {
-      // TODO: Idle muting can cut off parts of the audio. Replace with eventual XMOS command to cut power to speaker
-      // amp
       // this->unmute_();
       this->is_idle_muted_ = false;
     }
@@ -608,12 +609,13 @@ void NabuMediaPlayer::loop() {
   }
 }
 
-void NabuMediaPlayer::set_ducking_ratio(float ducking_ratio, float duration) {
+void NabuMediaPlayer::set_ducking_reduction(uint8_t decibel_reduction, float transition_duration) {
   if (this->audio_mixer_ != nullptr) {
     CommandEvent command_event;
     command_event.command = CommandEventType::DUCK;
-    command_event.ducking_ratio = ducking_ratio;
-    command_event.samples = 48000*2;
+    command_event.decibel_reduction = decibel_reduction;
+    command_event.transition_samples =
+        static_cast<size_t>(transition_duration * this->sample_rate_ * NUMBER_OF_CHANNELS);
     this->audio_mixer_->send_command(&command_event);
   }
 }

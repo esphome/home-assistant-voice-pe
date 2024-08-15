@@ -53,7 +53,10 @@ class NabuMediaPlayer : public Component,
   media_player::MediaPlayerTraits get_traits() override;
   bool is_muted() const override { return this->is_muted_; }
 
-  void set_ducking_ratio(float ducking_ratio, float duration = 1.0f);
+  /// @brief Sets the ducking level for the media stream in the mixer
+  /// @param decibel_reduction (uint8_t) The dB reduction level. For example, 0 is no change, 10 is a reduction by 10 dB
+  /// @param transition_duration (float) The duration (in seconds) for transitioning to the new ducking level
+  void set_ducking_reduction(uint8_t decibel_reduction, float transition_duration = 0.0f);
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
