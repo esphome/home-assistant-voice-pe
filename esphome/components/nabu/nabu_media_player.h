@@ -99,7 +99,7 @@ class NabuMediaPlayer : public Component,
   std::unique_ptr<AudioMixer> audio_mixer_;
 
   // Monitors the mixer task
-  void watch_();
+  void watch_mixer_();
 
   // Starts the ``type`` pipeline with a ``url`` or file. Starts the mixer, pipeline, and speaker tasks if necessary.
   // Unpauses if starting media in paused state
