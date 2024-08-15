@@ -177,10 +177,13 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_off:
       - delay: 200ms
-      - lambda: id(nabu_media_player).set_ducking_ratio(1);
+      - nabu.set_ducking:
+          decibel_reduction: 0
+          duration: 1.0s
       - script.execute: control_leds
     on_turn_on:
-      - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
+      - nabu.set_ducking:
+          decibel_reduction: 20
       - script.execute: ring_timer
       - script.execute: control_leds
       - delay: 15min
@@ -1117,7 +1120,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: kahrendt-20240810-media-player-cleanup
     components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word]
     refresh: 0s
 
@@ -1236,7 +1239,9 @@ voice_assistant:
           - script.execute: control_leds
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
-    - lambda: id(nabu_media_player).set_ducking_ratio(0.25);
+    - nabu.set_ducking:
+        decibel_reduction: 20   # Number of dB quieter; higher implies more quiet, 0 implies full volume
+        duration: 0.0s          # The duration of the transition (default is 0)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -1254,7 +1259,9 @@ voice_assistant:
     - wait_until:
         not:
           voice_assistant.is_running:
-    - lambda: id(nabu_media_player).set_ducking_ratio(1.0);
+    - nabu.set_ducking:
+        decibel_reduction: 0   # 0 dB means no reduction
+        duration: 1.0s
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_timer_finished:

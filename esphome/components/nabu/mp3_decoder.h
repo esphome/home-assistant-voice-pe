@@ -1,3 +1,5 @@
+#ifdef USE_ESP_IDF
+
 #ifndef MP3_DECODER_H_
 #define MP3_DECODER_H_
 
@@ -45,9 +47,7 @@ typedef enum { MPEG1 = 0, MPEG2 = 1, MPEG25 = 2 } MPEGVersion;
 
 typedef long long Word64;
 
-static __inline Word64 MADD64(Word64 sum64, int x, int y) {
-  return (sum64 + ((long long)x * y));
-}
+static __inline Word64 MADD64(Word64 sum64, int x, int y) { return (sum64 + ((long long) x * y)); }
 
 static __inline int MULSHIFT32(int x, int y) {
   /* important rules for smull RdLo, RdHi, Rm, Rs:
@@ -76,12 +76,12 @@ static __inline Word64 SAR64(Word64 x, int n) { return x >> n; }
 static __inline int CLZ(int x) { return __builtin_clz(x); }
 
 /* clip to range [-2^n, 2^n - 1] */
-#define CLIP_2N(y, n)                                                          \
-  {                                                                            \
-    int sign = (y) >> 31;                                                      \
-    if (sign != (y) >> (n)) {                                                  \
-      (y) = sign ^ ((1 << (n)) - 1);                                           \
-    }                                                                          \
+#define CLIP_2N(y, n) \
+  { \
+    int sign = (y) >> 31; \
+    if (sign != (y) >> (n)) { \
+      (y) = sign ^ ((1 << (n)) - 1); \
+    } \
   }
 
 #define SIBYTES_MPEG1_MONO 17
@@ -94,15 +94,13 @@ static __inline int CLZ(int x) { return __builtin_clz(x); }
 #define POW43_FRACBITS_HIGH 12
 
 #define DQ_FRACBITS_OUT 25 /* number of fraction bits in output of dequant */
-#define IMDCT_SCALE 2 /* additional scaling (by sqrt(2)) for fast IMDCT36 */
+#define IMDCT_SCALE 2      /* additional scaling (by sqrt(2)) for fast IMDCT36 */
 
 #define HUFF_PAIRTABS 32
 #define BLOCK_SIZE 18
 #define NBANDS 32
-#define MAX_REORDER_SAMPS                                                      \
-  ((192 - 126) *                                                               \
-   3) /* largest critical band for short blocks (see sfBandTable) */
-#define VBUF_LENGTH (17 * 2 * NBANDS) /* for double-sized vbuf FIFO */
+#define MAX_REORDER_SAMPS ((192 - 126) * 3) /* largest critical band for short blocks (see sfBandTable) */
+#define VBUF_LENGTH (17 * 2 * NBANDS)       /* for double-sized vbuf FIFO */
 
 /* map these to the corresponding 2-bit values in the frame header */
 typedef enum {
@@ -110,9 +108,9 @@ typedef enum {
                     different # of bits */
   Joint = 0x01,  /* coupled channels - layer III: mix of M-S and intensity,
                     Layers I/II: intensity and direct coding only */
-  Dual = 0x02, /* two independent channels, L and R always have exactly 1/2 the
-                  total bitrate */
-  Mono = 0x03  /* one channel */
+  Dual = 0x02,   /* two independent channels, L and R always have exactly 1/2 the
+                    total bitrate */
+  Mono = 0x03    /* one channel */
 } StereoMode;
 
 typedef struct _SFBandTable {
@@ -146,22 +144,22 @@ typedef struct _FrameHeader {
 } FrameHeader;
 
 typedef struct _SideInfoSub {
-  int part23Length; /* number of bits in main data */
-  int nBigvals; /* 2x this = first set of Huffman cw's (maximum amplitude can be
-                   > 1) */
-  int globalGain; /* overall gain for dequantizer */
-  int sfCompress; /* unpacked to figure out number of bits in scale factors */
-  int winSwitchFlag; /* window switching flag */
-  int blockType;     /* block type */
-  int mixedBlock; /* 0 = regular block (all short or long), 1 = mixed block */
-  int tableSelect[3];  /* index of Huffman tables for the big values regions */
-  int subBlockGain[3]; /* subblock gain offset, relative to global gain */
-  int region0Count; /* 1+region0Count = num scale factor bands in first region
-                       of bigvals */
-  int region1Count; /* 1+region1Count = num scale factor bands in second region
-                       of bigvals */
-  int preFlag;      /* for optional high frequency boost */
-  int sfactScale;   /* scaling of the scalefactors */
+  int part23Length;      /* number of bits in main data */
+  int nBigvals;          /* 2x this = first set of Huffman cw's (maximum amplitude can be
+                            > 1) */
+  int globalGain;        /* overall gain for dequantizer */
+  int sfCompress;        /* unpacked to figure out number of bits in scale factors */
+  int winSwitchFlag;     /* window switching flag */
+  int blockType;         /* block type */
+  int mixedBlock;        /* 0 = regular block (all short or long), 1 = mixed block */
+  int tableSelect[3];    /* index of Huffman tables for the big values regions */
+  int subBlockGain[3];   /* subblock gain offset, relative to global gain */
+  int region0Count;      /* 1+region0Count = num scale factor bands in first region
+                            of bigvals */
+  int region1Count;      /* 1+region1Count = num scale factor bands in second region
+                            of bigvals */
+  int preFlag;           /* for optional high frequency boost */
+  int sfactScale;        /* scaling of the scalefactors */
   int count1TableSelect; /* index of Huffman table for quad codewords */
 } SideInfoSub;
 
@@ -189,20 +187,12 @@ typedef struct _DequantInfo {
 typedef struct _HuffmanInfo {
   int huffDecBuf[MAX_NCHAN][MAX_NSAMP]; /* used both for decoded Huffman values
                                            and dequantized coefficients */
-  int nonZeroBound[MAX_NCHAN]; /* number of coeffs in huffDecBuf[ch] which can
-                                  be > 0 */
-  int gb[MAX_NCHAN]; /* minimum number of guard bits in huffDecBuf[ch] */
+  int nonZeroBound[MAX_NCHAN];          /* number of coeffs in huffDecBuf[ch] which can
+                                           be > 0 */
+  int gb[MAX_NCHAN];                    /* minimum number of guard bits in huffDecBuf[ch] */
 } HuffmanInfo;
 
-typedef enum _HuffTabType {
-  noBits,
-  oneShot,
-  loopNoLinbits,
-  loopLinbits,
-  quadA,
-  quadB,
-  invalidTab
-} HuffTabType;
+typedef enum _HuffTabType { noBits, oneShot, loopNoLinbits, loopLinbits, quadA, quadB, invalidTab } HuffTabType;
 
 typedef struct _HuffTabLookup {
   int linBits;
@@ -213,8 +203,8 @@ typedef struct _IMDCTInfo {
   int outBuf[MAX_NCHAN][BLOCK_SIZE][NBANDS]; /* output of IMDCT */
   int overBuf[MAX_NCHAN][MAX_NSAMP / 2];     /* overlap-add buffer (by symmetry,
                                                 only need 1/2 size) */
-  int numPrevIMDCT[MAX_NCHAN]; /* how many IMDCT's calculated in this channel on
-                                  prev. granule */
+  int numPrevIMDCT[MAX_NCHAN];               /* how many IMDCT's calculated in this channel on
+                                                prev. granule */
   int prevType[MAX_NCHAN];
   int prevWinSwitch[MAX_NCHAN];
   int gb[MAX_NCHAN];
@@ -254,10 +244,9 @@ typedef struct _ScaleFactorInfo {
  * memmove on the last 15 blocks to shift them down one, a hardware style FIFO)
  */
 typedef struct _SubbandInfo {
-  int vbuf[MAX_NCHAN *
-           VBUF_LENGTH]; /* vbuf for fast DCT-based synthesis PQMF - double size
-                            for speed (no modulo indexing) */
-  int vindex;            /* internal index for tracking position in vbuf */
+  int vbuf[MAX_NCHAN * VBUF_LENGTH]; /* vbuf for fast DCT-based synthesis PQMF - double size
+                                        for speed (no modulo indexing) */
+  int vindex;                        /* internal index for tracking position in vbuf */
 } SubbandInfo;
 
 /* bitstream.c */
@@ -266,23 +255,18 @@ unsigned int GetBits(BitStreamInfo *bsi, int nBits);
 int CalcBitsUsed(BitStreamInfo *bsi, unsigned char *startBuf, int startOffset);
 
 /* dequant.c, dqchan.c, stproc.c */
-int DequantChannel(int *sampleBuf, int *workBuf, int *nonZeroBound,
-                   FrameHeader *fh, SideInfoSub *sis, ScaleFactorInfoSub *sfis,
-                   CriticalBandInfo *cbi);
+int DequantChannel(int *sampleBuf, int *workBuf, int *nonZeroBound, FrameHeader *fh, SideInfoSub *sis,
+                   ScaleFactorInfoSub *sfis, CriticalBandInfo *cbi);
 void MidSideProc(int x[MAX_NCHAN][MAX_NSAMP], int nSamps, int mOut[2]);
-void IntensityProcMPEG1(int x[MAX_NCHAN][MAX_NSAMP], int nSamps,
-                        FrameHeader *fh, ScaleFactorInfoSub *sfis,
-                        CriticalBandInfo *cbi, int midSideFlag, int mixFlag,
-                        int mOut[2]);
-void IntensityProcMPEG2(int x[MAX_NCHAN][MAX_NSAMP], int nSamps,
-                        FrameHeader *fh, ScaleFactorInfoSub *sfis,
-                        CriticalBandInfo *cbi, ScaleFactorJS *sfjs,
-                        int midSideFlag, int mixFlag, int mOut[2]);
+void IntensityProcMPEG1(int x[MAX_NCHAN][MAX_NSAMP], int nSamps, FrameHeader *fh, ScaleFactorInfoSub *sfis,
+                        CriticalBandInfo *cbi, int midSideFlag, int mixFlag, int mOut[2]);
+void IntensityProcMPEG2(int x[MAX_NCHAN][MAX_NSAMP], int nSamps, FrameHeader *fh, ScaleFactorInfoSub *sfis,
+                        CriticalBandInfo *cbi, ScaleFactorJS *sfjs, int midSideFlag, int mixFlag, int mOut[2]);
 
 /* dct32.c */
 // about 1 ms faster in RAM, but very large
 void FDCT32(int *x, int *d, int offset, int oddBlock,
-            int gb); // __attribute__ ((section (".data")));
+            int gb);  // __attribute__ ((section (".data")));
 
 /* hufftabs.c */
 extern const HuffTabLookup huffTabLookup[HUFF_PAIRTABS];
@@ -344,12 +328,10 @@ void FreeBuffers(MP3DecInfo *mp3DecInfo);
 int CheckPadBit(MP3DecInfo *mp3DecInfo);
 int UnpackFrameHeader(MP3DecInfo *mp3DecInfo, unsigned char *buf);
 int UnpackSideInfo(MP3DecInfo *mp3DecInfo, unsigned char *buf);
-int DecodeHuffman(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset,
-                  int huffBlockBits, int gr, int ch);
+int DecodeHuffman(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int huffBlockBits, int gr, int ch);
 int Dequantize(MP3DecInfo *mp3DecInfo, int gr);
 int IMDCT(MP3DecInfo *mp3DecInfo, int gr, int ch);
-int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, unsigned char *buf,
-                       int *bitOffset, int bitsAvail, int gr, int ch);
+int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffset, int bitsAvail, int gr, int ch);
 int Subband(MP3DecInfo *mp3DecInfo, short *pcmBuf);
 
 extern const int samplerateTab[3][3];
@@ -393,12 +375,11 @@ typedef struct _MP3FrameInfo {
 /* public API */
 HMP3Decoder MP3InitDecoder(void);
 void MP3FreeDecoder(HMP3Decoder hMP3Decoder);
-int MP3Decode(HMP3Decoder hMP3Decoder, unsigned char **inbuf, int *bytesLeft,
-              short *outbuf, int useSize);
+int MP3Decode(HMP3Decoder hMP3Decoder, unsigned char **inbuf, int *bytesLeft, short *outbuf, int useSize);
 
 void MP3GetLastFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo);
-int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo,
-                        unsigned char *buf);
+int MP3GetNextFrameInfo(HMP3Decoder hMP3Decoder, MP3FrameInfo *mp3FrameInfo, unsigned char *buf);
 int MP3FindSyncWord(unsigned char *buf, int nBytes);
 
-#endif // MP3_DECODER_H_
+#endif  // MP3_DECODER_H_
+#endif

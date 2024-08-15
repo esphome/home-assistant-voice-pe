@@ -1,3 +1,5 @@
+#ifdef USE_ESP_IDF
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -432,3 +434,4 @@ int64_t FLACDecoder::read_rice_sint(uint8_t param) {
 void FLACDecoder::align_to_byte() { this->bit_buffer_length_ -= (this->bit_buffer_length_ % 8); }  // align_to_byte
 
 }  // namespace flac
+#endif

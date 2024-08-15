@@ -41,13 +41,12 @@ enum class CommandEventType : uint8_t {
 
 struct CommandEvent {
   CommandEventType command;
-  float ducking_ratio = 0.0;
+  uint8_t decibel_reduction;
+  size_t transition_samples = 0;
 };
 
 class AudioMixer {
  public:
-  AudioMixer();
-
   /// @brief Returns the number of bytes available to read from the ring buffer
   size_t available() { return this->output_ring_buffer_->available(); }
 
@@ -55,11 +54,15 @@ class AudioMixer {
     return xQueueSend(this->command_queue_, command, ticks_to_wait);
   }
 
+  BaseType_t send_command_to_front(CommandEvent *command, TickType_t ticks_to_wait = portMAX_DELAY) {
+    return xQueueSendToFront(this->command_queue_, command, ticks_to_wait);
+  }
+
   BaseType_t read_event(TaskEvent *event, TickType_t ticks_to_wait = 0) {
     return xQueueReceive(this->event_queue_, event, ticks_to_wait);
   }
 
-  void start(const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(const std::string &task_name, UBaseType_t priority = 1);
 
   void stop() {
     vTaskDelete(this->task_handle_);
@@ -101,6 +104,9 @@ class AudioMixer {
   RingBuffer *get_announcement_ring_buffer() { return this->announcement_ring_buffer_.get(); }
 
  protected:
+  esp_err_t allocate_buffers_();
+
+  static void mix_task_(void *params);
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *stack_buffer_{nullptr};
@@ -108,8 +114,6 @@ class AudioMixer {
   std::unique_ptr<RingBuffer> output_ring_buffer_;
   QueueHandle_t event_queue_;
   QueueHandle_t command_queue_;
-
-  static void mix_task_(void *params);
 
   std::unique_ptr<RingBuffer> media_ring_buffer_;
   std::unique_ptr<RingBuffer> announcement_ring_buffer_;

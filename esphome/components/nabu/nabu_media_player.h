@@ -2,20 +2,21 @@
 
 #ifdef USE_ESP_IDF
 
-#include "esphome/components/media_player/media_player.h"
-#include "esphome/components/i2s_audio/i2s_audio.h"
-#include "esphome/core/component.h"
-#include "esphome/core/ring_buffer.h"
-
 #include "audio_mixer.h"
 #include "audio_pipeline.h"
+
+#include "esphome/components/media_player/media_player.h"
+#include "esphome/components/i2c/i2c.h"
+#include "esphome/components/i2s_audio/i2s_audio.h"
+
+#include "esphome/core/automation.h"
+#include "esphome/core/component.h"
+#include "esphome/core/ring_buffer.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
 #include <esp_http_client.h>
-
-#include "esphome/components/i2c/i2c.h"
 
 namespace esphome {
 namespace nabu {
@@ -53,11 +54,16 @@ class NabuMediaPlayer : public Component,
   media_player::MediaPlayerTraits get_traits() override;
   bool is_muted() const override { return this->is_muted_; }
 
-  void set_ducking_ratio(float ducking_ratio) override;
+  /// @brief Sets the ducking level for the media stream in the mixer
+  /// @param decibel_reduction (uint8_t) The dB reduction level. For example, 0 is no change, 10 is a reduction by 10 dB
+  /// @param duration (float) The duration (in seconds) for transitioning to the new ducking level
+  void set_ducking_reduction(uint8_t decibel_reduction, float duration);
 
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
+
+  void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
 
  protected:
   // Receives commands from HA or from the voice assistant component
@@ -93,7 +99,11 @@ class NabuMediaPlayer : public Component,
   std::unique_ptr<AudioMixer> audio_mixer_;
 
   // Monitors the mixer task
-  void watch_();
+  void watch_mixer_();
+
+  // Starts the ``type`` pipeline with a ``url`` or file. Starts the mixer, pipeline, and speaker tasks if necessary.
+  // Unpauses if starting media in paused state
+  esp_err_t start_pipeline_(AudioPipelineType type, bool url);
 
   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
   AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};
@@ -113,6 +123,17 @@ class NabuMediaPlayer : public Component,
 
   // We mute the DAC whenever there is no audio playback to avoid speaker hiss
   bool is_idle_muted_{false};
+
+  // The amount to change the volume on volume up/down commands
+  float volume_increment_;
+};
+
+template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
+  TEMPLATABLE_VALUE(uint8_t, decibel_reduction)
+  TEMPLATABLE_VALUE(float, duration)
+  void play(Ts... x) override {
+    this->parent_->set_ducking_reduction(this->decibel_reduction_.value(x...), this->duration_.value(x...));
+  }
 };
 
 }  // namespace nabu

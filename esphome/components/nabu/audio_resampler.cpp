@@ -11,19 +11,15 @@ static const size_t NUM_TAPS = 32;
 static const size_t NUM_FILTERS = 32;
 static const bool USE_PRE_POST_FILTER = true;
 
+// These output parameters are currently hardcoded in the elements further down the pipeline (mixer and speaker)
+static const uint8_t OUTPUT_CHANNELS = 2;
+static const uint8_t OUTPUT_BITS_PER_SAMPLE = 16;
+
 AudioResampler::AudioResampler(RingBuffer *input_ring_buffer, RingBuffer *output_ring_buffer,
                                size_t internal_buffer_samples) {
   this->input_ring_buffer_ = input_ring_buffer;
   this->output_ring_buffer_ = output_ring_buffer;
   this->internal_buffer_samples_ = internal_buffer_samples;
-
-  ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  this->input_buffer_ = int16_allocator.allocate(internal_buffer_samples);
-  this->output_buffer_ = int16_allocator.allocate(internal_buffer_samples);
-
-  ExternalRAMAllocator<float> float_allocator(ExternalRAMAllocator<float>::ALLOW_FAILURE);
-  this->float_input_buffer_ = float_allocator.allocate(internal_buffer_samples);
-  this->float_output_buffer_ = float_allocator.allocate(internal_buffer_samples);
 }
 
 AudioResampler::~AudioResampler() {
@@ -50,7 +46,36 @@ AudioResampler::~AudioResampler() {
   // dsps_fird_s16_aexx_free(&this->fir_filter_);
 }
 
-bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate) {
+esp_err_t AudioResampler::allocate_buffers_() {
+  ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+  ExternalRAMAllocator<float> float_allocator(ExternalRAMAllocator<float>::ALLOW_FAILURE);
+
+  if (this->input_buffer_ == nullptr)
+    this->input_buffer_ = int16_allocator.allocate(this->internal_buffer_samples_);
+  if (this->output_buffer_ == nullptr)
+    this->output_buffer_ = int16_allocator.allocate(this->internal_buffer_samples_);
+
+  if (this->float_input_buffer_ == nullptr)
+    this->float_input_buffer_ = float_allocator.allocate(this->internal_buffer_samples_);
+
+  if (this->float_output_buffer_ == nullptr)
+    this->float_output_buffer_ = float_allocator.allocate(this->internal_buffer_samples_);
+
+  if ((this->input_buffer_ == nullptr) || (this->output_buffer_ == nullptr) || (this->float_input_buffer_ == nullptr) ||
+      (this->float_output_buffer_ == nullptr)) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
+esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate,
+                                ResampleInfo &resample_info) {
+  esp_err_t err = this->allocate_buffers_();
+  if (err != ESP_OK) {
+    return err;
+  }
+
   this->stream_info_ = stream_info;
 
   this->input_buffer_current_ = this->input_buffer_;
@@ -63,16 +88,14 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
   this->float_output_buffer_current_ = this->float_output_buffer_;
   this->float_output_buffer_length_ = 0;
 
-  this->needs_mono_to_stereo_ = (stream_info.channels != 2);
+  resample_info.mono_to_stereo = (stream_info.channels != 2);
 
-  if ((stream_info.channels > 2) || (stream_info_.bits_per_sample != 16)) {
-    // TODO: Make these values configurable
-    return false;
+  if ((stream_info.channels > OUTPUT_CHANNELS) || (stream_info_.bits_per_sample != OUTPUT_BITS_PER_SAMPLE)) {
+    return ESP_ERR_NOT_SUPPORTED;
   }
 
   if (stream_info.channels > 0) {
     this->channel_factor_ = 2 / stream_info.channels;
-    printf("Converting %d channels to 2 channels\n", stream_info.channels);
   }
 
   if (stream_info.sample_rate != target_sample_rate) {
@@ -94,11 +117,9 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
     {
       int flags = 0;
 
-      this->needs_resampling_ = true;
+      resample_info.resample = true;
 
       this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(stream_info.sample_rate);
-
-      printf("Resampling from %d Hz to %d Hz\n", stream_info.sample_rate, target_sample_rate);
 
       if (this->sample_ratio_ < 1.0) {
         this->lowpass_ratio_ -= (10.24 / 16);
@@ -144,10 +165,11 @@ bool AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t targe
       resampleAdvancePosition(this->resampler_, NUM_TAPS / 2.0);
     }
   } else {
-    this->needs_resampling_ = false;
+    resample_info.resample = false;
   }
 
-  return true;
+  this->resample_info_ = resample_info;
+  return ESP_OK;
 }
 
 AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
@@ -206,9 +228,9 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
     this->input_buffer_length_ += bytes_read;
   }
 
-  if (this->needs_resampling_) {
+  if (this->resample_info_.resample) {
     if (this->decimation_filter_) {
-      if (this->needs_mono_to_stereo_) {
+      if (this->resample_info_.mono_to_stereo) {
         if (this->input_buffer_length_ > 0) {
           size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
 
@@ -327,7 +349,7 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
     this->output_buffer_length_ += bytes_to_transfer;
   }
 
-  if (this->needs_mono_to_stereo_) {
+  if (this->resample_info_.mono_to_stereo) {
     // Convert mono to stereo
     for (int i = this->output_buffer_length_ / (sizeof(int16_t)) - 1; i >= 0; --i) {
       this->output_buffer_[2 * i] = this->output_buffer_[i];

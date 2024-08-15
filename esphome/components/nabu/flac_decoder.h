@@ -4,6 +4,8 @@
 // Uses some small parts from: https://github.com/schreibfaul1/ESP32-audioI2S/
 // See also: https://xiph.org/flac/format.html
 
+#ifdef USE_ESP_IDF
+
 #ifndef _FLAC_DECODER_H
 #define _FLAC_DECODER_H
 
@@ -173,4 +175,5 @@ class FLACDecoder {
 
 }  // namespace flac
 
+#endif
 #endif

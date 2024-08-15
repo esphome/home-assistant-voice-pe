@@ -7,10 +7,12 @@ from magic import Magic
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome import external_files, pins
+
+from esphome import automation, external_files, pins
 from esphome.components import esp32, i2c, media_player
 from esphome.components.media_player import MediaFile, MEDIA_FILE_TYPE_ENUM
 from esphome.const import (
+    CONF_DURATION,
     CONF_FILE,
     CONF_ID,
     CONF_PATH,
@@ -45,8 +47,11 @@ DOMAIN = "file"
 TYPE_LOCAL = "local"
 TYPE_WEB = "web"
 
+CONF_DECIBEL_REDUCTION = "decibel_reduction"
+
 CONF_FILES = "files"
 CONF_SAMPLE_RATE = "sample_rate"
+CONF_VOLUME_INCREMENT = "volume_increment"
 
 nabu_ns = cg.esphome_ns.namespace("nabu")
 NabuMediaPlayer = nabu_ns.class_("NabuMediaPlayer")
@@ -58,14 +63,10 @@ NabuMediaPlayer = nabu_ns.class_(
     I2SAudioOut,
     i2c.I2CDevice,
 )
-# MediaFile = nabu_ns.struct("MediaFile")
-# MediaFileType = nabu_ns.enum("MediaFileType", is_class=True)
-# MEDIA_FILE_TYPE_ENUM = {
-#     "NONE": MediaFileType.NONE,
-#     "WAV": MediaFileType.WAV,
-#     "MP3": MediaFileType.MP3,
-#     "FLAC": MediaFileType.FLAC,
-# }
+
+DuckingSetAction = nabu_ns.class_(
+    "DuckingSetAction", automation.Action, cg.Parented.template(NabuMediaPlayer)
+)
 
 
 def _compute_local_file_path(value: dict) -> Path:
@@ -181,6 +182,7 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
         ),
+        cv.Optional(CONF_VOLUME_INCREMENT, default=0.05): cv.percentage,
         cv.Optional(CONF_FILES): cv.ensure_list(MEDIA_FILE_TYPE_SCHEMA),
     }
 ).extend(i2c.i2c_device_schema(0x18))
@@ -191,9 +193,6 @@ async def to_code(config):
         name="esp-dsp",
         repo="https://github.com/kahrendt/esp-dsp",
         ref="no-round-dot-product",
-        # ref="filename-fix",
-        # repo="https://github.com/espressif/esp-dsp",
-        # ref="v1.3.0",
     )
     cg.add_build_flag("-Wno-narrowing")  # Necessary to compile helix mp3 decoder
 
@@ -207,8 +206,9 @@ async def to_code(config):
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
 
+    cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
+
     if files_list := config.get(CONF_FILES):
-        media_files = []
         for file_config in files_list:
             conf_file = file_config[CONF_FILE]
             file_source = conf_file[CONF_TYPE]
@@ -253,6 +253,30 @@ async def to_code(config):
             cg.new_Pvariable(
                 file_config[CONF_ID],
                 media_files_struct,
-                # prog_arr,
-                # media_file_type,
             )
+
+
+DUCKING_SET_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(NabuMediaPlayer),
+        cv.Required(CONF_DECIBEL_REDUCTION): cv.templatable(
+            cv.int_range(min=0, max=51)
+        ),
+        cv.Optional(CONF_DURATION, default="0.0s"): cv.templatable(cv.positive_time_period_seconds),
+    }
+)
+
+
+@automation.register_action("nabu.set_ducking", DuckingSetAction, DUCKING_SET_SCHEMA)
+async def ducking_set_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    decibel_reduction = await cg.templatable(
+        config[CONF_DECIBEL_REDUCTION], args, cg.uint8
+    )
+    cg.add(var.set_decibel_reduction(decibel_reduction))
+    duration = await cg.templatable(
+        config[CONF_DURATION], args, cg.float_
+    )
+    cg.add(var.set_duration(duration))
+    return var

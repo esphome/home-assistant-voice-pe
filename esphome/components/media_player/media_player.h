@@ -43,13 +43,13 @@ enum class MediaFileType : uint8_t {
   MP3,
   FLAC,
 };
+const char *media_player_file_type_to_string(MediaFileType file_type);
 
 struct MediaFile {
   const uint8_t *data;
   size_t length;
   MediaFileType file_type;
 };
-
 
 class MediaPlayer;
 
@@ -85,7 +85,7 @@ class MediaPlayerCall {
   const optional<std::string> &get_media_url() const { return media_url_; }
   const optional<float> &get_volume() const { return volume_; }
   const optional<bool> &get_announcement() const { return announcement_; }
-  const optional<MediaFile*> &get_local_media_file() const { return media_file_; }
+  const optional<MediaFile *> &get_local_media_file() const { return media_file_; }
 
  protected:
   void validate_();
@@ -94,7 +94,7 @@ class MediaPlayerCall {
   optional<std::string> media_url_;
   optional<float> volume_;
   optional<bool> announcement_;
-  optional<MediaFile*> media_file_;
+  optional<MediaFile *> media_file_;
 };
 
 class MediaPlayer : public EntityBase {
@@ -111,8 +111,6 @@ class MediaPlayer : public EntityBase {
   virtual bool is_muted() const { return false; }
 
   virtual MediaPlayerTraits get_traits() = 0;
-
-  virtual void set_ducking_ratio(float ducking_ratio) { return;}
 
  protected:
   friend MediaPlayerCall;
