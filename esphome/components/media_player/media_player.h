@@ -51,8 +51,6 @@ struct MediaFile {
   MediaFileType file_type;
 };
 
-<<<<<<< Updated upstream
-=======
 enum class MediaPlayerFormatPurpose : uint8_t {
   DEFAULT = 0,
   ANNOUNCEMENT,
@@ -64,9 +62,6 @@ struct MediaPlayerSupportedFormat {
   uint32_t num_channels;
   MediaPlayerFormatPurpose purpose;
 };
-
-
->>>>>>> Stashed changes
 class MediaPlayer;
 
 class MediaPlayerTraits {
