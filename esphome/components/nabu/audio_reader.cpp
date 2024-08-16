@@ -68,6 +68,7 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
       .cert_pem = nullptr,
       .disable_auto_redirect = false,
       .max_redirection_count = 10,
+      .keep_alive_enable = true,
   };
   this->client_ = esp_http_client_init(&config);
 
@@ -141,7 +142,8 @@ AudioReaderState AudioReader::http_read_() {
   if (received_len > 0) {
     this->output_ring_buffer_->write((void *) this->transfer_buffer_, received_len);
   } else if (received_len < 0) {
-    // TODO: Error situation. Should we mark failed..?
+    this->cleanup_connection_();
+    return AudioReaderState::FAILED;
   }
 
   if (esp_http_client_is_complete_data_received(this->client_)) {
