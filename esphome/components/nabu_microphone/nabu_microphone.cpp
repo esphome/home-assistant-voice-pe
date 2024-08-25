@@ -170,7 +170,7 @@ void NabuMicrophone::read_task_(void *params) {
 
       // Note, if we have 16 bit samples incoming, this requires modification
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
-      int32_t *buffer = allocator.allocate(DMA_SAMPLES);
+      int32_t *buffer = allocator.allocate(CHANNELS*DMA_SAMPLES);
 
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_2_samples;
@@ -204,7 +204,7 @@ void NabuMicrophone::read_task_(void *params) {
             }
 
             size_t bytes_read;
-            esp_err_t err = i2s_read(this_microphone->parent_->get_port(), buffer, DMA_SAMPLES * sizeof(int32_t),
+            esp_err_t err = i2s_read(this_microphone->parent_->get_port(), buffer, CHANNELS*DMA_SAMPLES * sizeof(int32_t),
                                      &bytes_read, (10 / portTICK_PERIOD_MS));
             if (err != ESP_OK) {
               event.type = i2s_audio::TaskEventType::WARNING;
