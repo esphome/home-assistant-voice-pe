@@ -124,11 +124,11 @@ class VoiceAssistant : public Component {
     uint32_t flags = 0;
     flags |= VoiceAssistantFeature::FEATURE_VOICE_ASSISTANT;
     flags |= VoiceAssistantFeature::FEATURE_API_AUDIO;
-    // TODO: Fix this hack! This makes the TTS response be sent as a wav file rather than an mp3 for speed
-    // #ifdef USE_SPEAKER if (this->speaker_ != nullptr) {
-    flags |= VoiceAssistantFeature::FEATURE_SPEAKER;
-    // }
-    // #endif
+#ifdef USE_SPEAKER
+    if (this->speaker_ != nullptr) {
+      flags |= VoiceAssistantFeature::FEATURE_SPEAKER;
+    }
+#endif
 
     if (this->has_timers_) {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
@@ -308,7 +308,7 @@ class VoiceAssistant : public Component {
   bool last_vad_state_;
 #endif
 #endif
-};
+};  // namespace voice_assistant
 
 template<typename... Ts> class StartAction : public Action<Ts...>, public Parented<VoiceAssistant> {
   TEMPLATABLE_VALUE(std::string, wake_word);
