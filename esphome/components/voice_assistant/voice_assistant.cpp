@@ -487,6 +487,12 @@ void VoiceAssistant::write_speaker_() {
 }
 #endif
 
+#ifdef USE_MICRO_WAKE_WORD
+void VoiceAssistant::on_wake_word(const micro_wake_word::DetectionEvent &detection_event) {
+  ESP_LOGD(TAG, "directly communicated wake word: %s", detection_event.wake_word->c_str());
+}
+#endif
+
 void VoiceAssistant::client_subscription(api::APIConnection *client, bool subscribe) {
   if (!subscribe) {
     if (this->api_client_ == nullptr || client != this->api_client_) {

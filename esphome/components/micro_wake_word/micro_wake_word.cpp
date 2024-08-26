@@ -7,6 +7,8 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include "esphome/components/voice_assistant/voice_assistant.h"
+
 #include <frontend.h>
 #include <frontend_util.h>
 
@@ -332,6 +334,12 @@ void MicroWakeWord::loop() {
                (detection_event.max_probability / 255.0f));
       this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
       xQueueOverwrite(this->wake_word_queue_, &detection_event);
+
+#ifdef USE_VOICE_ASSISTANT
+      if (voice_assistant::global_voice_assistant != nullptr) {
+        voice_assistant::global_voice_assistant->on_wake_word(detection_event);
+      }
+#endif
     }
   }
 }
