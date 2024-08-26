@@ -140,6 +140,10 @@ class VoiceAssistant : public Component {
   void request_start(bool continuous, bool silence_detection);
   void request_stop();
 
+#ifdef USE_MICRO_WAKE_WORD
+  void on_wake_word(const micro_wake_word::DetectionEvent &detection_event);
+#endif
+
   void on_event(const api::VoiceAssistantEventResponse &msg);
   void on_audio(const api::VoiceAssistantAudio &msg);
   void on_timer_event(const api::VoiceAssistantTimerEventResponse &msg);
