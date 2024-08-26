@@ -17,6 +17,7 @@ enum class TaskEventType : uint8_t {
   IDLE,
   STOPPING,
   STOPPED,
+  MUTED,
   WARNING = 255,
 };
 
