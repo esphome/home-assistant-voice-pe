@@ -12,7 +12,7 @@
 namespace esphome {
 namespace nabu_microphone {
 
-static const size_t RING_BUFFER_LENGTH = 64;  // Measured in milliseconds
+static const size_t RING_BUFFER_LENGTH = 640;  // Measured in milliseconds
 static const size_t QUEUE_LENGTH = 10;
 
 static const size_t DMA_BUF_COUNT = 4;
