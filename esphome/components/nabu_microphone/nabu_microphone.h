@@ -23,10 +23,9 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
 
   void loop() override;
 
-  // size_t read(int16_t *buf, size_t len) override;
-  // size_t read_secondary(int16_t *buf, size_t len) override;
-
-  // size_t available_secondary() override { return this->comm_ring_buffer_->available(); }
+  void mute();
+  void unmute();
+  
   void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
   void set_channel_2(NabuMicrophoneChannel *microphone) { this->channel_2_ = microphone; }
 

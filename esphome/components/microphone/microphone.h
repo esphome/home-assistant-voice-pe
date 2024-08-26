@@ -6,10 +6,13 @@
 namespace esphome {
 namespace microphone {
 
+// TODO: The mute state should belong to the microphone, not the parent nabu_microphone
+
 enum State : uint8_t {
   STATE_STOPPED = 0,
   STATE_STARTING,
   STATE_RUNNING,
+  STATE_MUTED,
   STATE_STOPPING,
 };
 
@@ -22,8 +25,10 @@ class Microphone {
   }
   virtual size_t read(int16_t *buf, size_t len) = 0;
 
+  // How many bytes are available in the ring buffer
   virtual size_t available() { return 0; }
 
+  // Reset the ring buffer
   virtual void reset() {}
 
   bool is_running() const { return this->state_ == STATE_RUNNING; }
