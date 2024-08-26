@@ -344,6 +344,24 @@ void MicroWakeWord::loop() {
   }
 }
 
+void MicroWakeWord::enable_wake_words(std::vector<std::string> &wake_words_to_enable) {
+  for (auto &model : this->wake_word_models_) {
+    bool enabled_wake_word = false;
+
+    for (auto &wake_word : wake_words_to_enable) {
+      ESP_LOGD(TAG, "wake word model=%s; wake_word_target=%s", model->get_wake_word().c_str(), wake_word.c_str());
+      if (!model->get_wake_word().compare(wake_word)) {
+        model->enable();
+        enabled_wake_word = true;
+      }
+    }
+
+    if (!enabled_wake_word) {
+      model->disable();
+    }
+  }
+}
+
 void MicroWakeWord::start() {
   if (!this->is_ready()) {
     ESP_LOGW(TAG, "Wake word detection can't start as the component hasn't been setup yet");

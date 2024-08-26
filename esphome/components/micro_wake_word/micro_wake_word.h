@@ -64,6 +64,9 @@ class MicroWakeWord : public Component {
   // during the on_detected event
   optional<DetectionEvent> get_wake_word_detection_event();
 
+  // Enables the wake word phrases given as strings in a vector. Disables any wake words not in the vector
+  void enable_wake_words(std::vector<std::string> &wake_words_to_enable);
+
  protected:
   microphone::Microphone *microphone_{nullptr};
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
