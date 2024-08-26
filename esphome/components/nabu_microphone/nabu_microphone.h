@@ -25,7 +25,7 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
 
   void mute();
   void unmute();
-  
+
   void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
   void set_channel_2(NabuMicrophoneChannel *microphone) { this->channel_2_ = microphone; }
 
