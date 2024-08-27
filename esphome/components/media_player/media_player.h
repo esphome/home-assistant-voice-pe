@@ -45,6 +45,18 @@ enum class MediaFileType : uint8_t {
 };
 const char *media_player_file_type_to_string(MediaFileType file_type);
 
+enum class MediaPlayerFormatPurpose : uint8_t {
+  PURPOSE_DEFAULT = 0,
+  PURPOSE_ANNOUNCEMENT = 1,
+};
+
+struct MediaPlayerSupportedFormat {
+  std::string format;
+  uint32_t sample_rate;
+  uint32_t num_channels;
+  MediaPlayerFormatPurpose purpose;
+};
+
 struct MediaFile {
   const uint8_t *data;
   size_t length;
@@ -61,8 +73,11 @@ class MediaPlayerTraits {
 
   bool get_supports_pause() const { return this->supports_pause_; }
 
+  std::vector<MediaPlayerSupportedFormat> &get_supported_formats() { return this->supported_formats_; }
+
  protected:
   bool supports_pause_{false};
+  std::vector<MediaPlayerSupportedFormat> supported_formats_{};
 };
 
 class MediaPlayerCall {
