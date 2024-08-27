@@ -64,7 +64,7 @@ class NabuMediaPlayer : public Component,
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
-  
+
   void reconfigure_dac_new_settings();
   void reconfigure_dac_old_settings();
 
@@ -87,6 +87,8 @@ class NabuMediaPlayer : public Component,
 
   /// @return true if I2C writes were successful
   bool unmute_();
+
+  esp_err_t start_i2s_driver_();
 
   optional<std::string> media_url_{};                        // only modified by control function
   optional<std::string> announcement_url_{};                 // only modified by control function
@@ -112,10 +114,10 @@ class NabuMediaPlayer : public Component,
   AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};
 
   void watch_speaker_();
+
   static void speaker_task(void *params);
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
-  QueueHandle_t speaker_command_queue_;
 
   i2s_bits_per_sample_t bits_per_sample_;
   uint32_t sample_rate_;

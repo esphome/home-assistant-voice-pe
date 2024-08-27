@@ -18,7 +18,6 @@ namespace nabu {
 //  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
 //    speaker amp
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Simplify speaker_task controls/events (use EventGroup or TaskNotifications)
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - What do I need to give them an ESPHome id?
@@ -65,16 +64,23 @@ namespace nabu {
 //      - announcement playback takes highest priority
 
 static const size_t QUEUE_COUNT = 20;
-static const size_t DMA_BUFFER_COUNT = 4;
-static const size_t DMA_BUFFER_SIZE = 512;
-static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
+static const size_t DMA_BUFFER_COUNT = 4;
+static const size_t DMA_BUFFER_SIZE = 512;
+static const size_t BUFFER_SIZE = NUMBER_OF_CHANNELS * DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
 
-static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
+
+static const size_t TASK_DELAY_MS = 5;
+
+enum SpeakerTaskNotificationBits : uint32_t {
+  COMMAND_START = (1 << 0),  // Starts the main task purpose
+  COMMAND_STOP = (1 << 1),   // stops the main task
+};
 
 #define STATS_TASK_PRIO 3
 #define STATS_TICKS pdMS_TO_TICKS(5000)
@@ -198,14 +204,7 @@ void NabuMediaPlayer::setup() {
 
   this->media_control_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(MediaCallCommand));
 
-  this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
-
-  if (!this->parent_->try_lock()) {
-    ESP_LOGE(TAG, "Couldn't lock I2S port");
-    this->mark_failed();
-    return;
-  }
 
   if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
     ESP_LOGE(TAG, "Couldn't communicate with DAC");
@@ -216,38 +215,15 @@ void NabuMediaPlayer::setup() {
   ESP_LOGI(TAG, "Set up nabu media player");
 }
 
-void NabuMediaPlayer::speaker_task(void *params) {
-  NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
-
-  TaskEvent event;
-  CommandEvent command_event;
-
-  event.type = EventType::STARTING;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *buffer = allocator.allocate(NUMBER_OF_CHANNELS * BUFFER_SIZE);
-
-  if (buffer == nullptr) {
-    event.type = EventType::WARNING;
-    event.err = ESP_ERR_NO_MEM;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+esp_err_t NabuMediaPlayer::start_i2s_driver_() {
+  if (!this->parent_->try_lock()) {
+    return ESP_ERR_INVALID_STATE;
   }
 
   i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = this_speaker->sample_rate_,
-      .bits_per_sample = this_speaker->bits_per_sample_,
+      .mode = (i2s_mode_t) (this->parent_->get_i2s_mode() | I2S_MODE_TX),
+      .sample_rate = this->sample_rate_,
+      .bits_per_sample = this->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
@@ -268,99 +244,112 @@ void NabuMediaPlayer::speaker_task(void *params) {
 #endif
   };
 
-  esp_err_t err = i2s_driver_install(this_speaker->parent_->get_port(), &config, 0, nullptr);
+  esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
   if (err != ESP_OK) {
-    event.type = EventType::WARNING;
-    event.err = err;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+    return err;
   }
 
-  i2s_pin_config_t pin_config = this_speaker->parent_->get_pin_config();
-  pin_config.data_out_num = this_speaker->dout_pin_;
+  i2s_pin_config_t pin_config = this->parent_->get_pin_config();
+  pin_config.data_out_num = this->dout_pin_;
 
-  err = i2s_set_pin(this_speaker->parent_->get_port(), &pin_config);
+  err = i2s_set_pin(this->parent_->get_port(), &pin_config);
 
   if (err != ESP_OK) {
-    event.type = EventType::WARNING;
-    event.err = err;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+    return err;
   }
 
-  event.type = EventType::STARTED;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+  return ESP_OK;
+}
+
+void NabuMediaPlayer::speaker_task(void *params) {
+  NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
+
+  TaskEvent event;
+  esp_err_t err;
 
   while (true) {
-    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (5 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::STOP) {
-        // Stop signal from main thread
-        break;
-      }
-    }
+    uint32_t notification_bits = 0;
+    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
+                    ULONG_MAX,           // clear all bits after waiting
+                    &notification_bits,  // notifcation value after wait is finished
+                    portMAX_DELAY);      // how long to wait
 
-    size_t delay_ms = 10;
-    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * NUMBER_OF_CHANNELS;
-    size_t bytes_read = 0;
-
-    bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
-
-    if (bytes_read > 0) {
-      size_t bytes_written;
-      if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
-      } else {
-        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
-                         this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
-      }
-
-      if (bytes_written != bytes_read) {
-        event.type = EventType::WARNING;
-        event.err = ESP_ERR_INVALID_SIZE;
-        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-      } else {
-        event.type = EventType::RUNNING;
-        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-      }
-
-    } else {
-      i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-
-      event.type = EventType::IDLE;
+    if (notification_bits & SpeakerTaskNotificationBits::COMMAND_START) {
+      event.type = EventType::STARTING;
       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+      ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+      int16_t *buffer = allocator.allocate(BUFFER_SIZE);
+
+      if (buffer == nullptr) {
+        event.type = EventType::WARNING;
+        event.err = ESP_ERR_NO_MEM;
+        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+      } else {
+        err = this_speaker->start_i2s_driver_();
+
+        if (err != ESP_OK) {
+          event.type = EventType::WARNING;
+          event.err = err;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+        } else {
+          event.type = EventType::STARTED;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+          while (true) {
+            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(TASK_DELAY_MS));
+
+            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+              break;
+            }
+
+            size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * NUMBER_OF_CHANNELS;
+            size_t bytes_read = 0;
+
+            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, 0);
+
+            if (bytes_read > 0) {
+              size_t bytes_written;
+              if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+                i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
+              } else {
+                i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+                                 this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
+              }
+
+              if (bytes_written != bytes_read) {
+                event.type = EventType::WARNING;
+                event.err = ESP_ERR_INVALID_SIZE;
+                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              } else {
+                event.type = EventType::RUNNING;
+                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              }
+
+            } else {
+              i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+
+              event.type = EventType::IDLE;
+              xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+            }
+          }
+
+          i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+
+          event.type = EventType::STOPPING;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+          allocator.deallocate(buffer, BUFFER_SIZE);
+          i2s_stop(this_speaker->parent_->get_port());
+          i2s_driver_uninstall(this_speaker->parent_->get_port());
+
+          this_speaker->parent_->unlock();
+
+          event.type = EventType::STOPPED;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+        }
+      }
     }
-  }
-  i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-  event.type = EventType::STOPPING;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  allocator.deallocate(buffer, BUFFER_SIZE);
-  i2s_stop(this_speaker->parent_->get_port());
-  i2s_driver_uninstall(this_speaker->parent_->get_port());
-
-  event.type = EventType::STOPPED;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  while (true) {
-    delay(10);
   }
 }
 
@@ -378,10 +367,12 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   if (this->speaker_task_handle_ == nullptr) {
     xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
                 &this->speaker_task_handle_);
+    if (this->speaker_task_handle_ == nullptr) {
+      return ESP_FAIL;
+    }
   }
 
-  if (this->speaker_task_handle_ == nullptr)
-    return ESP_FAIL;
+  xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
 
   if (type == AudioPipelineType::MEDIA) {
     if (this->media_pipeline_ == nullptr) {
@@ -534,12 +525,7 @@ void NabuMediaPlayer::watch_speaker_() {
         ESP_LOGD(TAG, "Stopping Media Player Speaker");
         break;
       case EventType::STOPPED:
-        vTaskDelete(this->speaker_task_handle_);
-        this->speaker_task_handle_ = nullptr;
-        this->parent_->unlock();
-
         xQueueReset(this->speaker_event_queue_);
-        xQueueReset(this->speaker_command_queue_);
 
         ESP_LOGD(TAG, "Stopped Media Player Speaker");
         break;
@@ -863,8 +849,8 @@ void NabuMediaPlayer::reconfigure_dac_new_settings() {
    * They didn't properly modify this when switching to the 48 kHz firmware
    * We do need MDAC*DOSR/32 >= the resource compute level for the processing block
    * So here 2*128/32 = 8, which is equal to processing block 1 's recourse compute
-   * See https://www.ti.com/lit/an/slaa404c/slaa404c.pdf?ts=1723806329961 page 5 for workflow on how to determine these
-   * settings
+   * See https://www.ti.com/lit/an/slaa404c/slaa404c.pdf?ts=1723806329961 page 5 for workflow on how to determine
+   * these settings
    */
   // Power up MDAC and set to 2 (was originally 6)
   this->write_byte(AIC3204_MDAC, 0x82);
