@@ -161,7 +161,7 @@ const SFBandTable sfBandTable[3][3] = {
     },
 };
 
-const int imdctWin[4][36] = {
+const uint32_t imdctWin[4][36] = {
     {
         0x02aace8b, 0x07311c28, 0x0a868fec, 0x0c913b52, 0x0d413ccd, 0x0c913b52, 0x0a868fec, 0x07311c28, 0x02aace8b,
         0xfd16d8dd, 0xf6a09e66, 0xef7a6275, 0xe7dbc161, 0xe0000000, 0xd8243e9f, 0xd0859d8b, 0xc95f619a, 0xc2e92723,
@@ -333,7 +333,7 @@ const unsigned char uniqueIDTab[8] = {0x5f, 0x4b, 0x43, 0x5f, 0x5f, 0x4a, 0x52, 
  *   csa[0][i] = CSi, csa[1][i] = CAi
  * format = Q31
  */
-const int csa[8][2] = {
+const uint32_t csa[8][2] = {
     {0x6dc253f0, 0xbe2500aa}, {0x70dcebe4, 0xc39e4949}, {0x798d6e73, 0xd7e33f4a}, {0x7ddd40a7, 0xe8b71176},
     {0x7f6d20b7, 0xf3e4fe2f}, {0x7fe47e40, 0xfac1a3c7}, {0x7ffcb263, 0xfe2ebdc6}, {0x7fffc694, 0xff86c25d},
 };
@@ -381,7 +381,7 @@ const int coef32[31] = {
  * polyCoef[256, 257, ... 263] are for special case of sample 16 (out of 0)
  *   see PolyphaseStereo() and PolyphaseMono()
  */
-const int polyCoef[264] = {
+const uint32_t polyCoef[264] = {
     /* shuffled vs. original from 0, 1, ... 15 to 0, 15, 2, 13, ... 14, 1 */
     0x00000000, 0x00000074, 0x00000354, 0x0000072c, 0x00001fd4, 0x00005084, 0x000066b8, 0x000249c4, 0x00049478,
     0xfffdb63c, 0x000066b8, 0xffffaf7c, 0x00001fd4, 0xfffff8d4, 0x00000354, 0xffffff8c, 0xfffffffc, 0x00000068,
@@ -421,10 +421,10 @@ typedef int ARRAY3[3]; /* for short-block reordering */
 static const char preTab[22] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0};
 
 /* pow(2,-i/4) for i=0..3, Q31 format */
-int pow14[4] = {0x7fffffff, 0x6ba27e65, 0x5a82799a, 0x4c1bf829};
+const int pow14[4] = {0x7fffffff, 0x6ba27e65, 0x5a82799a, 0x4c1bf829};
 
 /* pow(2,-i/4) * pow(j,4/3) for i=0..3 j=0..15, Q25 format */
-int pow43_14[4][16] = {
+const int pow43_14[4][16] = {
     {
         0x00000000,
         0x10000000,
@@ -503,7 +503,7 @@ int pow43_14[4][16] = {
 };
 
 /* pow(j,4/3) for j=16..63, Q23 format */
-int pow43[] = {
+const int pow43[] = {
     0x1428a2fa, 0x15db1bd6, 0x1796302c, 0x19598d85, 0x1b24e8bb, 0x1cf7fcfa, 0x1ed28af2, 0x20b4582a,
     0x229d2e6e, 0x248cdb55, 0x26832fda, 0x28800000, 0x2a832287, 0x2c8c70a8, 0x2e9bc5d8, 0x30b0ff99,
     0x32cbfd4a, 0x34eca001, 0x3712ca62, 0x393e6088, 0x3b6f47e0, 0x3da56717, 0x3fe0a5fc, 0x4220ed72,
@@ -523,13 +523,14 @@ int pow43[] = {
  * Relative error < 1E-7
  * Coefs are scaled by 4, 2, 1, 0.5, 0.25
  */
-int poly43lo[5] = {0x29a0bda9, 0xb02e4828, 0x5957aa1b, 0x236c498d, 0xff581859};
-int poly43hi[5] = {0x10852163, 0xd333f6a4, 0x46e9408b, 0x27c2cef0, 0xfef577b4};
+const unsigned int poly43lo[5] = {0x29a0bda9, 0xb02e4828, 0x5957aa1b, 0x236c498d, 0xff581859};
+const unsigned int poly43hi[5] = {0x10852163, 0xd333f6a4, 0x46e9408b, 0x27c2cef0, 0xfef577b4};
 
 /* pow(2, i*4/3) as exp and frac */
-int pow2exp[8] = {14, 13, 11, 10, 9, 7, 6, 5};
+const int pow2exp[8] = {14, 13, 11, 10, 9, 7, 6, 5};
 
-int pow2frac[8] = {0x6597fa94, 0x50a28be6, 0x7fffffff, 0x6597fa94, 0x50a28be6, 0x7fffffff, 0x6597fa94, 0x50a28be6};
+const int pow2frac[8] = {0x6597fa94, 0x50a28be6, 0x7fffffff, 0x6597fa94,
+                         0x50a28be6, 0x7fffffff, 0x6597fa94, 0x50a28be6};
 
 /**************************************************************************************
  * Function:    DequantBlock
@@ -550,7 +551,8 @@ static int DequantBlock(int *inbuf, int *outbuf, int num, int scale) {
   int scalef, scalei, shift;
   int sx, x, y;
   int mask = 0;
-  const int *tab16, *coef;
+  const int *tab16;
+  const unsigned int *coef;
 
   tab16 = pow43_14[scale & 0x3];
   scalef = pow14[scale & 0x3];
@@ -860,9 +862,9 @@ static __inline short ClipToShort(int x, int fracBits) {
  * TODO:        add 32-bit version for platforms where 64-bit mul-acc is not
  *supported (note max filter gain - see polyCoef[] comments)
  **************************************************************************************/
-void PolyphaseMono(short *pcm, int *vbuf, const int *coefBase) {
+void PolyphaseMono(short *pcm, int *vbuf, const uint32_t *coefBase) {
   int i;
-  const int *coef;
+  const uint32_t *coef;
   int *vb1;
   int vLo, vHi, c1, c2;
   Word64 sum1L, sum2L, rndVal;
@@ -995,9 +997,9 @@ void PolyphaseMono(short *pcm, int *vbuf, const int *coefBase) {
  * TODO:        add 32-bit version for platforms where 64-bit mul-acc is not
  *supported
  **************************************************************************************/
-void PolyphaseStereo(short *pcm, int *vbuf, const int *coefBase) {
+void PolyphaseStereo(short *pcm, int *vbuf, const uint32_t *coefBase) {
   int i;
-  const int *coef;
+  const uint32_t *coef;
   int *vb1;
   int vLo, vHi, c1, c2;
   Word64 sum1L, sum2L, sum1R, sum2R, rndVal;
@@ -1779,7 +1781,7 @@ int UnpackScaleFactors(MP3DecInfo *mp3DecInfo, unsigned char *buf, int *bitOffse
 // a little bit faster in RAM (< 1 ms per block)
 static void AntiAlias(int *x, int nBfly) {
   int k, a0, b0, c0, c1;
-  const int *c;
+  const uint32_t *c;
 
   /* csa = Q31 */
   for (k = nBfly; k > 0; k--) {
@@ -1879,7 +1881,7 @@ static void AntiAlias(int *x, int nBfly) {
  **************************************************************************************/
 static void WinPrevious(int *xPrev, int *xPrevWin, int btPrev) {
   int i, x, *xp, *xpwLo, *xpwHi, wLo, wHi;
-  const int *wpLo, *wpHi;
+  const uint32_t *wpLo, *wpHi;
 
   xp = xPrev;
   /* mapping (see IMDCT12x3): xPrev[0-2] = sum[6-8], xPrev[3-8] = sum[12-17] */
@@ -2040,7 +2042,7 @@ static const int c9_4 = 0x7e0e2e32;
 /* format = Q31
  * cos(((0:8) + 0.5) * (pi/18))
  */
-static const int c18[9] = {
+static const uint32_t c18[9] = {
     0x7f834ed0, 0x7ba3751d, 0x7401e4c1, 0x68d9f964, 0x5a82799a, 0x496af3e2, 0x36185aee, 0x2120fb83, 0x0b27eb5c,
 };
 
@@ -2131,7 +2133,7 @@ static __inline void idct9(int *x) {
  *      fastWin[2*j+1] = c(j)*(s(j) - c(j))
  * format = Q30
  */
-int fastWin36[18] = {
+const uint32_t fastWin36[18] = {
     0x42aace8b, 0xc2e92724, 0x47311c28, 0xc95f619a, 0x4a868feb, 0xd0859d8c, 0x4c913b51, 0xd8243ea0, 0x4d413ccc,
     0xe0000000, 0x4c913b51, 0xe7dbc161, 0x4a868feb, 0xef7a6275, 0x47311c28, 0xf6a09e67, 0x42aace8b, 0xfd16d8dd,
 };
@@ -2172,7 +2174,7 @@ static int IMDCT36(int *xCurr, int *xPrev, int *y, int btCurr, int btPrev, int b
   int i, es, xBuf[18], xPrevWin[18];
   int acc1, acc2, s, d, t, mOut;
   int xo, xe, c, *xp, yLo, yHi;
-  const int *cp, *wp;
+  const uint32_t *cp, *wp;
 
   acc1 = acc2 = 0;
   xCurr += 17;
@@ -2360,7 +2362,7 @@ static __inline void imdct12(int *x, int *out) {
 // barely faster in RAM
 static int IMDCT12x3(int *xCurr, int *xPrev, int *y, int btPrev, int blockIdx, int gb) {
   int i, es, mOut, yLo, xBuf[18], xPrevWin[18]; /* need temp buffer for reordering short blocks */
-  const int *wp;
+  const uint32_t *wp;
 
   es = 0;
   /* 7 gb is always adequate for accumulator loop + idct12 + window + overlap */

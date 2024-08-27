@@ -198,7 +198,6 @@ async def to_code(config):
         repo="https://github.com/kahrendt/esp-dsp",
         ref="no-round-dot-product",
     )
-    # cg.add_build_flag("-Wno-narrowing")  # Necessary to compile helix mp3 decoder
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
