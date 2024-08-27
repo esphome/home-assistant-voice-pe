@@ -20,7 +20,6 @@ namespace nabu {
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
-//    - What do I need to give them an ESPHome id?
 //    - Add a yaml action to play a specific media file
 //
 //

@@ -49,6 +49,7 @@ TYPE_WEB = "web"
 
 CONF_DECIBEL_REDUCTION = "decibel_reduction"
 
+CONF_MEDIA_FILE = "media_file"
 CONF_FILES = "files"
 CONF_SAMPLE_RATE = "sample_rate"
 CONF_VOLUME_INCREMENT = "volume_increment"
@@ -66,6 +67,9 @@ NabuMediaPlayer = nabu_ns.class_(
 
 DuckingSetAction = nabu_ns.class_(
     "DuckingSetAction", automation.Action, cg.Parented.template(NabuMediaPlayer)
+)
+PlayLocalMediaAction = nabu_ns.class_(
+    "PlayLocalMediaAction", automation.Action, cg.Parented.template(NabuMediaPlayer)
 )
 
 
@@ -194,7 +198,7 @@ async def to_code(config):
         repo="https://github.com/kahrendt/esp-dsp",
         ref="no-round-dot-product",
     )
-    cg.add_build_flag("-Wno-narrowing")  # Necessary to compile helix mp3 decoder
+    # cg.add_build_flag("-Wno-narrowing")  # Necessary to compile helix mp3 decoder
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -254,6 +258,13 @@ async def to_code(config):
                 file_config[CONF_ID],
                 media_files_struct,
             )
+            # decl = VariableDeclarationExpression(type, "*", name)
+            # CORE.add_global(decl)
+            # var = MockObj(name, "->")
+            # CORE.register_variable(name, var)
+            # return var
+
+            # CORE.register_variable(MediaFile, file_config[CONF_ID])
 
 
 DUCKING_SET_SCHEMA = cv.Schema(
@@ -262,9 +273,30 @@ DUCKING_SET_SCHEMA = cv.Schema(
         cv.Required(CONF_DECIBEL_REDUCTION): cv.templatable(
             cv.int_range(min=0, max=51)
         ),
-        cv.Optional(CONF_DURATION, default="0.0s"): cv.templatable(cv.positive_time_period_seconds),
+        cv.Optional(CONF_DURATION, default="0.0s"): cv.templatable(
+            cv.positive_time_period_seconds
+        ),
     }
 )
+
+
+# @automation.register_action(
+#     "nabu.play_local_media_file",
+#     PlayLocalMediaAction,
+#     cv.maybe_simple_value(
+#         {
+#             cv.GenerateID(): cv.use_id(NabuMediaPlayer),
+#             cv.Required(CONF_MEDIA_FILE): cv.use_id(MediaFile),
+#         },
+#         key=CONF_MEDIA_FILE,
+#     ),
+# )
+# async def media_player_play_media_action(config, action_id, template_arg, args):
+#     var = cg.new_Pvariable(action_id, template_arg)
+#     await cg.register_parented(var, config[CONF_ID])
+#     media_file = config[CONF_MEDIA_FILE]
+#     cg.add(var.set_media_file(media_file))
+#     return var
 
 
 @automation.register_action("nabu.set_ducking", DuckingSetAction, DUCKING_SET_SCHEMA)
@@ -275,8 +307,6 @@ async def ducking_set_to_code(config, action_id, template_arg, args):
         config[CONF_DECIBEL_REDUCTION], args, cg.uint8
     )
     cg.add(var.set_decibel_reduction(decibel_reduction))
-    duration = await cg.templatable(
-        config[CONF_DURATION], args, cg.float_
-    )
+    duration = await cg.templatable(config[CONF_DURATION], args, cg.float_)
     cg.add(var.set_duration(duration))
     return var

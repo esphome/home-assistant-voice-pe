@@ -141,6 +141,15 @@ template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public P
   }
 };
 
+// template<typename... Ts> class PlayLocalMediaAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
+//   TEMPLATABLE_VALUE(media_player::MediaFile, media_file)
+//   // public:
+//   //   void set_media_file(media_player::MediaFile media_file) { this->media_file_ = media_file; }
+//     void play(Ts... x) override { this->parent_->make_call().set_local_media_file(this->media_file_.value(x...)).perform(); }
+//   // protected:
+//   //   media_player::MediaFile media_file_;
+// };
+
 }  // namespace nabu
 }  // namespace esphome
 
