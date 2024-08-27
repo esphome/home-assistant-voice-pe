@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esphome/components/audio_dac/audio_dac.h"
 #include "esphome/components/i2c/i2c.h"
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
@@ -55,19 +56,18 @@ static const uint8_t AIC3204_ADC_PTM = 0x3D;       // Register 61 - ADC Power Tu
 static const uint8_t AIC3204_AN_IN_CHRG = 0x47;    // Register 71 - Analog Input Quick Charging Config
 static const uint8_t AIC3204_REF_STARTUP = 0x7B;   // Register 123 - Reference Power Up Config
 
-class AIC3204 : public Component, public i2c::I2CDevice {
+class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
  public:
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::IO; }
 
-  void set_mute_off();
-  void set_mute_on();
+  void set_mute_off() override;
+  void set_mute_on() override;
   void set_auto_mute_mode(optional<uint8_t> auto_mute_mode);
-  void set_volume(optional<float> volume);
+  void set_volume(optional<float> volume) override;
 
  protected:
-  bool is_muted{false};
   uint8_t auto_mute_mode_{0};
 };
 
