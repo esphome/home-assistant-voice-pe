@@ -164,6 +164,7 @@ void AIC3204::dump_config() {
   }
 }
 
+#ifdef USE_AUDIO_DAC
 void AIC3204::set_mute_off() {
   this->is_muted = false;
   uint8_t mute_mode_byte = this->auto_mute_mode_ << 4;  // auto-mute control is bits 4-6
@@ -221,6 +222,6 @@ void AIC3204::set_volume(optional<float> volume) {
     ESP_LOGE(TAG, "Set volume failed");
   }
 }
-
+#endif
 }  // namespace aic3204
 }  // namespace esphome

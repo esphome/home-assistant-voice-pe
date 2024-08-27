@@ -62,6 +62,7 @@ class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::IO; }
 
+#ifdef USE_AUDIO_DAC
   void set_mute_off() override;
   void set_mute_on() override;
   void set_auto_mute_mode(optional<uint8_t> auto_mute_mode);
@@ -69,6 +70,7 @@ class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
 
  protected:
   uint8_t auto_mute_mode_{0};
+#endif
 };
 
 }  // namespace aic3204
