@@ -18,7 +18,7 @@ namespace nabu {
 //  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
 //    speaker amp
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Simplify speaker_task controls/events and mixer controls/events (use EventGroup or TaskNotifications)
+//  - Simplify speaker_task controls/events (use EventGroup or TaskNotifications)
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - What do I need to give them an ESPHome id?
