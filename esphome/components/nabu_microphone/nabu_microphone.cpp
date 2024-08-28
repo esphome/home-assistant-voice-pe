@@ -33,10 +33,10 @@ static const size_t DMA_SAMPLES = DMA_BUF_COUNT * DMA_BUF_LEN * CHANNELS;
 static const char *const TAG = "i2s_audio.microphone";
 
 enum TaskNotificationBits : uint32_t {
-  COMMAND_START = (1 << 0),   // Starts the main task purpose
-  COMMAND_STOP = (1 << 1),    // stops the main task
-  COMMAND_MUTE = (1 << 2),    // mutes the microphone by only sending zeros
-  COMMAND_UNMUTE = (1 << 3),  // unmutes the microphone
+  COMMAND_START = (1 << 0),  // Starts the main task purpose
+  COMMAND_STOP = (1 << 1),   // stops the main task
+  // COMMAND_MUTE = (1 << 2),    // mutes the microphone by only sending zeros
+  // COMMAND_UNMUTE = (1 << 3),  // unmutes the microphone
 };
 
 void NabuMicrophoneChannel::setup() {
@@ -51,7 +51,16 @@ void NabuMicrophoneChannel::setup() {
 
 void NabuMicrophoneChannel::loop() {
   if (this->parent_->is_running()) {
-    this->state_ = microphone::STATE_RUNNING;
+    if (this->is_muted_) {
+      if (this->requested_stop_) {
+        // The microphone was muted when stopping was requested
+        this->state_ = microphone::STATE_STOPPED;
+      } else {
+        this->state_ = microphone::STATE_MUTED;
+      }
+    } else {
+      this->state_ = microphone::STATE_RUNNING;
+    }
   } else {
     this->state_ = microphone::STATE_STOPPED;
   }
@@ -80,13 +89,25 @@ void NabuMicrophone::setup() {
 }
 
 void NabuMicrophone::mute() {
-  if (this->read_task_handle_ != nullptr)
-    xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_MUTE, eSetValueWithoutOverwrite);
+  // if (this->read_task_handle_ != nullptr)
+  //   xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_MUTE, eSetValueWithoutOverwrite);
+  if (this->channel_1_ != nullptr) {
+    this->channel_1_->set_mute_state(true);
+  }
+  if (this->channel_2_ != nullptr) {
+    this->channel_2_->set_mute_state(true);
+  }
 }
 
 void NabuMicrophone::unmute() {
-  if (this->read_task_handle_ != nullptr)
-    xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_UNMUTE, eSetValueWithoutOverwrite);
+  // if (this->read_task_handle_ != nullptr)
+  //   xTaskNotify(this->read_task_handle_, TaskNotificationBits::COMMAND_UNMUTE, eSetValueWithoutOverwrite);
+  if (this->channel_1_ != nullptr) {
+    this->channel_1_->set_mute_state(false);
+  }
+  if (this->channel_2_ != nullptr) {
+    this->channel_2_->set_mute_state(false);
+  }
 }
 
 esp_err_t NabuMicrophone::start_i2s_driver_() {
@@ -187,10 +208,11 @@ void NabuMicrophone::read_task_(void *params) {
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_2_samples;
 
-      channel_1_samples.reserve(DMA_SAMPLES);
-      channel_2_samples.reserve(DMA_SAMPLES);
+      if (this_microphone->channel_1_ != nullptr)
+        channel_1_samples.reserve(DMA_SAMPLES);
 
-      bool muted = false;
+      if (this_microphone->channel_2_ != nullptr)
+        channel_2_samples.reserve(DMA_SAMPLES);
 
       if ((buffer == nullptr) || (channel_1_samples.capacity() < DMA_SAMPLES) ||
           (channel_2_samples.capacity() < DMA_SAMPLES)) {
@@ -215,13 +237,6 @@ void NabuMicrophone::read_task_(void *params) {
             notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
             if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
               break;
-            } else if (notification_bits & TaskNotificationBits::COMMAND_MUTE) {
-              muted = true;
-              event.type = i2s_audio::TaskEventType::MUTED;
-              event.err = ESP_OK;
-              xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
-            } else if (notification_bits & TaskNotificationBits::COMMAND_UNMUTE) {
-              muted = false;
             }
 
             size_t bytes_read;
@@ -245,18 +260,18 @@ void NabuMicrophone::read_task_(void *params) {
               uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
               uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
 
-              if (!muted) {
-                for (size_t i = 0; i < frames_read; i++) {
-                  int32_t channel_1_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_1_shift;
-                  int32_t channel_2_sample = buffer[CHANNELS * sample_rate_factor * i + 1] >> channel_2_shift;
-
+              for (size_t i = 0; i < frames_read; i++) {
+                int32_t channel_1_sample = 0;
+                if ((this_microphone->channel_1_ != nullptr) && (!this_microphone->channel_1_->get_mute_state())) {
+                  channel_1_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_1_shift;
                   channel_1_samples[i] = clamp<int16_t>(channel_1_sample, INT16_MIN, INT16_MAX);
+                }
+
+                int32_t channel_2_sample = 0;
+                if ((this_microphone->channel_2_ != nullptr) && (!this_microphone->channel_2_->get_mute_state())) {
+                  channel_2_sample = buffer[CHANNELS * sample_rate_factor * i + 1] >> channel_2_shift;
                   channel_2_samples[i] = clamp<int16_t>(channel_2_sample, INT16_MIN, INT16_MAX);
                 }
-              } else {
-                // Software muted, so just set every output to 0
-                memset(channel_1_samples.data(), 0, frames_read*sizeof(int16_t));
-                memset(channel_2_samples.data(), 0, frames_read*sizeof(int16_t));
               }
 
               size_t bytes_to_write = frames_read * sizeof(int16_t);
@@ -317,8 +332,13 @@ void NabuMicrophone::stop() {
 }
 
 void NabuMicrophone::loop() {
-  // Note this->state_ is only modified here based on the status of the task
+  if ((this->channel_1_ != nullptr) && (this->channel_1_->get_requested_stop()) && (this->channel_2_ != nullptr) &&
+      (this->channel_2_->get_requested_stop())) {
+    // Both microphone channels have requested a stop
+    this->stop();
+  }
 
+  // Note this->state_ is only modified here based on the status of the task
   i2s_audio::TaskEvent event;
   while (xQueueReceive(this->event_queue_, &event, 0)) {
     switch (event.type) {

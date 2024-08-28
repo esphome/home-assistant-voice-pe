@@ -21,8 +21,14 @@ Microphone = microphone_ns.class_("Microphone")
 CaptureAction = microphone_ns.class_(
     "CaptureAction", automation.Action, cg.Parented.template(Microphone)
 )
+MuteAction = microphone_ns.class_(
+    "MuteAction", automation.Action, cg.Parented.template(Microphone)
+)
 StopCaptureAction = microphone_ns.class_(
     "StopCaptureAction", automation.Action, cg.Parented.template(Microphone)
+)
+UnmuteAction = microphone_ns.class_(
+    "UnmuteAction", automation.Action, cg.Parented.template(Microphone)
 )
 
 
@@ -66,7 +72,7 @@ MICROPHONE_SCHEMA = cv.Schema(
 MICROPHONE_ACTION_SCHEMA = maybe_simple_id({cv.GenerateID(): cv.use_id(Microphone)})
 
 
-async def media_player_action(config, action_id, template_arg, args):
+async def microphone_action(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
@@ -74,15 +80,23 @@ async def media_player_action(config, action_id, template_arg, args):
 
 automation.register_action(
     "microphone.capture", CaptureAction, MICROPHONE_ACTION_SCHEMA
-)(media_player_action)
+)(microphone_action)
+
+automation.register_action(
+    "microphone.mute", MuteAction, MICROPHONE_ACTION_SCHEMA
+)(microphone_action)
 
 automation.register_action(
     "microphone.stop_capture", StopCaptureAction, MICROPHONE_ACTION_SCHEMA
-)(media_player_action)
+)(microphone_action)
+
+automation.register_action(
+    "microphone.unmute", UnmuteAction, MICROPHONE_ACTION_SCHEMA
+)(microphone_action)
 
 automation.register_condition(
     "microphone.is_capturing", IsCapturingCondition, MICROPHONE_ACTION_SCHEMA
-)(media_player_action)
+)(microphone_action)
 
 
 @coroutine_with_priority(100.0)

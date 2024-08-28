@@ -376,7 +376,7 @@ void VoiceAssistant::loop() {
     }
     case State::STOP_MICROPHONE: {
       if (this->mic_->is_running()) {
-        // this->mic_->stop();
+        this->mic_->stop();
         this->set_state_(State::STOPPING_MICROPHONE);
       } else {
         this->set_state_(this->desired_state_);
@@ -384,9 +384,9 @@ void VoiceAssistant::loop() {
       break;
     }
     case State::STOPPING_MICROPHONE: {
-      // if (this->mic_->is_stopped()) {
-      //   this->set_state_(this->desired_state_);
-      // }
+      if (this->mic_->is_stopped()) {
+        this->set_state_(this->desired_state_);
+      }
       this->set_state_(this->desired_state_);
       break;
     }
@@ -735,7 +735,7 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       this->defer([this, text]() {
         this->tts_start_trigger_->trigger(text);
 #ifdef USE_SPEAKER
-        // this->speaker_->start();
+        this->speaker_->start();
 #endif
       });
       break;

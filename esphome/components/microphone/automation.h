@@ -12,6 +12,14 @@ template<typename... Ts> class CaptureAction : public Action<Ts...>, public Pare
   void play(Ts... x) override { this->parent_->start(); }
 };
 
+template<typename... Ts> class MuteAction : public Action<Ts...>, public Parented<Microphone> {
+  void play(Ts... x) override { this->parent_->set_mute_state(true); }
+};
+
+template<typename... Ts> class UnmuteAction : public Action<Ts...>, public Parented<Microphone> {
+  void play(Ts... x) override { this->parent_->set_mute_state(false); }
+};
+
 template<typename... Ts> class StopCaptureAction : public Action<Ts...>, public Parented<Microphone> {
   void play(Ts... x) override { this->parent_->stop(); }
 };
