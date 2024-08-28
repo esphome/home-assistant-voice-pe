@@ -55,16 +55,11 @@ class MicroWakeWord : public Component {
 #endif
 
   // Intended for the voice assistant component to know which wake words are available
-  // Since these are pointers to the actual WakeWordModel object, the voice assistant component can enable or disable it
+  // Since these are pointers to the WakeWordModel objects, the voice assistant component can enable or disable them
   const std::vector<WakeWordModel *> &get_wake_words() const { return this->wake_word_models_; }
 
-  // Intended for the voice assistant component to poll for wake word events
-  // Returns an empty optional state if there is no wake word detection event in the queue
-  // TODO: This is how the VA will know a wake word has been said rather than calling a start pipeline action
-  // during the on_detected event
-  optional<DetectionEvent> get_wake_word_detection_event();
-
-  // Enables the wake word phrases given as strings in a vector. Disables any wake words not in the vector
+  // Enables the wake word phrases given as strings in a vector. Disables any wake words not listed in the vector
+  // TODO: Should this logic be in the voice_assistant component?
   void enable_wake_words(std::vector<std::string> &wake_words_to_enable);
 
  protected:

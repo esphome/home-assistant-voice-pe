@@ -22,7 +22,6 @@
 //  - does VAD need to be a separate class?
 //  - setup protocol between micro_wake_word and voice_assistant components
 //    - voice assistant should handle all decisions, mWW should just send info
-//    - Need to be able to send the details of each available wake word to voice assistants
 //  - load trained languages from manifest to expose to voice assistant
 
 namespace esphome {
@@ -30,8 +29,7 @@ namespace micro_wake_word {
 
 static const char *const TAG = "micro_wake_word";
 
-static const size_t BUFFER_LENGTH = 64;  // 0.064 seconds
-static const size_t QUEUE_COUNT = 5;
+static const size_t DETECTION_QUEUE_COUNT = 5;
 
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
@@ -92,10 +90,7 @@ void MicroWakeWord::setup() {
   this->frontend_config_.log_scale.scale_shift = 6;
 
   this->event_group_ = xEventGroupCreate();
-  this->detection_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(DetectionEvent));
-
-  // Only store most recent wake word detection
-  this->wake_word_queue_ = xQueueCreate(1, sizeof(DetectionEvent));
+  this->detection_queue_ = xQueueCreate(DETECTION_QUEUE_COUNT, sizeof(DetectionEvent));
 
   ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
   this->preprocessor_task_stack_buffer_ = allocator.allocate(8192);
@@ -282,15 +277,6 @@ void MicroWakeWord::add_vad_model(const uint8_t *model_start, uint8_t probabilit
 }
 #endif
 
-optional<DetectionEvent> MicroWakeWord::get_wake_word_detection_event() {
-  DetectionEvent detection_event;
-  if (!xQueueReceive(this->wake_word_queue_, &detection_event, 0)) {
-    // Nothing in queue, return nothing
-    return {};
-  }
-  return detection_event;
-}
-
 void MicroWakeWord::loop() {
   // Determines the state of microWakeWord by monitoring the Event Group state.
   // This is the only place where the component's state is modified
@@ -333,7 +319,6 @@ void MicroWakeWord::loop() {
                detection_event.wake_word->c_str(), (detection_event.average_probability / 255.0f),
                (detection_event.max_probability / 255.0f));
       this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
-      xQueueOverwrite(this->wake_word_queue_, &detection_event);
 
 #ifdef USE_VOICE_ASSISTANT
       if (voice_assistant::global_voice_assistant != nullptr) {
