@@ -29,7 +29,18 @@ namespace micro_wake_word {
 
 static const char *const TAG = "micro_wake_word";
 
-static const size_t DETECTION_QUEUE_COUNT = 5;
+static const ssize_t DETECTION_QUEUE_COUNT = 5;
+
+static const ssize_t FEATURES_RING_BUFFER_SPECTROGRAM_SLICES = 10;
+
+static const size_t TASK_DELAY_MS = 10;
+static const size_t STOPPING_TIMEOUT_MS = 200;
+
+static const uint32_t PREPROCESSOR_TASK_STACK_SIZE = 4096;
+static const uint32_t INFERENCE_TASK_STACK_SIZE = 4096;
+
+static const UBaseType_t PREPROCESSOR_TASK_PRIORITY = 10;
+static const UBaseType_t INFERENCE_TASK_PRIORITY = 5;
 
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
@@ -76,25 +87,25 @@ void MicroWakeWord::setup() {
   this->frontend_config_.window.size_ms = FEATURE_DURATION_MS;
   this->frontend_config_.window.step_size_ms = this->features_step_size_;
   this->frontend_config_.filterbank.num_channels = PREPROCESSOR_FEATURE_SIZE;
-  this->frontend_config_.filterbank.lower_band_limit = 125.0;
-  this->frontend_config_.filterbank.upper_band_limit = 7500.0;
-  this->frontend_config_.noise_reduction.smoothing_bits = 10;
-  this->frontend_config_.noise_reduction.even_smoothing = 0.025;
-  this->frontend_config_.noise_reduction.odd_smoothing = 0.06;
-  this->frontend_config_.noise_reduction.min_signal_remaining = 0.05;
-  this->frontend_config_.pcan_gain_control.enable_pcan = 1;
-  this->frontend_config_.pcan_gain_control.strength = 0.95;
-  this->frontend_config_.pcan_gain_control.offset = 80.0;
-  this->frontend_config_.pcan_gain_control.gain_bits = 21;
-  this->frontend_config_.log_scale.enable_log = 1;
-  this->frontend_config_.log_scale.scale_shift = 6;
+  this->frontend_config_.filterbank.lower_band_limit = FILTERBANK_LOWER_BAND_LIMIT;
+  this->frontend_config_.filterbank.upper_band_limit = FILTERBANK_UPPER_BAND_LIMIT;
+  this->frontend_config_.noise_reduction.smoothing_bits = NOISE_REDUCTION_SMOOTHING_BITS;
+  this->frontend_config_.noise_reduction.even_smoothing = NOISE_REDUCTION_EVEN_SMOOTHING;
+  this->frontend_config_.noise_reduction.odd_smoothing = NOISE_REDUCTION_ODD_SMOOTHING;
+  this->frontend_config_.noise_reduction.min_signal_remaining = NOISE_REDUCTION_MIN_SIGNAL_REMAINING;
+  this->frontend_config_.pcan_gain_control.enable_pcan = PCAN_GAIN_CONTROL_ENABLE_PCAN;
+  this->frontend_config_.pcan_gain_control.strength = PCAN_GAIN_CONTROL_STRENGTH;
+  this->frontend_config_.pcan_gain_control.offset = PCAN_GAIN_CONTROL_OFFSET;
+  this->frontend_config_.pcan_gain_control.gain_bits = PCAN_GAIN_CONTROL_GAIN_BITS;
+  this->frontend_config_.log_scale.enable_log = LOG_SCALE_ENABLE_LOG;
+  this->frontend_config_.log_scale.scale_shift = LOG_SCALE_SCALE_SHIFT;
 
   this->event_group_ = xEventGroupCreate();
   this->detection_queue_ = xQueueCreate(DETECTION_QUEUE_COUNT, sizeof(DetectionEvent));
 
   ExternalRAMAllocator<StackType_t> allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-  this->preprocessor_task_stack_buffer_ = allocator.allocate(8192);
-  this->inference_task_stack_buffer_ = allocator.allocate(8192);
+  this->preprocessor_task_stack_buffer_ = allocator.allocate(PREPROCESSOR_TASK_STACK_SIZE);
+  this->inference_task_stack_buffer_ = allocator.allocate(INFERENCE_TASK_STACK_SIZE);
 
   ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
 }
@@ -108,7 +119,7 @@ void MicroWakeWord::preprocessor_task_(void *params) {
     EventBits_t event_bits = xEventGroupWaitBits(this_mww->event_group_,
                                                  PREPROCESSOR_COMMAND_START,  // Bit message to read
                                                  pdTRUE,                      // Clear the bit on exit
-                                                 pdFALSE,                     // Wait for all the bits,
+                                                 pdFALSE,                     // Wait for all the bits
                                                  portMAX_DELAY);              // Block indefinitely until bit is set
 
     xEventGroupClearBits(this_mww->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_IDLE);
@@ -134,7 +145,8 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       }
 
       if (this_mww->features_ring_buffer_ == nullptr) {
-        this_mww->features_ring_buffer_ = RingBuffer::create(PREPROCESSOR_FEATURE_SIZE * 10);  // TODO: Tweak this
+        this_mww->features_ring_buffer_ =
+            RingBuffer::create(PREPROCESSOR_FEATURE_SIZE * FEATURES_RING_BUFFER_SPECTROGRAM_SLICES);
         if (this_mww->features_ring_buffer_ == nullptr) {
           xEventGroupSetBits(this_mww->event_group_,
                              EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
@@ -169,8 +181,8 @@ void MicroWakeWord::preprocessor_task_(void *params) {
             // for historical reasons, to match up with the output of other feature
             // generators.
             // The process is then further complicated when we quantize the model. This
-            // means we have to scale the 0.0 to 26.0 real values to the -128 to 127
-            // signed integer numbers.
+            // means we have to scale the 0.0 to 26.0 real values to the -128 (INT8_MIN)
+            // to 127 (INT8_MAX) signed integer numbers.
             // All this means that to get matching values from our integer feature
             // output into the tensor input, we have to perform:
             // input = (((feature / 25.6) / 26.0) * 256) - 128
@@ -179,22 +191,19 @@ void MicroWakeWord::preprocessor_task_(void *params) {
             constexpr int32_t value_scale = 256;
             constexpr int32_t value_div = 666;  // 666 = 25.6 * 26.0 after rounding
             int32_t value = ((frontend_output.values[i] * value_scale) + (value_div / 2)) / value_div;
-            value -= 128;
-            if (value < -128) {
-              value = -128;
-            }
-            if (value > 127) {
-              value = 127;
-            }
-            features_buffer[i] = value;
+
+            value -= INT8_MIN;
+            features_buffer[i] = clamp<int8_t>(value, INT8_MIN, INT8_MAX);
           }
 
           this_mww->features_ring_buffer_->write((void *) features_buffer, PREPROCESSOR_FEATURE_SIZE);
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(TASK_DELAY_MS);
       }
+
+      this_mww->microphone_->stop();
 
       FrontendFreeStateContents(&this_mww->frontend_state_);
 
@@ -260,7 +269,7 @@ void MicroWakeWord::inference_task_(void *params) {
         }
 
         // Block to give other tasks opportunity to run
-        delay(10);
+        delay(TASK_DELAY_MS);
       }
 
       this_mww->unload_models_();
@@ -315,9 +324,10 @@ void MicroWakeWord::loop() {
     if (detection_event.blocked_by_vad) {
       ESP_LOGD(TAG, "Wake word model predicts '%s', but VAD model doesn't.", detection_event.wake_word->c_str());
     } else {
+      constexpr float uint8_to_float_divisor = 255.0f;  // Converting a quantized uint8 probability to floating point
       ESP_LOGD(TAG, "Detected '%s' with sliding average probability is %.2f and max probability is %.2f",
-               detection_event.wake_word->c_str(), (detection_event.average_probability / 255.0f),
-               (detection_event.max_probability / 255.0f));
+               detection_event.wake_word->c_str(), (detection_event.average_probability / uint8_to_float_divisor),
+               (detection_event.max_probability / uint8_to_float_divisor));
       this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
 
 #ifdef USE_VOICE_ASSISTANT
@@ -366,15 +376,15 @@ void MicroWakeWord::start() {
   ESP_LOGD(TAG, "Starting wake word detection");
 
   if (this->preprocessor_task_handle_ == nullptr) {
-    this->preprocessor_task_handle_ =
-        xTaskCreateStatic(MicroWakeWord::preprocessor_task_, "preprocessor", 8192, (void *) this, 10,
-                          this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
+    this->preprocessor_task_handle_ = xTaskCreateStatic(
+        MicroWakeWord::preprocessor_task_, "preprocessor", PREPROCESSOR_TASK_STACK_SIZE, (void *) this,
+        PREPROCESSOR_TASK_PRIORITY, this->preprocessor_task_stack_buffer_, &this->preprocessor_task_stack_);
   }
 
   if (this->inference_task_handle_ == nullptr) {
     this->inference_task_handle_ =
-        xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", 8192, (void *) this, 5,
-                          this->inference_task_stack_buffer_, &this->inference_task_stack_);
+        xTaskCreateStatic(MicroWakeWord::inference_task_, "inference", INFERENCE_TASK_STACK_SIZE, (void *) this,
+                          INFERENCE_TASK_PRIORITY, this->inference_task_stack_buffer_, &this->inference_task_stack_);
   }
 
   xEventGroupSetBits(this->event_group_, PREPROCESSOR_COMMAND_START);
@@ -392,7 +402,7 @@ void MicroWakeWord::stop() {
                       (PREPROCESSOR_MESSAGE_IDLE | INFERENCE_MESSAGE_IDLE),  // Bit message to read
                       pdTRUE,                                                // Clear the bit on exit
                       true,                                                  // Wait for all the bits,
-                      pdMS_TO_TICKS(200));  // Block temporarily before deleting each task
+                      pdMS_TO_TICKS(STOPPING_TIMEOUT_MS));  // Block temporarily before deleting each task
 
   xEventGroupClearBits(this->event_group_, ALL_BITS);
   this->features_ring_buffer_->reset();
