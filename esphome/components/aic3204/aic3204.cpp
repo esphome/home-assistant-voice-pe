@@ -4,6 +4,8 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_AUDIO_DAC
+
 namespace esphome {
 namespace aic3204 {
 
@@ -80,18 +82,18 @@ void AIC3204::setup() {
       // Route Right DAC to HPR
       !this->write_byte(AIC3204_HPR_ROUTE, 0x08) ||
       // Route Left DAC to LOL
-      !this->write_byte(0x0e, 0x08) ||
+      !this->write_byte(AIC3204_LOL_ROUTE, 0x08) ||
       // Route Right DAC to LOR
-      !this->write_byte(0x0f, 0x08) ||
+      !this->write_byte(AIC3204_LOR_ROUTE, 0x08) ||
 
       // Unmute HPL and set gain to -2dB (see comment before configuring the AIC3204_CM_CTRL register)
       !this->write_byte(AIC3204_HPL_GAIN, 0x3e) ||
       // Unmute HPR and set gain to -2dB (see comment before configuring the AIC3204_CM_CTRL register)
       !this->write_byte(AIC3204_HPR_GAIN, 0x3e) ||
       // Unmute LOL and set gain to 0dB
-      !this->write_byte(0x12, 0x00) ||
+      !this->write_byte(AIC3204_LOL_DRV_GAIN, 0x00) ||
       // Unmute LOR and set gain to 0dB
-      !this->write_byte(0x13, 0x00) ||
+      !this->write_byte(AIC3204_LOR_DRV_GAIN, 0x00) ||
 
       // Power up HPL and HPR, LOL and LOR drivers
       !this->write_byte(AIC3204_OP_PWR_CTRL, 0x3C)) {
@@ -111,10 +113,10 @@ void AIC3204::setup() {
         // Power up the Left and Right DAC Channels. Route Left data to Left DAC and Right data to Right DAC.
         // DAC Vol control soft step 1 step per DAC word clock.
         !this->write_byte(AIC3204_DAC_CH_SET1, 0xd4) ||
-        // Unmute Left and Right DAC digital volume control
-        !this->write_byte(AIC3204_DAC_CH_SET2, 0x00) ||
-        // Unmute Left and Right ADC Digital Volume Control.
-        !this->write_byte(AIC3204_ADC_FGA_MUTE, 0x00)) {
+        // Set left and right DAC digital volume control
+        !this->write_volume_() ||
+        // Unmute left and right channels
+        !this->write_mute_()) {
       ESP_LOGE(TAG, "AIC3204 power-up failed");
       this->mark_failed();
       return;
@@ -131,64 +133,70 @@ void AIC3204::dump_config() {
   }
 }
 
-#ifdef USE_AUDIO_DAC
-void AIC3204::set_mute_off() {
-  this->is_muted = false;
-  uint8_t mute_mode_byte = this->auto_mute_mode_ << 4;  // auto-mute control is bits 4-6
-  mute_mode_byte |= this->is_muted ? 0x0c : 0x00;
-  if (!this->write_byte(AIC3204_PAGE_CTRL, 0x00) || !this->write_byte(AIC3204_DAC_CH_SET2, mute_mode_byte)) {
-    ESP_LOGE(TAG, "Unmute failed");
-  }
+bool AIC3204::set_mute_off() {
+  this->is_muted_ = false;
+  return this->write_mute_();
 }
 
-void AIC3204::set_mute_on() {
-  this->is_muted = true;
-  uint8_t mute_mode_byte = this->auto_mute_mode_ << 4;  // auto-mute control is bits 4-6
-  mute_mode_byte |= this->is_muted ? 0x0c : 0x00;
-  if (!this->write_byte(AIC3204_PAGE_CTRL, 0x00) || !this->write_byte(AIC3204_DAC_CH_SET2, mute_mode_byte)) {
-    ESP_LOGE(TAG, "Mute failed");
-  }
+bool AIC3204::set_mute_on() {
+  this->is_muted_ = true;
+  return this->write_mute_();
 }
 
-void AIC3204::set_auto_mute_mode(optional<uint8_t> auto_mute_mode) {
+bool AIC3204::set_auto_mute_mode(optional<uint8_t> auto_mute_mode) {
   if (!auto_mute_mode.has_value()) {
-    return;
+    return false;
   }
 
-  auto_mute_mode = clamp<uint8_t>(auto_mute_mode.value(), 0, 7);
-  ESP_LOGVV(TAG, "Setting auto_mute_mode to 0x%.2x", auto_mute_mode.value());
-
-  this->auto_mute_mode_ = auto_mute_mode.value();
-  uint8_t mute_mode_byte = this->auto_mute_mode_ << 4;  // auto-mute control is bits 4-6
-  mute_mode_byte |= this->is_muted ? 0x0c : 0x00;
-
-  if ((!this->write_byte(AIC3204_PAGE_CTRL, 0x00)) ||
-      (!this->write_byte(AIC3204_DAC_CH_SET2, auto_mute_mode.value()))) {
-    ESP_LOGE(TAG, "Set auto_mute_mode failed");
-  }
+  this->auto_mute_mode_ = auto_mute_mode.value() & 0x07;
+  ESP_LOGVV(TAG, "Setting auto_mute_mode to 0x%.2x", this->auto_mute_mode_);
+  return this->write_mute_();
 }
 
-void AIC3204::set_volume(optional<float> volume) {
+bool AIC3204::set_volume(optional<float> volume) {
   if (!volume.has_value()) {
-    return;
+    return false;
   }
 
-  const float dvc_min = -63.5;
-  const float dvc_max = 24;
+  this->volume_ = clamp<float>(volume.value(), dvc_min, dvc_max);
+  return this->write_volume_();
+}
+
+bool AIC3204::is_muted() {
+  return this->is_muted_;
+}
+
+float AIC3204::volume() {
+  return this->volume_;
+}
+
+bool AIC3204::write_mute_() {
+  uint8_t mute_mode_byte = this->auto_mute_mode_ << 4;  // auto-mute control is bits 4-6
+  mute_mode_byte |= this->is_muted_ ? 0x0c : 0x00;      // mute bits are 2-3
+  if (!this->write_byte(AIC3204_PAGE_CTRL, 0x00) || !this->write_byte(AIC3204_DAC_CH_SET2, mute_mode_byte)) {
+    ESP_LOGE(TAG, "Writing mute modes failed");
+    return false;
+  }
+  return true;
+}
+
+bool AIC3204::write_volume_() {
   const int8_t dvc_min_byte = -127;
   const int8_t dvc_max_byte = 48;
 
-  volume = clamp<float>(volume.value(), dvc_min, dvc_max);
-  int8_t volume_byte = dvc_min_byte + (2 * (volume.value() - dvc_min));
+  int8_t volume_byte = dvc_min_byte + (2 * (this->volume_ - dvc_min));
   volume_byte = clamp<int8_t>(volume_byte, dvc_min_byte, dvc_max_byte);
 
   ESP_LOGVV(TAG, "Setting volume to 0x%.2x", volume_byte & 0xFF);
 
   if ((!this->write_byte(AIC3204_PAGE_CTRL, 0x00)) || (!this->write_byte(AIC3204_DACL_VOL_D, volume_byte)) ||
       (!this->write_byte(AIC3204_DACR_VOL_D, volume_byte))) {
-    ESP_LOGE(TAG, "Set volume failed");
+    ESP_LOGE(TAG, "Writing volume failed");
+    return false;
   }
+  return true;
 }
-#endif
+
 }  // namespace aic3204
 }  // namespace esphome
+#endif

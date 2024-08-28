@@ -43,8 +43,12 @@ static const uint8_t AIC3204_OP_PWR_CTRL = 0x09;   // Register 9  - Output Drive
 static const uint8_t AIC3204_CM_CTRL = 0x0A;       // Register 10 - Common Mode Control
 static const uint8_t AIC3204_HPL_ROUTE = 0x0C;     // Register 12 - HPL Routing Select
 static const uint8_t AIC3204_HPR_ROUTE = 0x0D;     // Register 13 - HPR Routing Select
+static const uint8_t AIC3204_LOL_ROUTE = 0x0E;     // Register 14 - LOL Routing Selection
+static const uint8_t AIC3204_LOR_ROUTE = 0x0F;     // Register 15 - LOR Routing Selection
 static const uint8_t AIC3204_HPL_GAIN = 0x10;      // Register 16 - HPL Driver Gain
 static const uint8_t AIC3204_HPR_GAIN = 0x11;      // Register 17 - HPR Driver Gain
+static const uint8_t AIC3204_LOL_DRV_GAIN = 0x12;  // Register 18 - LOL Driver Gain Setting
+static const uint8_t AIC3204_LOR_DRV_GAIN = 0x13;  // Register 19 - LOR Driver Gain Setting
 static const uint8_t AIC3204_HP_START = 0x14;      // Register 20 - Headphone Driver Startup
 static const uint8_t AIC3204_LPGA_P_ROUTE = 0x34;  // Register 52 - Left PGA Positive Input Route
 static const uint8_t AIC3204_LPGA_N_ROUTE = 0x36;  // Register 54 - Left PGA Negative Input Route
@@ -56,20 +60,29 @@ static const uint8_t AIC3204_ADC_PTM = 0x3D;       // Register 61 - ADC Power Tu
 static const uint8_t AIC3204_AN_IN_CHRG = 0x47;    // Register 71 - Analog Input Quick Charging Config
 static const uint8_t AIC3204_REF_STARTUP = 0x7B;   // Register 123 - Reference Power Up Config
 
+static const float dvc_min = -63.5;                // Digital volume control min
+static const float dvc_max = 24;                   // Digital volume control max
+
 class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
+#ifdef USE_AUDIO_DAC
  public:
   void setup() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::IO; }
 
-#ifdef USE_AUDIO_DAC
-  void set_mute_off() override;
-  void set_mute_on() override;
-  void set_auto_mute_mode(optional<uint8_t> auto_mute_mode);
-  void set_volume(optional<float> volume) override;
+  bool set_mute_off() override;
+  bool set_mute_on() override;
+  bool set_auto_mute_mode(optional<uint8_t> auto_mute_mode);
+  bool set_volume(optional<float> volume) override;
+
+  bool is_muted() override;
+  float volume() override;
 
  protected:
+  bool write_mute_();
+  bool write_volume_();
   uint8_t auto_mute_mode_{0};
+  float volume_{0};
 #endif
 };
 

@@ -10,11 +10,15 @@ namespace audio_dac {
 class AudioDac : public Component {
 #ifdef USE_AUDIO_DAC
  public:
-  virtual void set_mute_off(){ this->is_muted = false; }
-  virtual void set_mute_on(){ this->is_muted = true; }
-  virtual void set_volume(optional<float> volume){}
+  virtual bool set_mute_off() = 0;
+  virtual bool set_mute_on() = 0;
+  virtual bool set_volume(optional<float> volume) = 0;
+
+  virtual bool is_muted() = 0;
+  virtual float volume() = 0;
+
  protected:
-  bool is_muted{false};
+  bool is_muted_{false};
 #endif
 };
 
