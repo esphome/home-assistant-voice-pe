@@ -10,10 +10,15 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
+#ifndef USE_AUDIO_DAC
+#include "esp_dsp.h"
+#endif
+
 namespace esphome {
 namespace nabu {
 
 // TODO:
+//  - Call audio_dac component for the various i2c writes/reads
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
 //  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
 //    speaker amp
@@ -205,7 +210,7 @@ void NabuMediaPlayer::setup() {
 
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
 
-  if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
+  if (!this->get_volume_().has_value() || !this->get_mute_().has_value()) {
     ESP_LOGE(TAG, "Couldn't communicate with DAC");
     this->mark_failed();
     return;
@@ -309,6 +314,17 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
             if (bytes_read > 0) {
               size_t bytes_written;
+
+#ifndef USE_AUDIO_DAC
+#if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
+              dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t),
+                                 this_speaker->software_volume_scale_factor_, 1, 1);
+#else
+              dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t),
+                                 this_speaker->software_volume_scale_factor_, 1, 1);
+#endif
+#endif
+
               if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
                 i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
               } else {
@@ -441,7 +457,6 @@ void NabuMediaPlayer::watch_media_commands_() {
     if (media_command.volume.has_value()) {
       this->set_volume_(media_command.volume.value());
       this->unmute_();
-      this->is_muted_ = false;
       this->publish_state();
     }
 
@@ -482,13 +497,12 @@ void NabuMediaPlayer::watch_media_commands_() {
           break;
         case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
           this->mute_();
-          this->is_muted_ = true;
+
           this->publish_state();
           break;
         }
         case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
           this->unmute_();
-          this->is_muted_ = false;
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
@@ -674,7 +688,8 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   return traits;
 };
 
-optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
+optional<float> NabuMediaPlayer::get_volume_(bool publish) {
+#ifdef USE_AUDIO_DAC
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
     ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
     return {};
@@ -687,6 +702,10 @@ optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
   }
 
   float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
+#else
+  float volume = this->volume;
+#endif
+
   if (publish) {
     this->volume = volume;
   }
@@ -695,6 +714,7 @@ optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
 }
 
 bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
+#ifdef USE_AUDIO_DAC
   int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
@@ -706,6 +726,11 @@ bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
     ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
     return false;
   }
+#else
+  // Use the decibel reduction table from audio_mixer.h
+  ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
+  this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
+#endif
 
   if (publish)
     this->volume = volume;
@@ -713,7 +738,8 @@ bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
   return true;
 }
 
-optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
+optional<bool> NabuMediaPlayer::get_mute_(bool publish) {
+#ifdef USE_AUDIO_DAC
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
     return {};
@@ -731,6 +757,9 @@ optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
   if (dac_mute_left == DAC_MUTE_COMMAND && dac_mute_right == DAC_MUTE_COMMAND) {
     is_muted = true;
   }
+#else
+  bool is_muted = this->is_muted_;
+#endif
 
   if (publish) {
     this->is_muted_ = is_muted;
@@ -739,6 +768,7 @@ optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
 }
 
 bool NabuMediaPlayer::mute_() {
+#ifdef USE_AUDIO_DAC
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
     return false;
@@ -749,11 +779,17 @@ bool NabuMediaPlayer::mute_() {
     ESP_LOGE(TAG, "DAC failed to mute left and right channels");
     return false;
   }
+#else
+  this->software_volume_scale_factor_ = 0;
+#endif
+
+  this->is_muted_ = true;
 
   return true;
 }
 
 bool NabuMediaPlayer::unmute_() {
+#ifdef USE_AUDIO_DAC
   if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
     ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
     return false;
@@ -764,6 +800,11 @@ bool NabuMediaPlayer::unmute_() {
     ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
     return false;
   }
+#else
+  this->set_volume_(this->volume);
+#endif
+
+  this->is_muted_ = false;
 
   return true;
 }

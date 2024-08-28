@@ -2,6 +2,9 @@
 
 #ifdef USE_ESP_IDF
 
+// Temporarily add this until the audio_dac component is used
+#define USE_AUDIO_DAC
+
 #include "audio_mixer.h"
 #include "audio_pipeline.h"
 
@@ -73,19 +76,19 @@ class NabuMediaPlayer : public Component,
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @return Volume read from DAC between 0.0 and 1.0, if successful. Updates volume_ if publish is true.
-  optional<float> get_dac_volume_(bool publish = true);
+  /// @return The current volume, if successful. Updates this->volume if publish is true.
+  optional<float> get_volume_(bool publish = true);
 
-  /// @return Mute status read from DAC, if successful. Updates is_muted_ if publish is true.
-  optional<bool> get_dac_mute_(bool publish = true);
+  /// @return The current mute status, if successful. Updates this->is_muted_ if publish is true.
+  optional<bool> get_mute_(bool publish = true);
 
-  /// @return true if I2C writes were successful
+  /// @return True if successful set. Updates this->volume if publish is true.
   bool set_volume_(float volume, bool publish = true);
 
-  /// @return true if I2C writes were successful
+  /// @return True if successfully muted, false otherwise
   bool mute_();
 
-  /// @return true if I2C writes were successful
+  /// @return True if successfully unmuted, false otherwise
   bool unmute_();
 
   esp_err_t start_i2s_driver_();
@@ -131,6 +134,12 @@ class NabuMediaPlayer : public Component,
 
   // The amount to change the volume on volume up/down commands
   float volume_increment_;
+
+#ifdef USE_AUDIO_DAC
+  // TODO: Add a pointer to the audio_dac generic object
+#else
+  int16_t software_volume_scale_factor_ = INT16_MAX;
+#endif
 };
 
 template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
@@ -145,7 +154,8 @@ template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public P
 //   TEMPLATABLE_VALUE(media_player::MediaFile, media_file)
 //   // public:
 //   //   void set_media_file(media_player::MediaFile media_file) { this->media_file_ = media_file; }
-//     void play(Ts... x) override { this->parent_->make_call().set_local_media_file(this->media_file_.value(x...)).perform(); }
+//     void play(Ts... x) override {
+//     this->parent_->make_call().set_local_media_file(this->media_file_.value(x...)).perform(); }
 //   // protected:
 //   //   media_player::MediaFile media_file_;
 // };
