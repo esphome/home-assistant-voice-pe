@@ -63,6 +63,14 @@ struct CommandEvent {
   size_t transition_samples = 0;
 };
 
+// Gives the Q15 fixed point scaling factor to reduce by 0 dB, 1dB, ..., 50 dB
+// dB to PCM scaling factor formula: floating_point_scale_factor = 2^(-db/6.014)
+// float to Q15 fixed point formula: q15_scale_factor = floating_point_scale_factor * 2^(15)
+static const std::vector<int16_t> decibel_reduction_table = {
+    32767, 29201, 26022, 23189, 20665, 18415, 16410, 14624, 13032, 11613, 10349, 9222, 8218, 7324, 6527, 5816, 5183,
+    4619,  4116,  3668,  3269,  2913,  2596,  2313,  2061,  1837,  1637,  1459,  1300, 1158, 1032, 920,  820,  731,
+    651,   580,   517,   461,   411,   366,   326,   291,   259,   231,   206,   183,  163,  146,  130,  116,  103};
+
 class AudioMixer {
  public:
   /// @brief Returns the number of bytes available to read from the ring buffer
@@ -123,7 +131,7 @@ class AudioMixer {
   void mix_audio_samples_without_clipping_(int16_t *media_buffer, int16_t *announcement_buffer,
                                            int16_t *combination_buffer, size_t samples_to_mix);
 
-  /// @brief Scales audio samples
+  /// @brief Scales audio samples. Scales in place when audio_samples = output_buffer.
   /// @param audio_samples PCM int16 audio samples
   /// @param output_buffer Buffer to store the scaled samples
   /// @param scale_factor Q15 fixed point scaling factor

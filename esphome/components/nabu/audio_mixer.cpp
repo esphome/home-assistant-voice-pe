@@ -20,14 +20,6 @@ static const size_t TASK_DELAY_MS = 20;
 static const int16_t MAX_AUDIO_SAMPLE_VALUE = INT16_MAX;
 static const int16_t MIN_AUDIO_SAMPLE_VALUE = INT16_MIN;
 
-// Gives the Q15 fixed point scaling factor to reduce by 0 dB, 1dB, ..., 50 dB
-// dB to PCM scaling factor formula: floating_point_scale_factor = 2^(-db/6.014)
-// float to Q15 fixed point formula: q15_scale_factor = floating_point_scale_factor * 2^(15)
-static const std::vector<int16_t> decibel_reduction_q15_table = {
-    32767, 29201, 26022, 23189, 20665, 18415, 16410, 14624, 13032, 11613, 10349, 9222, 8218, 7324, 6527, 5816, 5183,
-    4619,  4116,  3668,  3269,  2913,  2596,  2313,  2061,  1837,  1637,  1459,  1300, 1158, 1032, 920,  820,  731,
-    651,   580,   517,   461,   411,   366,   326,   291,   259,   231,   206,   183,  163,  146,  130,  116,  103};
-
 esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
   esp_err_t err = this->allocate_buffers_();
 
@@ -174,10 +166,8 @@ void AudioMixer::audio_mixer_task_(void *params) {
 
               size_t samples_left = ducking_transition_samples_remaining;
 
-              // There may be more than one step worth of samples to duck in the buffers, so manage the buffers'
-              // positions
+              // There may be more than one step worth of samples to duck in the buffers, so manage positions
               int16_t *current_media_buffer = media_buffer;
-              int16_t *current_combination_buffer = combination_buffer;
 
               size_t samples_left_in_step = samples_left % samples_per_ducking_step;
               if (samples_left_in_step == 0) {
@@ -193,14 +183,13 @@ void AudioMixer::audio_mixer_task_(void *params) {
               while (samples_left_to_duck > 0) {
                 // Ensure we only point to valid index in the Q15 scaling factor table
                 uint8_t safe_db_reduction_index =
-                    clamp<uint8_t>(current_ducking_db_reduction, 0, decibel_reduction_q15_table.size() - 1);
+                    clamp<uint8_t>(current_ducking_db_reduction, 0, decibel_reduction_table.size() - 1);
 
-                int16_t q15_scale_factor = decibel_reduction_q15_table[safe_db_reduction_index];
-                this_mixer->scale_audio_samples_(current_media_buffer, current_combination_buffer, q15_scale_factor,
+                int16_t q15_scale_factor = decibel_reduction_table[safe_db_reduction_index];
+                this_mixer->scale_audio_samples_(current_media_buffer, current_media_buffer, q15_scale_factor,
                                                  samples_left_to_duck);
 
                 current_media_buffer += samples_left_to_duck;
-                current_combination_buffer += samples_left_to_duck;
 
                 samples_read -= samples_left_to_duck;
                 samples_left -= samples_left_to_duck;
@@ -216,18 +205,14 @@ void AudioMixer::audio_mixer_task_(void *params) {
                 }
                 samples_left_to_duck = std::min(samples_left_in_step, samples_read);
               }
-
-              std::memcpy((void *) media_buffer, (void *) combination_buffer, total_samples_ducked * sizeof(int16_t));
             } else if (target_ducking_db_reduction > 0) {
               // We still need to apply a ducking scaling, but we are done transitioning
 
               uint8_t safe_db_reduction_index =
-                  clamp<uint8_t>(target_ducking_db_reduction, 0, decibel_reduction_q15_table.size() - 1);
+                  clamp<uint8_t>(target_ducking_db_reduction, 0, decibel_reduction_table.size() - 1);
 
-              int16_t q15_scale_factor = decibel_reduction_q15_table[safe_db_reduction_index];
-              this_mixer->scale_audio_samples_(media_buffer, combination_buffer, q15_scale_factor, samples_read);
-
-              std::memcpy((void *) media_buffer, (void *) combination_buffer, media_bytes_read);
+              int16_t q15_scale_factor = decibel_reduction_table[safe_db_reduction_index];
+              this_mixer->scale_audio_samples_(media_buffer, media_buffer, q15_scale_factor, samples_read);
             }
           }
         }
@@ -363,10 +348,7 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
   if (q15_scaling_factor < MAX_AUDIO_SAMPLE_VALUE) {
     // Need to scale to avoid clipping
 
-    this->scale_audio_samples_(media_buffer, combination_buffer, q15_scaling_factor, samples_to_mix);
-
-    // Move the scaled media samples back into the media buffer
-    std::memcpy((void *) media_buffer, (void *) combination_buffer, samples_to_mix * sizeof(int16_t));
+    this->scale_audio_samples_(media_buffer, media_buffer, q15_scaling_factor, samples_to_mix);
 
     // Mix both stream by adding them together with no bitshift
     // The dsps_add functions have the following inputs:
@@ -384,15 +366,12 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
 
 void AudioMixer::scale_audio_samples_(int16_t *audio_samples, int16_t *output_buffer, int16_t scale_factor,
                                       size_t samples_to_scale) {
-  // Scale the audio samples and store them in the temporary buffer
+  // Scale the audio samples and store them in the output buffer
 #if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
   dsps_mulc_s16_ae32(audio_samples, output_buffer, samples_to_scale, scale_factor, 1, 1);
 #else
   dsps_mulc_s16_ansi(audio_samples, output_buffer, samples_to_scale, scale_factor, 1, 1);
 #endif
-
-  // Move the scaled audio samples back into their original buffer
-  std::memcpy((void *) audio_samples, (void *) output_buffer, samples_to_scale * sizeof(int16_t));
 }
 
 }  // namespace nabu
