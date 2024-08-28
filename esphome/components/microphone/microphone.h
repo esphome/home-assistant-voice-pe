@@ -31,8 +31,11 @@ class Microphone {
   // Reset the ring buffer
   virtual void reset() {}
 
+  virtual void set_mute_state(bool mute_state) {};
+
   bool is_running() const { return this->state_ == STATE_RUNNING; }
   bool is_stopped() const { return this->state_ == STATE_STOPPED; }
+  bool is_muted() const { return this->state_ == STATE_MUTED; }
 
  protected:
   State state_{STATE_STOPPED};

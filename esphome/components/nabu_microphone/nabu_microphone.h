@@ -77,12 +77,26 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
  public:
   void setup() override;
 
-  void start() override { this->parent_->start(); }
+  void start() override {
+    this->parent_->start();
+    this->is_muted_ = false;
+    this->requested_stop_ = false;
+  }
 
   void set_parent(NabuMicrophone *nabu_microphone) { this->parent_ = nabu_microphone; }
 
-  void stop() override {};
+  void stop() override {
+    this->requested_stop_ = true;
+    this->is_muted_ = true;  // Mute until it is actually stopped
+  };
+
   void loop() override;
+
+  void set_mute_state(bool mute_state) override { this->is_muted_ = mute_state; }
+  bool get_mute_state() { return this->is_muted_; }
+
+  // void set_requested_stop() { this->requested_stop_ = true; }
+  bool get_requested_stop() { return this->requested_stop_; }
 
   size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len, 0); };
   size_t available() override { return this->ring_buffer_->available(); }
@@ -98,6 +112,8 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
   std::unique_ptr<RingBuffer> ring_buffer_;
 
   bool amplify_;
+  bool is_muted_;
+  bool requested_stop_;
 };
 
 }  // namespace nabu_microphone
