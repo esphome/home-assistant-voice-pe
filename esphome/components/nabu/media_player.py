@@ -192,6 +192,42 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
 ).extend(i2c.i2c_device_schema(0x18))
 
 
+def _read_audio_file_and_type(file_config):
+    conf_file = file_config[CONF_FILE]
+    file_source = conf_file[CONF_TYPE]
+    if file_source == TYPE_LOCAL:
+        path = CORE.relative_config_path(conf_file[CONF_PATH])
+    elif file_source == TYPE_WEB:
+        path = _compute_local_file_path(conf_file)
+
+    with open(path, "rb") as f:
+        data = f.read()
+
+    magic = Magic(mime=True)
+    file_type = magic.from_buffer(data)
+
+    media_file_type = MEDIA_FILE_TYPE_ENUM["NONE"]
+    if "wav" in file_type:
+        media_file_type = MEDIA_FILE_TYPE_ENUM["WAV"]
+    elif "mpeg" in file_type:
+        media_file_type = MEDIA_FILE_TYPE_ENUM["MP3"]
+    elif "flac" in file_type:
+        media_file_type = MEDIA_FILE_TYPE_ENUM["FLAC"]
+
+    return data, media_file_type
+
+
+def _supported_local_file_validate(config):
+    if files_list := config.get(CONF_FILES):
+        for file_config in files_list:
+            _, media_file_type = _read_audio_file_and_type(file_config)
+            if str(media_file_type) == str(MEDIA_FILE_TYPE_ENUM["NONE"]):
+                raise cv.Invalid("Unsupported local media file.")
+
+
+FINAL_VALIDATE_SCHEMA = _supported_local_file_validate
+
+
 async def to_code(config):
     esp32.add_idf_component(
         name="esp-dsp",
@@ -213,26 +249,7 @@ async def to_code(config):
 
     if files_list := config.get(CONF_FILES):
         for file_config in files_list:
-            conf_file = file_config[CONF_FILE]
-            file_source = conf_file[CONF_TYPE]
-            if file_source == TYPE_LOCAL:
-                path = CORE.relative_config_path(conf_file[CONF_PATH])
-            elif file_source == TYPE_WEB:
-                path = _compute_local_file_path(conf_file)
-
-            with open(path, "rb") as f:
-                data = f.read()
-
-            magic = Magic(mime=True)
-            file_type = magic.from_buffer(data)
-
-            media_file_type = None
-            if "wav" in file_type:
-                media_file_type = MEDIA_FILE_TYPE_ENUM["WAV"]
-            elif "mpeg" in file_type:
-                media_file_type = MEDIA_FILE_TYPE_ENUM["MP3"]
-            elif "flac" in file_type:
-                media_file_type = MEDIA_FILE_TYPE_ENUM["FLAC"]
+            data, media_file_type = _read_audio_file_and_type(file_config)
 
             rhs = [HexInt(x) for x in data]
             prog_arr = cg.progmem_array(file_config[CONF_RAW_DATA_ID], rhs)
