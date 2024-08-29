@@ -116,6 +116,7 @@ AudioReaderState AudioReader::read() {
 AudioReaderState AudioReader::file_read_() {
   if (this->media_file_bytes_left_ > 0) {
     size_t bytes_to_write = std::min(this->media_file_bytes_left_, this->output_ring_buffer_->free());
+    bytes_to_write = std::min(bytes_to_write, this->transfer_buffer_size_);
 
     if (bytes_to_write == 0) {
       return AudioReaderState::READING;
@@ -131,7 +132,7 @@ AudioReaderState AudioReader::file_read_() {
 }
 
 AudioReaderState AudioReader::http_read_() {
-  size_t bytes_to_read = this->output_ring_buffer_->free();
+  size_t bytes_to_read = std::min(this->output_ring_buffer_->free(), this->transfer_buffer_size_);
 
   if (bytes_to_read == 0) {
     return AudioReaderState::READING;

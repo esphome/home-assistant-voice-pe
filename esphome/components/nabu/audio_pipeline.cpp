@@ -10,7 +10,8 @@ namespace nabu {
 
 static const size_t QUEUE_COUNT = 10;
 
-static const size_t HTTP_BUFFER_SIZE = 64 * 1024;
+static const size_t FILE_BUFFER_SIZE = 32 * 1024;
+static const size_t FILE_RING_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
@@ -91,7 +92,7 @@ esp_err_t AudioPipeline::start(media_player::MediaFile *media_file, uint32_t tar
 
 esp_err_t AudioPipeline::allocate_buffers_() {
   if (this->raw_file_ring_buffer_ == nullptr)
-    this->raw_file_ring_buffer_ = RingBuffer::create(HTTP_BUFFER_SIZE);
+    this->raw_file_ring_buffer_ = RingBuffer::create(FILE_RING_BUFFER_SIZE);
 
   if (this->decoded_ring_buffer_ == nullptr)
     this->decoded_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
@@ -292,7 +293,7 @@ void AudioPipeline::read_task_(void *params) {
       event.source = InfoErrorSource::READER;
       esp_err_t err = ESP_OK;
 
-      AudioReader reader = AudioReader(this_pipeline->raw_file_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+      AudioReader reader = AudioReader(this_pipeline->raw_file_ring_buffer_.get(), FILE_BUFFER_SIZE);
 
       if (event_bits & READER_COMMAND_INIT_FILE) {
         err = reader.start(this_pipeline->current_media_file_, this_pipeline->current_media_file_type_);
@@ -360,7 +361,7 @@ void AudioPipeline::decode_task_(void *params) {
       event.source = InfoErrorSource::DECODER;
 
       std::unique_ptr<AudioDecoder> decoder = make_unique<AudioDecoder>(
-          this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(), HTTP_BUFFER_SIZE);
+          this_pipeline->raw_file_ring_buffer_.get(), this_pipeline->decoded_ring_buffer_.get(), FILE_BUFFER_SIZE);
       esp_err_t err = decoder->start(this_pipeline->current_media_file_type_);
 
       if (err != ESP_OK) {
