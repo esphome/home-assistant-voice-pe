@@ -1129,6 +1129,10 @@ external_components:
       - nabu_microphone
       - voice_assistant
     refresh: 0s
+  - source: github://esphome/esphome@dev
+    components:
+      - http_request
+    refresh: 0s
 
 audio_dac:
   - platform: aic3204
