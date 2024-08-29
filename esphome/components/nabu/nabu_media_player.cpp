@@ -18,8 +18,6 @@ namespace nabu {
 // TODO:
 //  - Call audio_dac component for the various i2c writes/reads
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
-//  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
-//    speaker amp
 //  - Tune task memory requirements and potentially buffer sizes if issues appear
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
@@ -65,7 +63,7 @@ namespace nabu {
 //    - It determines the overall state of the media player by considering the state of each pipeline
 //      - announcement playback takes highest priority
 
-static const size_t QUEUE_COUNT = 20;
+static const size_t QUEUE_LENGTH = 20;
 
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
 static const size_t DMA_BUFFER_COUNT = 4;
@@ -206,9 +204,8 @@ void NabuMediaPlayer::setup() {
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
-  this->media_control_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(MediaCallCommand));
-
-  this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
+  this->media_control_command_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(MediaCallCommand));
+  this->speaker_event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
 
   this->pref_ = global_preferences->make_preference<VolumeRestoreState>(this->get_object_id_hash());
 
@@ -587,29 +584,13 @@ void NabuMediaPlayer::loop() {
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-    if (this->is_idle_muted_ && !this->is_muted_) {
-      // this->unmute_();
-      this->is_idle_muted_ = false;
-    }
   } else {
     if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
-      if (!this->is_idle_muted_) {
-        // this->mute_();
-        this->is_idle_muted_ = true;
-      }
     } else if (this->is_paused_) {
       this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
-      if (!this->is_idle_muted_) {
-        // this->mute_();
-        this->is_idle_muted_ = true;
-      }
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
-      if (this->is_idle_muted_ && !this->is_muted_) {
-        // this->unmute_();
-        this->is_idle_muted_ = false;
-      }
     }
   }
 

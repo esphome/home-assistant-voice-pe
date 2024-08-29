@@ -127,9 +127,6 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   bool is_paused_{false};
   bool is_muted_{false};
 
-  // We mute the DAC whenever there is no audio playback to avoid speaker hiss
-  bool is_idle_muted_{false};
-
   // The amount to change the volume on volume up/down commands
   float volume_increment_;
 
