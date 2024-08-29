@@ -1114,11 +1114,6 @@ media_player:
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_cancelled.wav
 
 external_components:
-  - source: github://jesserockz/esphome-components
-    components:
-      - file
-      - udp_audio
-    refresh: 0s
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
@@ -1133,12 +1128,6 @@ external_components:
       - nabu
       - nabu_microphone
       - voice_assistant
-    refresh: 0s
-  - source: github://esphome/esphome@dev
-    components:
-      - update
-      - http_request
-      - watchdog
     refresh: 0s
 
 audio_dac:
