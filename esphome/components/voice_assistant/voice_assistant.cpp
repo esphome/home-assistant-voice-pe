@@ -300,6 +300,8 @@ void VoiceAssistant::loop() {
       msg.audio_settings = audio_settings;
       msg.wake_word_phrase = this->wake_word_;
       this->wake_word_ = "";
+      msg.pipeline_run_id = this->pipeline_run_id_;
+      this->pipeline_run_id_ = "";
 
       if (this->api_client_ == nullptr || !this->api_client_->send_voice_assistant_request(msg)) {
         ESP_LOGW(TAG, "Could not request start");
@@ -767,7 +769,11 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
     }
     case api::enums::VOICE_ASSISTANT_RUN_END: {
       ESP_LOGD(TAG, "Assist Pipeline ended");
-      if (this->state_ == State::STREAMING_MICROPHONE) {
+      if (this->state_ == State::STARTING_PIPELINE) {
+        // Pipeline ended before starting microphone
+        this->set_state_(State::IDLE, State::IDLE);
+      }
+      else if (this->state_ == State::STREAMING_MICROPHONE) {
         this->ring_buffer_->reset();
 #ifdef USE_ESP_ADF
         if (this->use_wake_word_) {
@@ -908,6 +914,14 @@ void VoiceAssistant::timer_tick_() {
     res.push_back(timer);
   }
   this->timer_tick_trigger_->trigger(res);
+}
+
+void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounce &msg) {
+#ifdef USE_MEDIA_PLAYER
+  if (this->media_player_ != nullptr) {
+    this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
+  }
+#endif
 }
 
 VoiceAssistant *global_voice_assistant = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
