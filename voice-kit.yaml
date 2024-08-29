@@ -1092,6 +1092,7 @@ media_player:
     id: nabu_media_player
     name: Media Player
     internal: false
+    audio_dac:
     sample_rate: 16000  # use 48000 for beta firmware
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
@@ -1121,12 +1122,15 @@ external_components:
       type: git
       url: https://github.com/esphome/voice-kit
       ref: dev
-    components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word]
+    components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word, audio_dac, aic3204]
     refresh: 0s
 
   - source: github://esphome/esphome@dev
     components: [update, http_request, watchdog]
     refresh: 0s
+
+audio_dac:
+  - platform: aic3204
 
 micro_wake_word:
   models:
