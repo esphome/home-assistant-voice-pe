@@ -2,14 +2,14 @@ import esphome.codegen as cg
 from esphome.components import i2c
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components.audio_dac import AudioDac, CONFIG_SCHEMA_BASE, to_code_base
+from esphome.components.audio_dac import AudioDac, audio_dac_ns
 from esphome.const import CONF_ID, CONF_MODE
 
 CODEOWNERS = ["@kbx81"]
 DEPENDENCIES = ["i2c"]
 
 aic3204_ns = cg.esphome_ns.namespace("aic3204")
-AIC3204 = aic3204_ns.class_("AIC3204", AudioDac, i2c.I2CDevice)
+AIC3204 = aic3204_ns.class_("AIC3204", AudioDac, cg.Component, i2c.I2CDevice)
 
 SetAutoMuteAction = aic3204_ns.class_("SetAutoMuteAction", automation.Action)
 
@@ -19,7 +19,7 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(AIC3204),
         }
     )
-    .extend(CONFIG_SCHEMA_BASE)
+    .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x18))
 )
 
@@ -47,5 +47,9 @@ async def aic3204_set_volume_to_code(config, action_id, template_arg, args):
 
 
 async def to_code(config):
-    var = await to_code_base(config)
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+
+    cg.add_define("USE_AUDIO_DAC")
+    cg.add_global(audio_dac_ns.using)

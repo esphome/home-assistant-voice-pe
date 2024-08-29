@@ -65,7 +65,7 @@ static const uint8_t AIC3204_REF_STARTUP = 0x7B;   // Register 123 - Reference P
 static const float dvc_min = -63.5;                // Digital volume control min
 static const float dvc_max = 24;                   // Digital volume control max
 
-class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
+class AIC3204 : public audio_dac::AudioDac, public Component, public i2c::I2CDevice {
  public:
   void setup() override;
   void dump_config() override;
