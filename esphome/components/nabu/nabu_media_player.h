@@ -2,20 +2,18 @@
 
 #ifdef USE_ESP_IDF
 
-// Temporarily add this until the audio_dac component is used
-#define USE_AUDIO_DAC
-
 #include "audio_mixer.h"
 #include "audio_pipeline.h"
 
-#include "esphome/components/media_player/media_player.h"
-#include "esphome/components/i2c/i2c.h"
+#ifdef USE_AUDIO_DAC
+#include "esphome/components/audio_dac/audio_dac.h"
+#endif
 #include "esphome/components/i2s_audio/i2s_audio.h"
+#include "esphome/components/media_player/media_player.h"
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
-#include "esphome/core/ring_buffer.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -50,10 +48,7 @@ struct VolumeRestoreState {
   bool is_muted;
 };
 
-class NabuMediaPlayer : public Component,
-                        public media_player::MediaPlayer,
-                        public i2s_audio::I2SAudioOut,
-                        public i2c::I2CDevice {
+class NabuMediaPlayer : public Component, public media_player::MediaPlayer, public i2s_audio::I2SAudioOut {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }
   void setup() override;
@@ -74,8 +69,9 @@ class NabuMediaPlayer : public Component,
 
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
 
-  void reconfigure_dac_new_settings();
-  void reconfigure_dac_old_settings();
+#ifdef USE_AUDIO_DAC
+  void set_audio_dac(audio_dac::AudioDac *audio_dac) { this->audio_dac_ = audio_dac; }
+#endif
 
  protected:
   // Receives commands from HA or from the voice assistant component
@@ -138,10 +134,10 @@ class NabuMediaPlayer : public Component,
   float volume_increment_;
 
 #ifdef USE_AUDIO_DAC
-  // TODO: Add a pointer to the audio_dac generic object
-#else
-  int16_t software_volume_scale_factor_ = INT16_MAX;
+  audio_dac::AudioDac *audio_dac_{nullptr};
 #endif
+
+  int16_t software_volume_scale_factor_;  // Q15 fixed point scale factor
 
   // Used to save volume/mute state for restoration
   ESPPreferenceObject pref_;

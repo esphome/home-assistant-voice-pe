@@ -10,9 +10,7 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
-#ifndef USE_AUDIO_DAC
 #include "esp_dsp.h"
-#endif
 
 namespace esphome {
 namespace nabu {
@@ -80,6 +78,8 @@ static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
 static const size_t TASK_DELAY_MS = 5;
+
+static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
 
 enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_START = (1 << 0),  // Starts the main task purpose
@@ -217,7 +217,7 @@ void NabuMediaPlayer::setup() {
     this->set_volume_(volume_restore_state.volume);
     this->set_mute_state_(volume_restore_state.is_muted);
   } else {
-    this->set_volume_(0.5f);
+    this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
     this->set_mute_state_(false);
   }
 
@@ -320,15 +320,20 @@ void NabuMediaPlayer::speaker_task(void *params) {
             if (bytes_read > 0) {
               size_t bytes_written;
 
-#ifndef USE_AUDIO_DAC
+#ifdef USE_AUDIO_DAC
+              if (this_speaker->audio_dac_ == nullptr)
+#endif
+              {  // Fallback to software volume control if an audio dac isn't available
+                int16_t volume_scale_factor =
+                    this_speaker->software_volume_scale_factor_;  // Atomic read, so thread safe
+                if (volume_scale_factor < INT16_MAX) {
 #if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
-              dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t),
-                                 this_speaker->software_volume_scale_factor_, 1, 1);
+                  dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
 #else
-              dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t),
-                                 this_speaker->software_volume_scale_factor_, 1, 1);
+                  dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
 #endif
-#endif
+                }
+              }
 
               if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
                 i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
@@ -693,28 +698,6 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   return traits;
 };
 
-void NabuMediaPlayer::set_volume_(float volume, bool publish) {
-#ifdef USE_AUDIO_DAC
-  int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
-
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE) ||
-      !this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
-      !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
-    ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
-    return;
-  }
-#else
-  // Use the decibel reduction table from audio_mixer.h for software volume control
-  ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
-  this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
-#endif
-
-  if (publish) {
-    this->volume = volume;
-    this->save_volume_restore_state_();
-  }
-}
-
 void NabuMediaPlayer::save_volume_restore_state_() {
   VolumeRestoreState volume_restore_state;
   volume_restore_state.volume = this->volume;
@@ -724,373 +707,43 @@ void NabuMediaPlayer::save_volume_restore_state_() {
 
 void NabuMediaPlayer::set_mute_state_(bool mute_state) {
 #ifdef USE_AUDIO_DAC
-  uint8_t mute_state_command = DAC_UNMUTE_COMMAND;
-  if (mute_state) {
-    mute_state_command = DAC_MUTE_COMMAND;
-  }
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE) ||
-      !this->write_byte(DAC_LEFT_MUTE_REGISTER, mute_state_command) ||
-      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, mute_state_command))) {
-    ESP_LOGE(TAG, "DAC failed to change mute state on left and right channels");
-    return;
-  }
-#else
-  if (mute_state) {
-    this->software_volume_scale_factor_ = 0;
-  } else {
-    this->set_volume_(this->volume_, false);
-  }
+  if (this->audio_dac_ != nullptr) {
+    if (mute_state) {
+      this->audio_dac_->set_mute_on();
+    } else {
+      this->audio_dac_->set_mute_off();
+    }
+  } else
 #endif
+  {  // Fall back to software mute control if there is no audio_dac or if it isn't configured
+    if (mute_state) {
+      this->software_volume_scale_factor_ = 0;
+    } else {
+      this->set_volume_(this->volume, false);  // restore previous volume
+    }
+  }
 
   this->is_muted_ = mute_state;
 
   this->save_volume_restore_state_();
 }
 
-#define AIC3204_PAGE_CTRL 0x00     // Register 0  - Page Control
-#define AIC3204_SW_RST 0x01        // Register 1  - Software Reset
-#define AIC3204_CLK_PLL1 0x04      // Register 4  - Clock Setting Register 1, Multiplexers
-#define AIC3204_CLK_PLL2 0x05      // Register 5  - Clock Setting Register 2, P and R values
-#define AIC3204_CLK_PLL3 0x06      // Register 6  - Clock Setting Register 3, J values
-#define AIC3204_NDAC 0x0B          // Register 11 - NDAC Divider Value
-#define AIC3204_MDAC 0x0C          // Register 12 - MDAC Divider Value
-#define AIC3204_DOSR 0x0E          // Register 14 - DOSR Divider Value (LS Byte)
-#define AIC3204_NADC 0x12          // Register 18 - NADC Divider Value
-#define AIC3204_MADC 0x13          // Register 19 - MADC Divider Value
-#define AIC3204_AOSR 0x14          // Register 20 - AOSR Divider Value
-#define AIC3204_CODEC_IF 0x1B      // Register 27 - CODEC Interface Control
-#define AIC3204_AUDIO_IF_5 0x20    // Register 32 - Audio Interface Setting Register 5
-#define AIC3204_DAC_SIG_PROC 0x3C  // Register 60 - DAC Sig Processing Block Control
-#define AIC3204_ADC_SIG_PROC 0x3D  // Register 61 - ADC Sig Processing Block Control
-#define AIC3204_DAC_CH_SET1 0x3F   // Register 63 - DAC Channel Setup 1
-#define AIC3204_DAC_CH_SET2 0x40   // Register 64 - DAC Channel Setup 2
-#define AIC3204_DACL_VOL_D 0x41    // Register 65 - DAC Left Digital Vol Control
-#define AIC3204_DACR_VOL_D 0x42    // Register 66 - DAC Right Digital Vol Control
-#define AIC3204_DRC_ENABLE 0x44
-#define AIC3204_ADC_CH_SET 0x51    // Register 81 - ADC Channel Setup
-#define AIC3204_ADC_FGA_MUTE 0x52  // Register 82 - ADC Fine Gain Adjust/Mute
+void NabuMediaPlayer::set_volume_(float volume, bool publish) {
+#ifdef USE_AUDIO_DAC
+  if (this->audio_dac_ != nullptr) {
+    this->audio_dac_->set_volume(volume);
+  } else
+#endif
+  {  // Fall back to software volume control if there is no audio_dac or if it isn't configured
+    // Use the decibel reduction table from audio_mixer.h for software volume control
+    ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
+    this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
+  }
 
-// Page 1
-#define AIC3204_PWR_CFG 0x01       // Register 1  - Power Config
-#define AIC3204_LDO_CTRL 0x02      // Register 2  - LDO Control
-#define AIC3204_PLAY_CFG1 0x03     // Register 3  - Playback Config 1
-#define AIC3204_PLAY_CFG2 0x04     // Register 4  - Playback Config 2
-#define AIC3204_OP_PWR_CTRL 0x09   // Register 9  - Output Driver Power Control
-#define AIC3204_CM_CTRL 0x0A       // Register 10 - Common Mode Control
-#define AIC3204_HPL_ROUTE 0x0C     // Register 12 - HPL Routing Select
-#define AIC3204_HPR_ROUTE 0x0D     // Register 13 - HPR Routing Select
-#define AIC3204_HPL_GAIN 0x10      // Register 16 - HPL Driver Gain
-#define AIC3204_HPR_GAIN 0x11      // Register 17 - HPR Driver Gain
-#define AIC3204_HP_START 0x14      // Register 20 - Headphone Driver Startup
-#define AIC3204_LPGA_P_ROUTE 0x34  // Register 52 - Left PGA Positive Input Route
-#define AIC3204_LPGA_N_ROUTE 0x36  // Register 54 - Left PGA Negative Input Route
-#define AIC3204_RPGA_P_ROUTE 0x37  // Register 55 - Right PGA Positive Input Route
-#define AIC3204_RPGA_N_ROUTE 0x39  // Register 57 - Right PGA Negative Input Route
-#define AIC3204_LPGA_VOL 0x3B      // Register 59 - Left PGA Volume
-#define AIC3204_RPGA_VOL 0x3C      // Register 60 - Right PGA Volume
-#define AIC3204_ADC_PTM 0x3D       // Register 61 - ADC Power Tune Config
-#define AIC3204_AN_IN_CHRG 0x47    // Register 71 - Analog Input Quick Charging Config
-#define AIC3204_REF_STARTUP 0x7B   // Register 123 - Reference Power Up Config
-
-void NabuMediaPlayer::reconfigure_dac_new_settings() {
-  // Set register page to 0
-  this->write_byte(AIC3204_PAGE_CTRL, 0x00);
-
-  // Initiate SW reset (PLL is powered off as part of reset)
-  this->write_byte(AIC3204_SW_RST, 0x01);
-
-  // Program clock settings
-
-  // Default is CODEC_CLKIN is from MCLK pin. Don't need to change this.
-  /*
-  // Enable PLL, MCLK is input to PLL
-  this->write_byte(AIC3204_CLK_PLL1, 0x03);
-  // MCLK is 24.576MHz, R = 1, J = 4, D = 0, P = 3, PLL_CLK = MCLK * R * J.D / P
-  this->write_byte(AIC3204_CLK_PLL2, 0xB1);
-  this->write_byte(AIC3204_CLK_PLL3, 0x04);
-  // Power up NDAC and set to 4, or could we disable PLL and just set NDAC to 3?
-  this->write_byte(AIC3204_NDAC, 0x84);
-  // Power up MDAC and set to 4
-  this->write_byte(AIC3204_MDAC, 0x84);
-  */
-  // Power up NDAC and set to 2
-  this->write_byte(AIC3204_NDAC, 0x82);
-
-  /*** MODIFICATION HERE
-   * MDAC*NDAC*FOSR*48Khz = mClk (which I believe is 24.576 MHz)
-   * (See page 51 of
-   * https://www.ti.com/lit/ml/slaa557/slaa557.pdf?ts=1723766936991&ref_url=https%253A%252F%252Fwww.ti.com%252F)
-   * They didn't properly modify this when switching to the 48 kHz firmware
-   * We do need MDAC*DOSR/32 >= the resource compute level for the processing block
-   * So here 2*128/32 = 8, which is equal to processing block 1 's recourse compute
-   * See https://www.ti.com/lit/an/slaa404c/slaa404c.pdf?ts=1723806329961 page 5 for workflow on how to determine
-   * these settings
-   */
-  // Power up MDAC and set to 2 (was originally 6)
-  this->write_byte(AIC3204_MDAC, 0x82);
-
-  // // Power up NADC and set to 1
-  // this->write_byte(AIC3204_NADC, 0x81);
-  // // Power up MADC and set to 4
-  // this->write_byte(AIC3204_MADC, 0x84);
-  // Program DOSR = 128
-  this->write_byte(AIC3204_DOSR, 0x80);
-  // // Program AOSR = 128
-  // this->write_byte(AIC3204_AOSR, 0x80);
-  // // Set Audio Interface Config: I2S, 24 bits, slave mode, DOUT always driving.
-  // this->write_byte(AIC3204_CODEC_IF, 0x20);
-  // Set Audio Interface Config: I2S, 32 bits, slave mode, DOUT always driving.
-  this->write_byte(AIC3204_CODEC_IF, 0x30);
-  // For I2S Firmware only, set SCLK/MFP3 pin as Audio Data In
-  this->write_byte(56, 0x02);
-  this->write_byte(31, 0x01);
-  this->write_byte(32, 0x01);
-  // Program the DAC processing block to be used - PRB_P1
-  this->write_byte(AIC3204_DAC_SIG_PROC, 0x01);
-  // Program the ADC processing block to be used - PRB_R1
-  this->write_byte(AIC3204_ADC_SIG_PROC, 0x01);
-  // Select Page 1
-  this->write_byte(AIC3204_PAGE_CTRL, 0x01);
-  // Enable the internal AVDD_LDO:
-  this->write_byte(AIC3204_LDO_CTRL, 0x09);
-
-  //
-  // Program Analog Blocks
-  // ---------------------
-  //
-  // Disable Internal Crude AVdd in presence of external AVdd supply or before powering up internal AVdd LDO
-  this->write_byte(AIC3204_PWR_CFG, 0x08);
-  // Enable Master Analog Power Control
-  this->write_byte(AIC3204_LDO_CTRL, 0x01);
-  // Set Common Mode voltages: Full Chip CM to 0.9V and Output Common Mode for Headphone to 1.65V and HP powered from
-  // LDOin @ 3.3V.
-
-  /*** MODIFICATION HERE! ***
-   * All page changes refer to the TLV320AIC3204 Application Reference Guide
-   *
-   * Page 125: Common mode control register, set d6 to 1 to make the full chip common mode = 0.75 v
-   * We are using the internal AVdd regulator with a nominal output of 1.72 V (see LDO_CTRL_REGISTER on page 123)
-   * Page 86 says to only set the common mode voltage to 0.9 v if AVdd >= 1.8... but it isn't
-   * We do need to tweak the HPL and HPR gain settings further down, as page 47 says we have to compensate with a -2
-   * gain
-   */
-  this->write_byte(AIC3204_CM_CTRL, 0b01000000);  // 0x33);
-
-  // Set PowerTune Modes
-  // Set the Left & Right DAC PowerTune mode to PTM_P3/4. Use Class-AB driver.
-  this->write_byte(AIC3204_PLAY_CFG1, 0x00);
-  this->write_byte(AIC3204_PLAY_CFG2, 0x00);
-  // // Set the Left & Right DAC PowerTune mode to PTM_P3/4. Use Class-D driver.
-  // this->write_byte(AIC3204_PLAY_CFG1, 0xC0);
-  // this->write_byte(AIC3204_PLAY_CFG2, 0xC0);
-
-  // // Set ADC PowerTune mode PTM_R4.
-  // this->write_byte(AIC3204_ADC_PTM, 0x00);
-  // // Set MicPGA startup delay to 3.1ms
-  // this->write_byte(AIC3204_AN_IN_CHRG, 0x31);
-
-  // Set the REF charging time to 40ms
-  this->write_byte(AIC3204_REF_STARTUP, 0x01);
-  // HP soft stepping settings for optimal pop performance at power up
-  // Rpop used is 6k with N = 6 and soft step = 20usec. This should work with 47uF coupling
-  // capacitor. Can try N=5,6 or 7 time constants as well. Trade-off delay vs “pop” sound.
-  this->write_byte(AIC3204_HP_START, 0x25);
-  // Route Left DAC to HPL
-  this->write_byte(AIC3204_HPL_ROUTE, 0x08);
-  // Route Right DAC to HPR
-  this->write_byte(AIC3204_HPR_ROUTE, 0x08);
-  // Route Left DAC to LOL
-  this->write_byte(0x0e, 0x08);
-  // Route Right DAC to LOR
-  this->write_byte(0x0f, 0x08);
-  // We are using Line input with low gain for PGA so can use 40k input R but lets stick to 20k for now.
-  // // Route IN2_L to LEFT_P with 20K input impedance
-  // this->write_byte(AIC3204_LPGA_P_ROUTE, 0x20);
-  // // Route IN2_R to LEFT_M with 20K input impedance
-  // this->write_byte(AIC3204_LPGA_N_ROUTE, 0x20);
-  // // Route IN1_R to RIGHT_P with 20K input impedance
-  // this->write_byte(AIC3204_RPGA_P_ROUTE, 0x80);
-  // // Route IN1_L to RIGHT_M with 20K input impedance
-  // this->write_byte(AIC3204_RPGA_N_ROUTE, 0x20);
-
-  /**** MODIFICATION HERE
-   *
-   * We compensate for the gain from modifying the common voltage
-   */
-
-  // Unmute HPL and set gain to 0dB
-  this->write_byte(AIC3204_HPL_GAIN,
-                   0b00111110);  // -2dB gain per page 47 of TLV320AIC3204 Application Reference Guide //0x00);
-  // Unmute HPR and set gain to 0dB
-  this->write_byte(AIC3204_HPR_GAIN,
-                   0b00111110);  // -2dB gain per page 47 of TLV320AIC3204 Application Reference Guide //0x00);
-
-  // Unmute LOL and set gain to 0dB
-  this->write_byte(0x12, 0x00);
-  // Unmute LOR and set gain to 0dB
-  this->write_byte(0x13, 0x00);
-  // Unmute Left MICPGA, Set Gain to 0dB.
-  this->write_byte(AIC3204_LPGA_VOL, 0x00);
-  // Unmute Right MICPGA, Set Gain to 0dB.
-  this->write_byte(AIC3204_RPGA_VOL, 0x00);
-  // // Power up HPL and HPR drivers
-  // this->write_byte(AIC3204_OP_PWR_CTRL, 0x30) == 0
-  // Power up HPL and HPR, LOL and LOR drivers
-  this->write_byte(AIC3204_OP_PWR_CTRL, 0x3C);
-
-  delay(2500);
-
-  //
-  // Power Up DAC/ADC
-  // ----------------
-  //
-  // Select Page 0
-  this->write_byte(AIC3204_PAGE_CTRL, 0x00);
-  // Disable DRC
-  // this->write_byte(AIC3204_DRC_ENABLE, 0x0F);
-  // Power up the Left and Right DAC Channels. Route Left data to Left DAC and Right data to Right DAC.
-  // DAC Vol control soft step 1 step per DAC word clock.
-  this->write_byte(AIC3204_DAC_CH_SET1, 0xd4);
-  // Power up Left and Right ADC Channels, ADC vol ctrl soft step 1 step per ADC word clock.
-  this->write_byte(AIC3204_ADC_CH_SET, 0xc0);
-  // Unmute Left and Right DAC digital volume control
-  this->write_byte(AIC3204_DAC_CH_SET2, 0x00);
-  // Unmute Left and Right ADC Digital Volume Control.
-  this->write_byte(AIC3204_ADC_FGA_MUTE, 0x00);
-}
-void NabuMediaPlayer::reconfigure_dac_old_settings() {
-  // Set register page to 0
-  this->write_byte(AIC3204_PAGE_CTRL, 0x00);
-
-  // Initiate SW reset (PLL is powered off as part of reset)
-  this->write_byte(AIC3204_SW_RST, 0x01);
-
-  // Program clock settings
-
-  // Default is CODEC_CLKIN is from MCLK pin. Don't need to change this.
-  /*
-  // Enable PLL, MCLK is input to PLL
-  this->write_byte(AIC3204_CLK_PLL1, 0x03);
-  // MCLK is 24.576MHz, R = 1, J = 4, D = 0, P = 3, PLL_CLK = MCLK * R * J.D / P
-  this->write_byte(AIC3204_CLK_PLL2, 0xB1);
-  this->write_byte(AIC3204_CLK_PLL3, 0x04);
-  // Power up NDAC and set to 4, or could we disable PLL and just set NDAC to 3?
-  this->write_byte(AIC3204_NDAC, 0x84);
-  // Power up MDAC and set to 4
-  this->write_byte(AIC3204_MDAC, 0x84);
-  */
-  // Power up NDAC and set to 2
-  this->write_byte(AIC3204_NDAC, 0x82);
-  // Power up MDAC and set to 6
-  this->write_byte(AIC3204_MDAC, 0x86);
-  // // Power up NADC and set to 1
-  // this->write_byte(AIC3204_NADC, 0x81);
-  // // Power up MADC and set to 4
-  // this->write_byte(AIC3204_MADC, 0x84);
-  // Program DOSR = 128
-  this->write_byte(AIC3204_DOSR, 0x80);
-  // // Program AOSR = 128
-  // this->write_byte(AIC3204_AOSR, 0x80);
-  // // Set Audio Interface Config: I2S, 24 bits, slave mode, DOUT always driving.
-  // this->write_byte(AIC3204_CODEC_IF, 0x20);
-  // Set Audio Interface Config: I2S, 32 bits, slave mode, DOUT always driving.
-  this->write_byte(AIC3204_CODEC_IF, 0x30);
-  // For I2S Firmware only, set SCLK/MFP3 pin as Audio Data In
-  this->write_byte(56, 0x02);
-  this->write_byte(31, 0x01);
-  this->write_byte(32, 0x01);
-  // Program the DAC processing block to be used - PRB_P1
-  this->write_byte(AIC3204_DAC_SIG_PROC, 0x01);
-  // Program the ADC processing block to be used - PRB_R1
-  this->write_byte(AIC3204_ADC_SIG_PROC, 0x01);
-  // Select Page 1
-  this->write_byte(AIC3204_PAGE_CTRL, 0x01);
-  // Enable the internal AVDD_LDO:
-  this->write_byte(AIC3204_LDO_CTRL, 0x09);
-
-  //
-  // Program Analog Blocks
-  // ---------------------
-  //
-  // Disable Internal Crude AVdd in presence of external AVdd supply or before powering up internal AVdd LDO
-  this->write_byte(AIC3204_PWR_CFG, 0x08);
-  // Enable Master Analog Power Control
-  this->write_byte(AIC3204_LDO_CTRL, 0x01);
-  // Set Common Mode voltages: Full Chip CM to 0.9V and Output Common Mode for Headphone to 1.65V and HP powered from
-  // LDOin @ 3.3V.
-  this->write_byte(AIC3204_CM_CTRL, 0x33);
-  // Set PowerTune Modes
-  // Set the Left & Right DAC PowerTune mode to PTM_P3/4. Use Class-AB driver.
-  this->write_byte(AIC3204_PLAY_CFG1, 0x00);
-  this->write_byte(AIC3204_PLAY_CFG2, 0x00);
-  // // Set the Left & Right DAC PowerTune mode to PTM_P3/4. Use Class-D driver.
-  // this->write_byte(AIC3204_PLAY_CFG1, 0xC0);
-  // this->write_byte(AIC3204_PLAY_CFG2, 0xC0);
-
-  // // Set ADC PowerTune mode PTM_R4.
-  // this->write_byte(AIC3204_ADC_PTM, 0x00);
-  // // Set MicPGA startup delay to 3.1ms
-  // this->write_byte(AIC3204_AN_IN_CHRG, 0x31);
-
-  // Set the REF charging time to 40ms
-  this->write_byte(AIC3204_REF_STARTUP, 0x01);
-  // HP soft stepping settings for optimal pop performance at power up
-  // Rpop used is 6k with N = 6 and soft step = 20usec. This should work with 47uF coupling
-  // capacitor. Can try N=5,6 or 7 time constants as well. Trade-off delay vs “pop” sound.
-  this->write_byte(AIC3204_HP_START, 0x25);
-  // Route Left DAC to HPL
-  this->write_byte(AIC3204_HPL_ROUTE, 0x08);
-  // Route Right DAC to HPR
-  this->write_byte(AIC3204_HPR_ROUTE, 0x08);
-  // Route Left DAC to LOL
-  this->write_byte(0x0e, 0x08);
-  // Route Right DAC to LOR
-  this->write_byte(0x0f, 0x08);
-  // We are using Line input with low gain for PGA so can use 40k input R but lets stick to 20k for now.
-  // // Route IN2_L to LEFT_P with 20K input impedance
-  // this->write_byte(AIC3204_LPGA_P_ROUTE, 0x20);
-  // // Route IN2_R to LEFT_M with 20K input impedance
-  // this->write_byte(AIC3204_LPGA_N_ROUTE, 0x20);
-  // // Route IN1_R to RIGHT_P with 20K input impedance
-  // this->write_byte(AIC3204_RPGA_P_ROUTE, 0x80);
-  // // Route IN1_L to RIGHT_M with 20K input impedance
-  // this->write_byte(AIC3204_RPGA_N_ROUTE, 0x20);
-  // Unmute HPL and set gain to 0dB
-  this->write_byte(AIC3204_HPL_GAIN, 0x00);
-  // Unmute HPR and set gain to 0dB
-  this->write_byte(AIC3204_HPR_GAIN, 0x00);
-  // Unmute LOL and set gain to 0dB
-  this->write_byte(0x12, 0x00);
-  // Unmute LOR and set gain to 0dB
-  this->write_byte(0x13, 0x00);
-  // Unmute Left MICPGA, Set Gain to 0dB.
-  this->write_byte(AIC3204_LPGA_VOL, 0x00);
-  // Unmute Right MICPGA, Set Gain to 0dB.
-  this->write_byte(AIC3204_RPGA_VOL, 0x00);
-  // // Power up HPL and HPR drivers
-  // this->write_byte(AIC3204_OP_PWR_CTRL, 0x30) == 0
-  // Power up HPL and HPR, LOL and LOR drivers
-  this->write_byte(AIC3204_OP_PWR_CTRL, 0x3C);
-
-  delay(2500);
-
-  //
-  // Power Up DAC/ADC
-  // ----------------
-  //
-  // Select Page 0
-  this->write_byte(AIC3204_PAGE_CTRL, 0x00);
-  // Disable DRC
-  // this->write_byte(AIC3204_DRC_ENABLE, 0x0F);
-  // Power up the Left and Right DAC Channels. Route Left data to Left DAC and Right data to Right DAC.
-  // DAC Vol control soft step 1 step per DAC word clock.
-  this->write_byte(AIC3204_DAC_CH_SET1, 0xd4);
-  // Power up Left and Right ADC Channels, ADC vol ctrl soft step 1 step per ADC word clock.
-  this->write_byte(AIC3204_ADC_CH_SET, 0xc0);
-  // Unmute Left and Right DAC digital volume control
-  this->write_byte(AIC3204_DAC_CH_SET2, 0x00);
-  // Unmute Left and Right ADC Digital Volume Control.
-  this->write_byte(AIC3204_ADC_FGA_MUTE, 0x00);
+  if (publish) {
+    this->volume = volume;
+    this->save_volume_restore_state_();
+  }
 }
 
 }  // namespace nabu
