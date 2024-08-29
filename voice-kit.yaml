@@ -1131,7 +1131,9 @@ external_components:
     refresh: 0s
   - source: github://esphome/esphome@dev
     components:
+      - update
       - http_request
+      - watchdog
     refresh: 0s
 
 audio_dac:
