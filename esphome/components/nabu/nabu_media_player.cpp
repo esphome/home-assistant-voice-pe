@@ -16,9 +16,8 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Call audio_dac component for the various i2c writes/reads
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
-//  - Tune task memory requirements and potentially buffer sizes if issues appear
+//  - Tune task memory requirements
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
@@ -66,11 +65,12 @@ namespace nabu {
 static const size_t QUEUE_LENGTH = 20;
 
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
-static const size_t DMA_BUFFER_COUNT = 4;
 static const size_t DMA_BUFFER_SIZE = 512;
-static const size_t BUFFER_SIZE = NUMBER_OF_CHANNELS * DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
+static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHANNELS;
+static const size_t DMA_BUFFERS_COUNT = 4;
+static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = SAMPLES_IN_ONE_DMA_BUFFER * DMA_BUFFERS_COUNT;
 
-static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
@@ -233,7 +233,7 @@ esp_err_t NabuMediaPlayer::start_i2s_driver_() {
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = DMA_BUFFER_COUNT,
+      .dma_buf_count = DMA_BUFFERS_COUNT,
       .dma_buf_len = DMA_BUFFER_SIZE,
       .use_apll = false,
       .tx_desc_auto_clear = true,
@@ -285,7 +285,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
       ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-      int16_t *buffer = allocator.allocate(BUFFER_SIZE);
+      int16_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
 
       if (buffer == nullptr) {
         event.type = EventType::WARNING;
@@ -309,7 +309,15 @@ void NabuMediaPlayer::speaker_task(void *params) {
               break;
             }
 
-            size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * NUMBER_OF_CHANNELS;
+            size_t bytes_available = this_speaker->audio_mixer_->available();
+            size_t samples_available = bytes_available / sizeof(int16_t);
+
+            size_t dma_buffers_available = samples_available / SAMPLES_IN_ONE_DMA_BUFFER;
+
+            size_t dma_buffers_to_read = std::min(dma_buffers_available, DMA_BUFFERS_COUNT);
+            dma_buffers_to_read = std::max(dma_buffers_to_read, (size_t) 1);  // always read at least 1 DMA buffer
+
+            size_t bytes_to_read = dma_buffers_to_read * SAMPLES_IN_ONE_DMA_BUFFER * sizeof(int16_t);
             size_t bytes_read = 0;
 
             bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, 0);
@@ -361,7 +369,7 @@ void NabuMediaPlayer::speaker_task(void *params) {
           event.type = EventType::STOPPING;
           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-          allocator.deallocate(buffer, BUFFER_SIZE);
+          allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
           i2s_stop(this_speaker->parent_->get_port());
           i2s_driver_uninstall(this_speaker->parent_->get_port());
 

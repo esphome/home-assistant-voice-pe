@@ -11,7 +11,7 @@ namespace esphome {
 namespace nabu {
 
 static const size_t INPUT_RING_BUFFER_SAMPLES = 24000;  // Audio samples
-static const size_t OUTPUT_BUFFER_SAMPLES = 4800;       // Audio samples - keep small for fast pausing
+static const size_t OUTPUT_BUFFER_SAMPLES = 8192;       // Audio samples - keep small for fast pausing
 static const size_t QUEUE_COUNT = 20;
 
 static const uint32_t TASK_STACK_SIZE = 3072;
@@ -227,12 +227,18 @@ void AudioMixer::audio_mixer_task_(void *params) {
         if ((media_bytes_read > 0) && (announcement_bytes_read > 0)) {
           // We have both a media and an announcement stream, so mix them together
 
+          if (media_bytes_read != announcement_bytes_read) {
+            printf("somehow media and announcement bytes read are different\n");
+          }
           size_t samples_read = bytes_to_read / sizeof(int16_t);
 
           this_mixer->mix_audio_samples_without_clipping_(media_buffer, announcement_buffer, combination_buffer,
                                                           samples_read);
 
           output_bytes_written = this_mixer->output_ring_buffer_->write((void *) combination_buffer, bytes_to_read);
+          if (output_bytes_written != bytes_to_read) {
+            printf("couldn't copy all the mixed samples into the output ring buffer\n");
+          }
         } else if (media_bytes_read > 0) {
           output_bytes_written = this_mixer->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
 
@@ -347,6 +353,8 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
 
   if (q15_scaling_factor < MAX_AUDIO_SAMPLE_VALUE) {
     // Need to scale to avoid clipping
+
+    printf("scaling media stream to avoid clipping\n");
 
     this->scale_audio_samples_(media_buffer, media_buffer, q15_scaling_factor, samples_to_mix);
 
