@@ -127,22 +127,14 @@ bool AIC3204::set_mute_on() {
   return this->write_mute_();
 }
 
-bool AIC3204::set_auto_mute_mode(optional<uint8_t> auto_mute_mode) {
-  if (!auto_mute_mode.has_value()) {
-    return false;
-  }
-
-  this->auto_mute_mode_ = auto_mute_mode.value() & 0x07;
+bool AIC3204::set_auto_mute_mode(uint8_t auto_mute_mode) {
+  this->auto_mute_mode_ = auto_mute_mode & 0x07;
   ESP_LOGVV(TAG, "Setting auto_mute_mode to 0x%.2x", this->auto_mute_mode_);
   return this->write_mute_();
 }
 
-bool AIC3204::set_volume(optional<float> volume) {
-  if (!volume.has_value()) {
-    return false;
-  }
-
-  this->volume_ = clamp<float>(volume.value(), dvc_min, dvc_max);
+bool AIC3204::set_volume(float volume) {
+  this->volume_ = clamp<float>(volume, dvc_min, dvc_max);
   return this->write_volume_();
 }
 

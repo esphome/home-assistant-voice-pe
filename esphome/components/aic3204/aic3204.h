@@ -73,8 +73,8 @@ class AIC3204 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
 
   bool set_mute_off() override;
   bool set_mute_on() override;
-  bool set_auto_mute_mode(optional<uint8_t> auto_mute_mode);
-  bool set_volume(optional<float> volume) override;
+  bool set_auto_mute_mode(uint8_t auto_mute_mode);
+  bool set_volume(float volume) override;
 
   bool is_muted() override;
   float volume() override;
