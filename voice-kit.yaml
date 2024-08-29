@@ -1115,18 +1115,30 @@ media_player:
 
 external_components:
   - source: github://jesserockz/esphome-components
-    components: [file, udp_audio]
+    components:
+      - file
+      - udp_audio
     refresh: 0s
-
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
       ref: dev
-    components: [i2s_audio, microphone, nabu_microphone, nabu, voice_assistant, media_player, micro_wake_word, audio_dac, aic3204]
+    components:
+      - aic3204
+      - audio_dac
+      - i2s_audio
+      - media_player
+      - micro_wake_word
+      - microphone
+      - nabu
+      - nabu_microphone
+      - voice_assistant
     refresh: 0s
-
   - source: github://esphome/esphome@dev
-    components: [update, http_request, watchdog]
+    components:
+      - update
+      - http_request
+      - watchdog
     refresh: 0s
 
 audio_dac:
