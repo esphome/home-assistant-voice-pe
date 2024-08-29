@@ -280,13 +280,13 @@ void PolyphaseMono(short *pcm, int *vbuf, const int *coefBase);
 void PolyphaseStereo(short *pcm, int *vbuf, const int *coefBase);
 
 /* trigtabs.c */
-extern const int imdctWin[4][36];
+extern const uint32_t imdctWin[4][36];
 extern const int ISFMpeg1[2][7];
 extern const int ISFMpeg2[2][2][16];
 extern const int ISFIIP[2][2];
-extern const int csa[8][2];
+extern const uint32_t csa[8][2];
 extern const int coef32[31];
-extern const int polyCoef[264];
+extern const uint32_t polyCoef[264];
 
 typedef struct _MP3DecInfo {
   /* pointers to platform-specific data structures */

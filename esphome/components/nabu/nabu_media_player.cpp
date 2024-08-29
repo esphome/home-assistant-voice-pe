@@ -10,18 +10,16 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
+#include "esp_dsp.h"
+
 namespace esphome {
 namespace nabu {
 
 // TODO:
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
-//  - Idle muting can cut off parts of the audio. Replace commnented code with eventual XMOS command to cut power to
-//    speaker amp
-//  - Tune task memory requirements and potentially buffer sizes if issues appear
-//  - Simplify speaker_task controls/events and mixer controls/events (use EventGroup or TaskNotifications)
+//  - Tune task memory requirements
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
-//    - What do I need to give them an ESPHome id?
 //    - Add a yaml action to play a specific media file
 //
 //
@@ -64,17 +62,27 @@ namespace nabu {
 //    - It determines the overall state of the media player by considering the state of each pipeline
 //      - announcement playback takes highest priority
 
-static const size_t QUEUE_COUNT = 20;
-static const size_t DMA_BUFFER_COUNT = 4;
-static const size_t DMA_BUFFER_SIZE = 512;
-static const size_t BUFFER_SIZE = DMA_BUFFER_COUNT * DMA_BUFFER_SIZE;
+static const size_t QUEUE_LENGTH = 20;
 
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
+static const size_t DMA_BUFFER_SIZE = 512;
+static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHANNELS;
+static const size_t DMA_BUFFERS_COUNT = 4;
+static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = SAMPLES_IN_ONE_DMA_BUFFER * DMA_BUFFERS_COUNT;
 
 static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
+
+static const size_t TASK_DELAY_MS = 5;
+
+static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
+
+enum SpeakerTaskNotificationBits : uint32_t {
+  COMMAND_START = (1 << 0),  // Starts the main task purpose
+  COMMAND_STOP = (1 << 1),   // stops the main task
+};
 
 #define STATS_TASK_PRIO 3
 #define STATS_TICKS pdMS_TO_TICKS(5000)
@@ -196,62 +204,36 @@ void NabuMediaPlayer::setup() {
 
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
-  this->media_control_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(MediaCallCommand));
+  this->media_control_command_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(MediaCallCommand));
+  this->speaker_event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
 
-  this->speaker_command_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(CommandEvent));
-  this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
+  this->pref_ = global_preferences->make_preference<VolumeRestoreState>(this->get_object_id_hash());
 
-  if (!this->parent_->try_lock()) {
-    ESP_LOGE(TAG, "Couldn't lock I2S port");
-    this->mark_failed();
-    return;
-  }
-
-  if (!this->get_dac_volume_().has_value() || !this->get_dac_mute_().has_value()) {
-    ESP_LOGE(TAG, "Couldn't communicate with DAC");
-    this->mark_failed();
-    return;
+  VolumeRestoreState volume_restore_state;
+  if (this->pref_.load(&volume_restore_state)) {
+    this->set_volume_(volume_restore_state.volume);
+    this->set_mute_state_(volume_restore_state.is_muted);
+  } else {
+    this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
+    this->set_mute_state_(false);
   }
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }
 
-void NabuMediaPlayer::speaker_task(void *params) {
-  NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
-
-  TaskEvent event;
-  CommandEvent command_event;
-
-  event.type = EventType::STARTING;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-  int16_t *buffer = allocator.allocate(NUMBER_OF_CHANNELS * BUFFER_SIZE);
-
-  if (buffer == nullptr) {
-    event.type = EventType::WARNING;
-    event.err = ESP_ERR_NO_MEM;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+esp_err_t NabuMediaPlayer::start_i2s_driver_() {
+  if (!this->parent_->try_lock()) {
+    return ESP_ERR_INVALID_STATE;
   }
 
   i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this_speaker->parent_->get_i2s_mode() | I2S_MODE_TX),
-      .sample_rate = this_speaker->sample_rate_,
-      .bits_per_sample = this_speaker->bits_per_sample_,
+      .mode = (i2s_mode_t) (this->parent_->get_i2s_mode() | I2S_MODE_TX),
+      .sample_rate = this->sample_rate_,
+      .bits_per_sample = this->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = DMA_BUFFER_COUNT,
+      .dma_buf_count = DMA_BUFFERS_COUNT,
       .dma_buf_len = DMA_BUFFER_SIZE,
       .use_apll = false,
       .tx_desc_auto_clear = true,
@@ -268,99 +250,136 @@ void NabuMediaPlayer::speaker_task(void *params) {
 #endif
   };
 
-  esp_err_t err = i2s_driver_install(this_speaker->parent_->get_port(), &config, 0, nullptr);
+  esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
   if (err != ESP_OK) {
-    event.type = EventType::WARNING;
-    event.err = err;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+    return err;
   }
 
-  i2s_pin_config_t pin_config = this_speaker->parent_->get_pin_config();
-  pin_config.data_out_num = this_speaker->dout_pin_;
+  i2s_pin_config_t pin_config = this->parent_->get_pin_config();
+  pin_config.data_out_num = this->dout_pin_;
 
-  err = i2s_set_pin(this_speaker->parent_->get_port(), &pin_config);
+  err = i2s_set_pin(this->parent_->get_port(), &pin_config);
 
   if (err != ESP_OK) {
-    event.type = EventType::WARNING;
-    event.err = err;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    event.type = EventType::STOPPED;
-    event.err = ESP_OK;
-    xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-    while (true) {
-      delay(10);
-    }
-
-    return;
+    return err;
   }
 
-  event.type = EventType::STARTED;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+  return ESP_OK;
+}
+
+void NabuMediaPlayer::speaker_task(void *params) {
+  NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
+
+  TaskEvent event;
+  esp_err_t err;
 
   while (true) {
-    if (xQueueReceive(this_speaker->speaker_command_queue_, &command_event, (5 / portTICK_PERIOD_MS)) == pdTRUE) {
-      if (command_event.command == CommandEventType::STOP) {
-        // Stop signal from main thread
-        break;
-      }
-    }
+    uint32_t notification_bits = 0;
+    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
+                    ULONG_MAX,           // clear all bits after waiting
+                    &notification_bits,  // notifcation value after wait is finished
+                    portMAX_DELAY);      // how long to wait
 
-    size_t delay_ms = 10;
-    size_t bytes_to_read = DMA_BUFFER_SIZE * sizeof(int16_t) * NUMBER_OF_CHANNELS;
-    size_t bytes_read = 0;
-
-    bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, (delay_ms / portTICK_PERIOD_MS));
-
-    if (bytes_read > 0) {
-      size_t bytes_written;
-      if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-        i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
-      } else {
-        i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
-                         this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
-      }
-
-      if (bytes_written != bytes_read) {
-        event.type = EventType::WARNING;
-        event.err = ESP_ERR_INVALID_SIZE;
-        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-      } else {
-        event.type = EventType::RUNNING;
-        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-      }
-
-    } else {
-      i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-
-      event.type = EventType::IDLE;
+    if (notification_bits & SpeakerTaskNotificationBits::COMMAND_START) {
+      event.type = EventType::STARTING;
       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+      ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+      int16_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
+
+      if (buffer == nullptr) {
+        event.type = EventType::WARNING;
+        event.err = ESP_ERR_NO_MEM;
+        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+      } else {
+        err = this_speaker->start_i2s_driver_();
+
+        if (err != ESP_OK) {
+          event.type = EventType::WARNING;
+          event.err = err;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+        } else {
+          event.type = EventType::STARTED;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+          while (true) {
+            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(TASK_DELAY_MS));
+
+            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+              break;
+            }
+
+            size_t bytes_available = this_speaker->audio_mixer_->available();
+            size_t samples_available = bytes_available / sizeof(int16_t);
+
+            size_t dma_buffers_available = samples_available / SAMPLES_IN_ONE_DMA_BUFFER;
+
+            size_t dma_buffers_to_read = std::min(dma_buffers_available, DMA_BUFFERS_COUNT);
+            dma_buffers_to_read = std::max(dma_buffers_to_read, (size_t) 1);  // always read at least 1 DMA buffer
+
+            size_t bytes_to_read = dma_buffers_to_read * SAMPLES_IN_ONE_DMA_BUFFER * sizeof(int16_t);
+            size_t bytes_read = 0;
+
+            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, 0);
+
+            if (bytes_read > 0) {
+              size_t bytes_written;
+
+#ifdef USE_AUDIO_DAC
+              if (this_speaker->audio_dac_ == nullptr)
+#endif
+              {  // Fallback to software volume control if an audio dac isn't available
+                int16_t volume_scale_factor =
+                    this_speaker->software_volume_scale_factor_;  // Atomic read, so thread safe
+                if (volume_scale_factor < INT16_MAX) {
+#if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
+                  dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
+#else
+                  dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
+#endif
+                }
+              }
+
+              if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+                i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
+              } else {
+                i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+                                 this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
+              }
+
+              if (bytes_written != bytes_read) {
+                event.type = EventType::WARNING;
+                event.err = ESP_ERR_INVALID_SIZE;
+                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              } else {
+                event.type = EventType::RUNNING;
+                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              }
+
+            } else {
+              i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+
+              event.type = EventType::IDLE;
+              xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+            }
+          }
+
+          i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+
+          event.type = EventType::STOPPING;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+
+          allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
+          i2s_stop(this_speaker->parent_->get_port());
+          i2s_driver_uninstall(this_speaker->parent_->get_port());
+
+          this_speaker->parent_->unlock();
+
+          event.type = EventType::STOPPED;
+          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+        }
+      }
     }
-  }
-  i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-  event.type = EventType::STOPPING;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  allocator.deallocate(buffer, BUFFER_SIZE);
-  i2s_stop(this_speaker->parent_->get_port());
-  i2s_driver_uninstall(this_speaker->parent_->get_port());
-
-  event.type = EventType::STOPPED;
-  xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-
-  while (true) {
-    delay(10);
   }
 }
 
@@ -378,10 +397,12 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   if (this->speaker_task_handle_ == nullptr) {
     xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
                 &this->speaker_task_handle_);
+    if (this->speaker_task_handle_ == nullptr) {
+      return ESP_FAIL;
+    }
   }
 
-  if (this->speaker_task_handle_ == nullptr)
-    return ESP_FAIL;
+  xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
 
   if (type == AudioPipelineType::MEDIA) {
     if (this->media_pipeline_ == nullptr) {
@@ -450,8 +471,7 @@ void NabuMediaPlayer::watch_media_commands_() {
 
     if (media_command.volume.has_value()) {
       this->set_volume_(media_command.volume.value());
-      this->unmute_();
-      this->is_muted_ = false;
+      this->set_mute_state_(false);
       this->publish_state();
     }
 
@@ -477,7 +497,6 @@ void NabuMediaPlayer::watch_media_commands_() {
             this->announcement_pipeline_->stop();
           } else {
             this->media_pipeline_->stop();
-            this->is_paused_ = false;
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
@@ -492,14 +511,13 @@ void NabuMediaPlayer::watch_media_commands_() {
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
-          this->mute_();
-          this->is_muted_ = true;
+          this->set_mute_state_(true);
+
           this->publish_state();
           break;
         }
         case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
-          this->unmute_();
-          this->is_muted_ = false;
+          this->set_mute_state_(false);
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
@@ -535,12 +553,7 @@ void NabuMediaPlayer::watch_speaker_() {
         ESP_LOGD(TAG, "Stopping Media Player Speaker");
         break;
       case EventType::STOPPED:
-        vTaskDelete(this->speaker_task_handle_);
-        this->speaker_task_handle_ = nullptr;
-        this->parent_->unlock();
-
         xQueueReset(this->speaker_event_queue_);
-        xQueueReset(this->speaker_command_queue_);
 
         ESP_LOGD(TAG, "Stopped Media Player Speaker");
         break;
@@ -579,29 +592,13 @@ void NabuMediaPlayer::loop() {
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-    if (this->is_idle_muted_ && !this->is_muted_) {
-      // this->unmute_();
-      this->is_idle_muted_ = false;
-    }
   } else {
-    if (this->is_paused_) {
-      this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
-      if (!this->is_idle_muted_) {
-        // this->mute_();
-        this->is_idle_muted_ = true;
-      }
-    } else if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
+    if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
       this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
-      if (!this->is_idle_muted_) {
-        // this->mute_();
-        this->is_idle_muted_ = true;
-      }
+    } else if (this->is_paused_) {
+      this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
     } else {
       this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
-      if (this->is_idle_muted_ && !this->is_muted_) {
-        // this->unmute_();
-        this->is_idle_muted_ = false;
-      }
     }
   }
 
@@ -678,114 +675,64 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   auto traits = media_player::MediaPlayerTraits();
   traits.set_supports_pause(true);
   traits.get_supported_formats().push_back(
-    media_player::MediaPlayerSupportedFormat{
-      .format = "flac",
-      .sample_rate = 48000,
-      .num_channels = 2,
-      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT
-  });
-  traits.get_supported_formats().push_back(
-    media_player::MediaPlayerSupportedFormat{
+      media_player::MediaPlayerSupportedFormat{.format = "flac",
+                                               .sample_rate = 48000,
+                                               .num_channels = 2,
+                                               .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT});
+  traits.get_supported_formats().push_back(media_player::MediaPlayerSupportedFormat{
       .format = "flac",
       .sample_rate = 48000,
       .num_channels = 1,
-      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT
-  });
+      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT});
   return traits;
 };
 
-optional<float> NabuMediaPlayer::get_dac_volume_(bool publish) {
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
-    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
-    return {};
-  }
-
-  uint8_t dac_volume = 0;
-  if (!this->read_byte(DAC_LEFT_VOLUME_REGISTER, &dac_volume)) {
-    ESP_LOGE(TAG, "Failed to read the volume from the DAC");
-    return {};
-  }
-
-  float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
-  if (publish) {
-    this->volume = volume;
-  }
-
-  return volume;
+void NabuMediaPlayer::save_volume_restore_state_() {
+  VolumeRestoreState volume_restore_state;
+  volume_restore_state.volume = this->volume;
+  volume_restore_state.is_muted = this->is_muted_;
+  this->pref_.save(&volume_restore_state);
 }
 
-bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
-  int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
-    return false;
+void NabuMediaPlayer::set_mute_state_(bool mute_state) {
+#ifdef USE_AUDIO_DAC
+  if (this->audio_dac_ != nullptr) {
+    if (mute_state) {
+      this->audio_dac_->set_mute_on();
+    } else {
+      this->audio_dac_->set_mute_off();
+    }
+  } else
+#endif
+  {  // Fall back to software mute control if there is no audio_dac or if it isn't configured
+    if (mute_state) {
+      this->software_volume_scale_factor_ = 0;
+    } else {
+      this->set_volume_(this->volume, false);  // restore previous volume
+    }
   }
 
-  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
-      !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
-    ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
-    return false;
-  }
+  this->is_muted_ = mute_state;
 
-  if (publish)
-    this->volume = volume;
-
-  return true;
+  this->save_volume_restore_state_();
 }
 
-optional<bool> NabuMediaPlayer::get_dac_mute_(bool publish) {
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return {};
-  }
-
-  uint8_t dac_mute_left = 0;
-  uint8_t dac_mute_right = 0;
-  if (!this->read_byte(DAC_LEFT_MUTE_REGISTER, &dac_mute_left) ||
-      !this->read_byte(DAC_RIGHT_MUTE_REGISTER, &dac_mute_right)) {
-    ESP_LOGE(TAG, "DAC failed to read mute status");
-    return {};
-  }
-
-  bool is_muted = false;
-  if (dac_mute_left == DAC_MUTE_COMMAND && dac_mute_right == DAC_MUTE_COMMAND) {
-    is_muted = true;
+void NabuMediaPlayer::set_volume_(float volume, bool publish) {
+#ifdef USE_AUDIO_DAC
+  if (this->audio_dac_ != nullptr) {
+    this->audio_dac_->set_volume(volume);
+  } else
+#endif
+  {  // Fall back to software volume control if there is no audio_dac or if it isn't configured
+    // Use the decibel reduction table from audio_mixer.h for software volume control
+    ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
+    this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
   }
 
   if (publish) {
-    this->is_muted_ = is_muted;
+    this->volume = volume;
+    this->save_volume_restore_state_();
   }
-  return is_muted;
-}
-
-bool NabuMediaPlayer::mute_() {
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return false;
-  }
-
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) ||
-      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
-    ESP_LOGE(TAG, "DAC failed to mute left and right channels");
-    return false;
-  }
-
-  return true;
-}
-
-bool NabuMediaPlayer::unmute_() {
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return false;
-  }
-
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) ||
-      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
-    ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
-    return false;
-  }
-
-  return true;
 }
 
 }  // namespace nabu

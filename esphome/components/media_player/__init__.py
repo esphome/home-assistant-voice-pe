@@ -31,7 +31,7 @@ MEDIA_FILE_TYPE_ENUM = {
     "FLAC": MediaFileType.FLAC,
 }
 
-CONF_MEDIA_FILE = "media_file"
+
 
 
 
@@ -158,24 +158,6 @@ async def media_player_play_media_action(config, action_id, template_arg, args):
     media_url = await cg.templatable(config[CONF_MEDIA_URL], args, cg.std_string)
     cg.add(var.set_media_url(media_url))
     return var
-
-# @automation.register_action(
-#     "media_player.play_local_media_file",
-#     PlayLocalMediaAction,
-#     cv.maybe_simple_value(
-#         {
-#             cv.GenerateID(): cv.use_id(MediaPlayer),
-#             cv.Required(CONF_MEDIA_FILE): cv.templatable(cv.string),
-#         },
-#         key=CONF_MEDIA_FILE,
-#     ),
-# )
-# async def media_player_play_media_action(config, action_id, template_arg, args):
-#     var = cg.new_Pvariable(action_id, template_arg)
-#     await cg.register_parented(var, config[CONF_ID])
-#     media_url = await cg.templatable(config[CONF_MEDIA_URL], args, cg.std_string)
-#     cg.add(var.set_media_url(media_url))
-#     return var
 
 @automation.register_action("media_player.play", PlayAction, MEDIA_PLAYER_ACTION_SCHEMA)
 @automation.register_action(

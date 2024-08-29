@@ -68,6 +68,7 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
       .cert_pem = nullptr,
       .disable_auto_redirect = false,
       .max_redirection_count = 10,
+      .keep_alive_enable = true,
   };
   this->client_ = esp_http_client_init(&config);
 
@@ -115,6 +116,7 @@ AudioReaderState AudioReader::read() {
 AudioReaderState AudioReader::file_read_() {
   if (this->media_file_bytes_left_ > 0) {
     size_t bytes_to_write = std::min(this->media_file_bytes_left_, this->output_ring_buffer_->free());
+    bytes_to_write = std::min(bytes_to_write, this->transfer_buffer_size_);
 
     if (bytes_to_write == 0) {
       return AudioReaderState::READING;
@@ -130,7 +132,7 @@ AudioReaderState AudioReader::file_read_() {
 }
 
 AudioReaderState AudioReader::http_read_() {
-  size_t bytes_to_read = this->output_ring_buffer_->free();
+  size_t bytes_to_read = std::min(this->output_ring_buffer_->free(), this->transfer_buffer_size_);
 
   if (bytes_to_read == 0) {
     return AudioReaderState::READING;
@@ -141,7 +143,8 @@ AudioReaderState AudioReader::http_read_() {
   if (received_len > 0) {
     this->output_ring_buffer_->write((void *) this->transfer_buffer_, received_len);
   } else if (received_len < 0) {
-    // TODO: Error situation. Should we mark failed..?
+    this->cleanup_connection_();
+    return AudioReaderState::FAILED;
   }
 
   if (esp_http_client_is_complete_data_received(this->client_)) {

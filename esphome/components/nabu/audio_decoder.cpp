@@ -167,6 +167,14 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     } else {
       this->potentially_failed_count_ = 0;
     }
+    if (this->get_stream_info().has_value()) {
+      size_t monotone_samples =
+          (this->output_ring_buffer_->available() / sizeof(int16_t)) / this->get_stream_info().value().channels;
+      if (monotone_samples > this->get_stream_info().value().sample_rate/100) {
+        // We have more than 10 milliseconds of samples ready to output, we can break
+        break;
+      }
+    }
   }
   return AudioDecoderState::DECODING;
 }
@@ -209,7 +217,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
     stream_info.channels = this->flac_decoder_->get_num_channels();
     stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
     stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
-    
+
     this->stream_info_ = stream_info;
 
     size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
