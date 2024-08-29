@@ -33,7 +33,7 @@ template<typename... Ts> class SetVolumeAction : public Action<Ts...> {
 
   TEMPLATABLE_VALUE(float, volume)
 
-  void play(Ts... x) override { this->audio_dac_->set_volume(this->volume_.optional_value(x...)); }
+  void play(Ts... x) override { this->audio_dac_->set_volume(this->volume_.value(x...)); }
 
  protected:
   AudioDac *audio_dac_;
