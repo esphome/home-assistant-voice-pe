@@ -4,8 +4,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-#ifdef USE_AUDIO_DAC
-
 namespace esphome {
 namespace aic3204 {
 
@@ -199,4 +197,3 @@ bool AIC3204::write_volume_() {
 
 }  // namespace aic3204
 }  // namespace esphome
-#endif

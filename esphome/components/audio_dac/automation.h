@@ -4,7 +4,6 @@
 #include "esphome/core/component.h"
 #include "audio_dac.h"
 
-#ifdef USE_AUDIO_DAC
 namespace esphome {
 namespace audio_dac {
 
@@ -42,4 +41,3 @@ template<typename... Ts> class SetVolumeAction : public Action<Ts...> {
 
 }  // namespace audio_dac
 }  // namespace esphome
-#endif

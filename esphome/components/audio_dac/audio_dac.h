@@ -8,7 +8,6 @@ namespace esphome {
 namespace audio_dac {
 
 class AudioDac : public Component {
-#ifdef USE_AUDIO_DAC
  public:
   virtual bool set_mute_off() = 0;
   virtual bool set_mute_on() = 0;
@@ -19,7 +18,6 @@ class AudioDac : public Component {
 
  protected:
   bool is_muted_{false};
-#endif
 };
 
 }  // namespace aic3204

@@ -4,7 +4,6 @@
 #include "esphome/core/component.h"
 #include "aic3204.h"
 
-#ifdef USE_AUDIO_DAC
 namespace esphome {
 namespace aic3204 {
 
@@ -22,4 +21,3 @@ template<typename... Ts> class SetAutoMuteAction : public Action<Ts...> {
 
 }  // namespace aic3204
 }  // namespace esphome
-#endif

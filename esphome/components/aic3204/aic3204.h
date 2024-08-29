@@ -64,7 +64,6 @@ static const float dvc_min = -63.5;                // Digital volume control min
 static const float dvc_max = 24;                   // Digital volume control max
 
 class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
-#ifdef USE_AUDIO_DAC
  public:
   void setup() override;
   void dump_config() override;
@@ -81,9 +80,9 @@ class AIC3204 : public audio_dac::AudioDac, public i2c::I2CDevice {
  protected:
   bool write_mute_();
   bool write_volume_();
+
   uint8_t auto_mute_mode_{0};
   float volume_{0};
-#endif
 };
 
 }  // namespace aic3204
