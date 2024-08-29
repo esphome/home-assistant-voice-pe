@@ -43,7 +43,9 @@ AudioResampler::~AudioResampler() {
     this->resampler_ = nullptr;
   }
 
-  // dsps_fird_s16_aexx_free(&this->fir_filter_);
+  if (this->use_effecient_upsampler_) {
+    delete this->effecient_upsampler_;
+  }
 }
 
 esp_err_t AudioResampler::allocate_buffers_() {
@@ -99,22 +101,20 @@ esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t 
   }
 
   if (stream_info.sample_rate != target_sample_rate) {
-    // if (stream_info.sample_rate == 48000) {
-    //   // Special case, we can do this a lot faster with esp-dsp code!
-    //   const uint8_t decimation = 48000 / 16000;
-    //   const float fir_out_offset = 0;  //((FIR_FILTER_LENGTH / decimation / 2) - 1);
+    // if ((target_sample_rate % stream_info.sample_rate == 0) && (stream_info.channels == 1)) {
+    //   // Integer upsampling mono samples case. Use esp-dsp optimized code
 
-    //   int8_t shift = this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t)
-    //   FIR_FILTER_LENGTH,
-    //                                                       (float) 0.5 / decimation);
-    //   // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
-    //   dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, this->fir_delay_, FIR_FILTER_LENGTH,
-    //                      decimation, fir_out_offset, -shift);
-    //   this->decimation_filter_ = true;
-    //   this->needs_resampling_ = true;
-    //   // memset(this->fir_delay_, 0, FIR_FILTER_LENGTH*sizeof(int16_t));
-    // } else
+    //   uint8_t upsampling_factor = target_sample_rate / stream_info.sample_rate;
+
+    //   this->effecient_upsampler_ = new ESPIntegerUpsampler(upsampling_factor);
+
+    //   resample_info.resample = true;
+    //   this->use_effecient_upsampler_ = true;
+    //   this->sample_ratio_ = upsampling_factor - 0.01f;
+    // } else 
     {
+      // Use the general, but slower, floating point polyphase resampler
+
       int flags = 0;
 
       resample_info.resample = true;
@@ -228,56 +228,71 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
     this->input_buffer_length_ += bytes_read;
   }
 
+  if (this->input_buffer_length_ == 0) {
+    return AudioResamplerState::RESAMPLING;
+  }
+
   if (this->resample_info_.resample) {
-    if (this->decimation_filter_) {
-      if (this->resample_info_.mono_to_stereo) {
-        if (this->input_buffer_length_ > 0) {
-          size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
+    if (this->use_effecient_upsampler_) {
+      size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
 
-          if (available_samples / 3 == 0) {
-            this->input_buffer_current_ = this->input_buffer_;
-            this->input_buffer_length_ = 0;
-          } else {
-            dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_current_, this->output_buffer_,
-                               available_samples / 3);
+      size_t output_samples =
+          this->effecient_upsampler_->upsample(this->input_buffer_current_, this->output_buffer_, available_samples);
 
-            size_t output_samples = available_samples / 3;
+      this->input_buffer_current_ += available_samples;
+      this->input_buffer_length_ -= available_samples * sizeof(int16_t);
 
-            this->input_buffer_current_ += output_samples * 3;
-            this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
+      this->output_buffer_current_ = this->output_buffer_;
+      this->output_buffer_length_ += output_samples * sizeof(int16_t);
 
-            this->output_buffer_current_ = this->output_buffer_;
-            this->output_buffer_length_ += output_samples * sizeof(int16_t);
-          }
-        }
-      } else {
-        // Interleaved stereo samples
-        // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't
-        // mixed
-        size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
-        for (int i = 0; i < available_samples / 2; ++i) {
-          // split interleaved samples into two separate streams
-          this->output_buffer_[i] = this->input_buffer_[2 * i];
-          this->output_buffer_[i + available_samples / 2] = this->input_buffer_[2 * i + 1];
-        }
-        std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
-        dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_, this->output_buffer_, (available_samples / 3) / 2);
-        dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_ + available_samples / 2,
-                           this->output_buffer_ + (available_samples / 3) / 2, (available_samples / 3) / 2);
-        std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
-        for (int i = 0; i < available_samples / 2; ++i) {
-          this->output_buffer_[2 * i] = this->input_buffer_[i];
-          this->output_buffer_[2 * i + 1] = this->input_buffer_[available_samples / 2 + i];
-        }
+      // if (this->resample_info_.mono_to_stereo) {
+      //   if (this->input_buffer_length_ > 0) {
+      //     size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
 
-        size_t output_samples = available_samples / 3;
+      //     if (available_samples / 3) {
+      //       this->input_buffer_current_ = this->input_buffer_;
+      //       this->input_buffer_length_ = 0;
+      //     } else {
+      //       dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_current_, this->output_buffer_,
+      //                          available_samples / 3);
 
-        this->input_buffer_current_ += output_samples * 3;
-        this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
+      //       size_t output_samples = available_samples / 3;
 
-        this->output_buffer_current_ = this->output_buffer_;
-        this->output_buffer_length_ += output_samples * sizeof(int16_t);
-      }
+      //       this->input_buffer_current_ += output_samples * 3;
+      //       this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
+
+      //       this->output_buffer_current_ = this->output_buffer_;
+      //       this->output_buffer_length_ += output_samples * sizeof(int16_t);
+      //     }
+      //   }
+      // } else {
+      //   // Interleaved stereo samples
+      //   // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't
+      //   // mixed
+      //   size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
+      //   for (int i = 0; i < available_samples / 2; ++i) {
+      //     // split interleaved samples into two separate streams
+      //     this->output_buffer_[i] = this->input_buffer_[2 * i];
+      //     this->output_buffer_[i + available_samples / 2] = this->input_buffer_[2 * i + 1];
+      //   }
+      //   std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
+      //   dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_, this->output_buffer_, (available_samples / 3) /
+      //   2); dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_ + available_samples / 2,
+      //                      this->output_buffer_ + (available_samples / 3) / 2, (available_samples / 3) / 2);
+      //   std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
+      //   for (int i = 0; i < available_samples / 2; ++i) {
+      //     this->output_buffer_[2 * i] = this->input_buffer_[i];
+      //     this->output_buffer_[2 * i + 1] = this->input_buffer_[available_samples / 2 + i];
+      //   }
+
+      //   size_t output_samples = available_samples / 3;
+
+      //   this->input_buffer_current_ += output_samples * 3;
+      //   this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
+
+      //   this->output_buffer_current_ = this->output_buffer_;
+      //   this->output_buffer_length_ += output_samples * sizeof(int16_t);
+      // }
     } else {
       if (this->input_buffer_length_ > 0) {
         // Samples are indiviudal int16 values. Frames include 1 sample for mono and 2 samples for stereo
@@ -361,9 +376,10 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   return AudioResamplerState::RESAMPLING;
 }
 
-int16_t AudioResampler::float_to_q15_(float q, uint32_t shift) { return (int16_t) (q * pow(2, 15 + shift)); }
+int16_t ESPIntegerUpsampler::float_to_q15_(float q, uint32_t shift) { return (int16_t) (q * pow(2, 15 + shift)); }
 
-int8_t AudioResampler::generate_q15_fir_coefficients_(int16_t *fir_coeffs, const unsigned int fir_len, const float ft) {
+int8_t ESPIntegerUpsampler::generate_q15_fir_coefficients_(int16_t *fir_coeffs, const unsigned int fir_len,
+                                                           const float ft) {
   // Even or odd length of the FIR filter
   const bool is_odd = (fir_len % 2) ? (true) : (false);
   const float fir_order = (float) (fir_len - 1);
