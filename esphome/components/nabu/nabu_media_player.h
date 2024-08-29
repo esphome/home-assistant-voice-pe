@@ -14,6 +14,7 @@
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 #include "esphome/core/ring_buffer.h"
 
 #include <freertos/FreeRTOS.h>
@@ -42,6 +43,11 @@ struct MediaCallCommand {
   optional<bool> announce;
   optional<bool> new_url;
   optional<bool> new_file;
+};
+
+struct VolumeRestoreState {
+  float volume;
+  bool is_muted;
 };
 
 class NabuMediaPlayer : public Component,
@@ -76,20 +82,16 @@ class NabuMediaPlayer : public Component,
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @return The current volume, if successful. Updates this->volume if publish is true.
-  optional<float> get_volume_(bool publish = true);
+  /// @brief Updates this->volume and saves volume/mute state to flash for restortation if publish is true.
+  void set_volume_(float volume, bool publish = true);
 
-  /// @return The current mute status, if successful. Updates this->is_muted_ if publish is true.
-  optional<bool> get_mute_(bool publish = true);
+  /// @brief Sets the mute state. Restores previous volume if unmuting. Always saves volume/mute state to flash for
+  /// restoration.
+  /// @param mute_state If true, audio will be muted. If false, audio will be unmuted
+  void set_mute_state_(bool mute_state);
 
-  /// @return True if successful set. Updates this->volume if publish is true.
-  bool set_volume_(float volume, bool publish = true);
-
-  /// @return True if successfully muted, false otherwise
-  bool mute_();
-
-  /// @return True if successfully unmuted, false otherwise
-  bool unmute_();
+  /// @brief Saves the current volume and mute state to the flash for restoration.
+  void save_volume_restore_state_();
 
   esp_err_t start_i2s_driver_();
 
@@ -140,6 +142,9 @@ class NabuMediaPlayer : public Component,
 #else
   int16_t software_volume_scale_factor_ = INT16_MAX;
 #endif
+
+  // Used to save volume/mute state for restoration
+  ESPPreferenceObject pref_;
 };
 
 template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {

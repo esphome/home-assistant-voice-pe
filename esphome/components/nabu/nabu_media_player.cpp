@@ -210,10 +210,15 @@ void NabuMediaPlayer::setup() {
 
   this->speaker_event_queue_ = xQueueCreate(QUEUE_COUNT, sizeof(TaskEvent));
 
-  if (!this->get_volume_().has_value() || !this->get_mute_().has_value()) {
-    ESP_LOGE(TAG, "Couldn't communicate with DAC");
-    this->mark_failed();
-    return;
+  this->pref_ = global_preferences->make_preference<VolumeRestoreState>(this->get_object_id_hash());
+
+  VolumeRestoreState volume_restore_state;
+  if (this->pref_.load(&volume_restore_state)) {
+    this->set_volume_(volume_restore_state.volume);
+    this->set_mute_state_(volume_restore_state.is_muted);
+  } else {
+    this->set_volume_(0.5f);
+    this->set_mute_state_(false);
   }
 
   ESP_LOGI(TAG, "Set up nabu media player");
@@ -456,7 +461,7 @@ void NabuMediaPlayer::watch_media_commands_() {
 
     if (media_command.volume.has_value()) {
       this->set_volume_(media_command.volume.value());
-      this->unmute_();
+      this->set_mute_state_(false);
       this->publish_state();
     }
 
@@ -496,13 +501,13 @@ void NabuMediaPlayer::watch_media_commands_() {
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_MUTE: {
-          this->mute_();
+          this->set_mute_state_(true);
 
           this->publish_state();
           break;
         }
         case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
-          this->unmute_();
+          this->set_mute_state_(false);
           this->publish_state();
           break;
         case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
@@ -688,125 +693,58 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   return traits;
 };
 
-optional<float> NabuMediaPlayer::get_volume_(bool publish) {
-#ifdef USE_AUDIO_DAC
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
-    ESP_LOGE(TAG, "Failed to switch to page 0 on DAC");
-    return {};
-  }
-
-  uint8_t dac_volume = 0;
-  if (!this->read_byte(DAC_LEFT_VOLUME_REGISTER, &dac_volume)) {
-    ESP_LOGE(TAG, "Failed to read the volume from the DAC");
-    return {};
-  }
-
-  float volume = remap<float, int8_t>(static_cast<int8_t>(dac_volume), -127, 48, 0.0f, 1.0f);
-#else
-  float volume = this->volume;
-#endif
-
-  if (publish) {
-    this->volume = volume;
-  }
-
-  return volume;
-}
-
-bool NabuMediaPlayer::set_volume_(float volume, bool publish) {
+void NabuMediaPlayer::set_volume_(float volume, bool publish) {
 #ifdef USE_AUDIO_DAC
   int8_t dac_volume = remap<int8_t, float>(volume, 0.0f, 1.0f, -127, 48);
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to volume page registers");
-    return false;
-  }
 
-  if (!this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_VOLUME_PAGE) ||
+      !this->write_byte(DAC_LEFT_VOLUME_REGISTER, dac_volume) ||
       !this->write_byte(DAC_RIGHT_VOLUME_REGISTER, dac_volume)) {
     ESP_LOGE(TAG, "DAC failed to set volume for left and right channels");
-    return false;
+    return;
   }
 #else
-  // Use the decibel reduction table from audio_mixer.h
+  // Use the decibel reduction table from audio_mixer.h for software volume control
   ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
   this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
 #endif
 
-  if (publish)
-    this->volume = volume;
-
-  return true;
-}
-
-optional<bool> NabuMediaPlayer::get_mute_(bool publish) {
-#ifdef USE_AUDIO_DAC
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return {};
-  }
-
-  uint8_t dac_mute_left = 0;
-  uint8_t dac_mute_right = 0;
-  if (!this->read_byte(DAC_LEFT_MUTE_REGISTER, &dac_mute_left) ||
-      !this->read_byte(DAC_RIGHT_MUTE_REGISTER, &dac_mute_right)) {
-    ESP_LOGE(TAG, "DAC failed to read mute status");
-    return {};
-  }
-
-  bool is_muted = false;
-  if (dac_mute_left == DAC_MUTE_COMMAND && dac_mute_right == DAC_MUTE_COMMAND) {
-    is_muted = true;
-  }
-#else
-  bool is_muted = this->is_muted_;
-#endif
-
   if (publish) {
-    this->is_muted_ = is_muted;
+    this->volume = volume;
+    this->save_volume_restore_state_();
   }
-  return is_muted;
 }
 
-bool NabuMediaPlayer::mute_() {
-#ifdef USE_AUDIO_DAC
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return false;
-  }
-
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_MUTE_COMMAND) ||
-      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_MUTE_COMMAND))) {
-    ESP_LOGE(TAG, "DAC failed to mute left and right channels");
-    return false;
-  }
-#else
-  this->software_volume_scale_factor_ = 0;
-#endif
-
-  this->is_muted_ = true;
-
-  return true;
+void NabuMediaPlayer::save_volume_restore_state_() {
+  VolumeRestoreState volume_restore_state;
+  volume_restore_state.volume = this->volume;
+  volume_restore_state.is_muted = this->is_muted_;
+  this->pref_.save(&volume_restore_state);
 }
 
-bool NabuMediaPlayer::unmute_() {
+void NabuMediaPlayer::set_mute_state_(bool mute_state) {
 #ifdef USE_AUDIO_DAC
-  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE)) {
-    ESP_LOGE(TAG, "DAC failed to switch to mute page registers");
-    return false;
+  uint8_t mute_state_command = DAC_UNMUTE_COMMAND;
+  if (mute_state) {
+    mute_state_command = DAC_MUTE_COMMAND;
   }
-
-  if (!this->write_byte(DAC_LEFT_MUTE_REGISTER, DAC_UNMUTE_COMMAND) ||
-      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, DAC_UNMUTE_COMMAND))) {
-    ESP_LOGE(TAG, "DAC failed to unmute left and right channels");
-    return false;
+  if (!this->write_byte(DAC_PAGE_SELECTION_REGISTER, DAC_MUTE_PAGE) ||
+      !this->write_byte(DAC_LEFT_MUTE_REGISTER, mute_state_command) ||
+      !(this->write_byte(DAC_RIGHT_MUTE_REGISTER, mute_state_command))) {
+    ESP_LOGE(TAG, "DAC failed to change mute state on left and right channels");
+    return;
   }
 #else
-  this->set_volume_(this->volume);
+  if (mute_state) {
+    this->software_volume_scale_factor_ = 0;
+  } else {
+    this->set_volume_(this->volume_, false);
+  }
 #endif
 
-  this->is_muted_ = false;
+  this->is_muted_ = mute_state;
 
-  return true;
+  this->save_volume_restore_state_();
 }
 
 #define AIC3204_PAGE_CTRL 0x00     // Register 0  - Page Control
