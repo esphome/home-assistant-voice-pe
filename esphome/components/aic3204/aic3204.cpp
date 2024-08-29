@@ -134,7 +134,7 @@ bool AIC3204::set_auto_mute_mode(uint8_t auto_mute_mode) {
 }
 
 bool AIC3204::set_volume(float volume) {
-  this->volume_ = clamp<float>(volume, dvc_min, dvc_max);
+  this->volume_ = clamp<float>(volume, 0.0, 1.0);
   return this->write_volume_();
 }
 
@@ -160,7 +160,7 @@ bool AIC3204::write_volume_() {
   const int8_t dvc_min_byte = -127;
   const int8_t dvc_max_byte = 48;
 
-  int8_t volume_byte = dvc_min_byte + (2 * (this->volume_ - dvc_min));
+  int8_t volume_byte = dvc_min_byte + (this->volume_ * (dvc_max_byte - dvc_min_byte));
   volume_byte = clamp<int8_t>(volume_byte, dvc_min_byte, dvc_max_byte);
 
   ESP_LOGVV(TAG, "Setting volume to 0x%.2x", volume_byte & 0xFF);

@@ -62,9 +62,6 @@ static const uint8_t AIC3204_ADC_PTM = 0x3D;       // Register 61 - ADC Power Tu
 static const uint8_t AIC3204_AN_IN_CHRG = 0x47;    // Register 71 - Analog Input Quick Charging Config
 static const uint8_t AIC3204_REF_STARTUP = 0x7B;   // Register 123 - Reference Power Up Config
 
-static const float dvc_min = -63.5;                // Digital volume control min
-static const float dvc_max = 24;                   // Digital volume control max
-
 class AIC3204 : public audio_dac::AudioDac, public Component, public i2c::I2CDevice {
  public:
   void setup() override;

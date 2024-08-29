@@ -25,9 +25,7 @@ MUTE_ACTION_SCHEMA = maybe_simple_id(
 SET_VOLUME_ACTION_SCHEMA = cv.maybe_simple_value(
     {
         cv.GenerateID(): cv.use_id(AudioDac),
-        cv.Required(CONF_VOLUME): cv.templatable(
-            cv.All(cv.decibel, cv.float_range(max=24, min=-63.5))
-        ),
+        cv.Required(CONF_VOLUME): cv.templatable(cv.percentage),
     },
     key=CONF_VOLUME,
 )
