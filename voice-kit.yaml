@@ -106,7 +106,6 @@ esp32_improv:
 i2c:
   sda: GPIO5
   scl: GPIO6
-  frequency: 400kHz
 
 psram:
   mode: octal
@@ -1114,9 +1113,6 @@ media_player:
       - id: facotry_reset_cancelled_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_cancelled.wav
 
-voice_kit:
-  reset_pin: GPIO4
-
 external_components:
   - source:
       type: git
@@ -1132,7 +1128,6 @@ external_components:
       - nabu
       - nabu_microphone
       - voice_assistant
-      - voice_kit
     refresh: 0s
 
 audio_dac:
@@ -1282,11 +1277,13 @@ button:
   - platform: restart
     name: "Restart"
     entity_category: diagnostic
+
   # TODO: make it internal before launch
   - platform: factory_reset
     id: factory_reset_button
     name: "Factory Reset"
     entity_category: diagnostic
+
   # TODO: Remove before launch, added for testing/development
   - platform: template
     name: "timer beep"
@@ -1298,12 +1295,14 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
+
   # TODO: Remove before launch, added for testing/development
   - platform: template
     name: Check for update
     entity_category: diagnostic
     on_press:
       - component.update: update_http_request
+
   # TODO: Remove before launch, added for testing/development
   - platform: template
     name: Perform Update
