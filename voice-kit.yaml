@@ -195,7 +195,7 @@ binary_sensor:
   - platform: gpio
     id: center_button
     pin:
-      number: GPIO17
+      number: GPIO0
       inverted: true
     on_press:
       - script.execute: control_leds
@@ -1032,53 +1032,28 @@ script:
             - delay: 1s
 
 i2s_audio:
-  - id: i2s_input
-    i2s_lrclk_pin:
-      number: GPIO7
-      allow_other_uses: true
-    i2s_bclk_pin:
-      number: GPIO8
-      allow_other_uses: true
-    i2s_mclk_pin:
-      number: GPIO9
-      allow_other_uses: true
-    i2s_mode: secondary
-
   - id: i2s_output
     i2s_lrclk_pin:
       number: GPIO7
-      allow_other_uses: true
     i2s_bclk_pin:
       number: GPIO8
-      allow_other_uses: true
-    i2s_mclk_pin:
-      number: GPIO9
-      allow_other_uses: true
     i2s_mode: secondary
     # i2s_output data pin is gpio10
 
-  # yamllint disable rule:comments-indentation
-  # This describes the second I2S interface between ESP32 and XMOS chip. Currently unused.
-  # - id: i2s_output
-  #   i2s_lrclk_pin:
-  #     number: GPIO14
-  #     # allow_other_uses: true
-  #   i2s_bclk_pin:
-  #     number: GPIO13
-  #     # allow_other_uses: true
-  #   i2s_mclk_pin:
-  #     number: GPIO12
-  #     # allow_other_uses: true
-  #   i2s_mode: primary #secondary
-  # data line is GPIO15
-  # yamllint enable rule:comments-indentation
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO14
+    i2s_bclk_pin:
+      number: GPIO13
+    i2s_mode: secondary
+    # data line is GPIO15
 
 microphone:
   - platform: nabu_microphone
-    i2s_din_pin: GPIO11
+    i2s_din_pin: GPIO15
     adc_type: external
     pdm: false
-    sample_rate: 16000  # use 48000 for beta firmware
+    sample_rate: 16000
     bits_per_sample: 32bit
     i2s_audio_id: i2s_input
     channel_1:
@@ -1086,7 +1061,7 @@ microphone:
       amplify: false
     channel_2:
       id: comm_mic
-      amplify: false  # should be true for firmware with two different streams
+      amplify: false  # May be useful to enable, but may also result in worse wake word detection if speaking close to the device
 
 media_player:
   - platform: nabu
@@ -1094,7 +1069,7 @@ media_player:
     name: Media Player
     internal: false
     audio_dac:
-    sample_rate: 16000  # use 48000 for beta firmware
+    sample_rate: 48000
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
