@@ -12,12 +12,10 @@ void VoiceKit::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Voice Kit...");
 
   // Reset device using the reset pin
-  if (this->reset_pin_ != nullptr) {
-    this->reset_pin_->setup();
-    this->reset_pin_->digital_write(true);
-    delay(1);
-    this->reset_pin_->digital_write(false);
-  }
+  this->reset_pin_->setup();
+  this->reset_pin_->digital_write(true);
+  delay(1);
+  this->reset_pin_->digital_write(false);
   // Wait for XMOS to boot...
   this->set_timeout(3000, [this]() {
     if (!this->dfu_get_version_()) {
