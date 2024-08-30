@@ -1061,7 +1061,7 @@ microphone:
       amplify: false
     channel_2:
       id: comm_mic
-      amplify: false  # should be true for firmware with two different streams
+      amplify: false  # May be useful to enable, but may also result in worse wake word detection if speaking close to the device
 
 media_player:
   - platform: nabu
