@@ -3,6 +3,8 @@
 #include "esphome/core/entity_base.h"
 #include "esphome/core/helpers.h"
 
+#include <freertos/FreeRTOS.h>
+
 namespace esphome {
 namespace microphone {
 
@@ -23,7 +25,7 @@ class Microphone {
   void add_data_callback(std::function<void(const std::vector<int16_t> &)> &&data_callback) {
     this->data_callbacks_.add(std::move(data_callback));
   }
-  virtual size_t read(int16_t *buf, size_t len) = 0;
+  virtual size_t read(int16_t *buf, size_t len, TickType_t ticks_to_wait = 0) = 0;
 
   // How many bytes are available in the ring buffer
   virtual size_t available() { return 0; }

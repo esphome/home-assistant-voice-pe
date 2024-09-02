@@ -98,7 +98,7 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
   // void set_requested_stop() { this->requested_stop_ = true; }
   bool get_requested_stop() { return this->requested_stop_; }
 
-  size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len, 0); };
+  size_t read(int16_t *buf, size_t len,  TickType_t ticks_to_wait = 0) override { return this->ring_buffer_->read((void *) buf, len, ticks_to_wait); };
   size_t available() override { return this->ring_buffer_->available(); }
   void reset() override { this->ring_buffer_->reset(); }
 
