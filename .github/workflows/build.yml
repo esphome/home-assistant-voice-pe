@@ -41,6 +41,7 @@ jobs:
               repo: context.repo.repo,
               run_id: context.runId,
             })
+            const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifacts['data']['artifacts'][0]['id']}`
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -48,7 +49,7 @@ jobs:
               body: `Firmware built successfully! :tada:
             [Download][download] and extract the firmware to install with https://web.esphome.io
             Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
-            [download]: ${artifacts['data']['artifacts'][0]['archive_download_url']}`
+            [download]: ${url}`
             })
 
   upload:
