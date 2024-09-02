@@ -94,10 +94,7 @@ class ESPIntegerUpsampler {
     int8_t shift =
         this->generate_q15_fir_coefficients_(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH, ft_cutoff);
     // dsps_16_array_rev(this->fir_filter_coeffecients_, (uint32_t) FIR_FILTER_LENGTH);
-    printf("shifitng coeffecients by%d\n", shift);
-    dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, NULL, FIR_FILTER_LENGTH, 1, 0,
-                       -shift);
-          
+    dsps_fird_init_s16(&this->fir_filter_, this->fir_filter_coeffecients_, NULL, FIR_FILTER_LENGTH, 1, 0, -shift);
   }
   ~ESPIntegerUpsampler() { dsps_fird_s16_aexx_free(&this->fir_filter_); }
 

@@ -111,7 +111,7 @@ esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t 
     //   resample_info.resample = true;
     //   this->use_effecient_upsampler_ = true;
     //   this->sample_ratio_ = upsampling_factor - 0.01f;
-    // } else 
+    // } else
     {
       // Use the general, but slower, floating point polyphase resampler
 
@@ -181,15 +181,26 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   }
 
   if (this->output_buffer_length_ > 0) {
-    size_t bytes_free = this->output_ring_buffer_->free();
-    size_t bytes_to_write = std::min(this->output_buffer_length_, bytes_free);
+    size_t bytes_to_write = this->output_buffer_length_;
 
     if (bytes_to_write > 0) {
-      size_t bytes_written = this->output_ring_buffer_->write((void *) this->output_buffer_current_, bytes_to_write);
+      size_t bytes_written = this->output_ring_buffer_->write_without_replacement((void *) this->output_buffer_current_,
+                                                                         bytes_to_write, pdMS_TO_TICKS(20));
 
       this->output_buffer_current_ += bytes_written / sizeof(int16_t);
       this->output_buffer_length_ -= bytes_written;
     }
+
+    return AudioResamplerState::RESAMPLING;
+  }
+
+  // Copy audio data directly to output_buffer if resampling isn't required
+  if (!this->resample_info_.resample && !this->resample_info_.mono_to_stereo) {
+    size_t bytes_read = this->input_ring_buffer_->read(
+        (void *) this->output_buffer_, this->internal_buffer_samples_ * sizeof(int16_t), pdMS_TO_TICKS(20));
+
+    this->output_buffer_current_ = this->output_buffer_;
+    this->output_buffer_length_ += bytes_read;
 
     return AudioResamplerState::RESAMPLING;
   }
@@ -218,12 +229,12 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   this->input_buffer_current_ = this->input_buffer_;
 
   // Copy new data to the end of the of the buffer
-  size_t bytes_available = this->input_ring_buffer_->available();
-  size_t bytes_to_read = std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
+  size_t bytes_to_read = max_input_samples * sizeof(int16_t) - this->input_buffer_length_;
 
   if (bytes_to_read > 0) {
     int16_t *new_input_buffer_data = this->input_buffer_ + this->input_buffer_length_ / sizeof(int16_t);
-    size_t bytes_read = this->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read);
+    size_t bytes_read =
+        this->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read, pdMS_TO_TICKS(20));
 
     this->input_buffer_length_ += bytes_read;
   }
