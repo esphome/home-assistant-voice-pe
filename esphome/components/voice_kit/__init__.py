@@ -18,6 +18,7 @@ CODEOWNERS = ["@kbx81"]
 DEPENDENCIES = ["i2c"]
 
 CONF_FIRMWARE = "firmware"
+CONF_MD5 = "md5"
 
 DOMAIN = "voice_kit"
 
@@ -39,6 +40,16 @@ def download_firmware(config):
     path = _compute_local_file_path(url)
     external_files.download_content(url, path)
 
+    try:
+        with open(path, "r+b") as f:
+            firmware_bin = f.read()
+    except Exception as e:
+        raise core.EsphomeError(f"Could not open firmware file {path}: {e}")
+
+    firmware_bin_md5 = hashlib.md5(firmware_bin).hexdigest()
+    if firmware_bin_md5 != config[CONF_MD5]:
+        raise cv.Invalid(f"{CONF_MD5} is not consistent with file contents")
+
     return config
 
 
@@ -52,6 +63,7 @@ CONFIG_SCHEMA = (
                 {
                     cv.Required(CONF_URL): cv.url,
                     cv.Required(CONF_VERSION): cv.version_number,
+                    cv.Required(CONF_MD5): cv.All(cv.string, cv.Length(min=32, max=32)),
                 },
                 download_firmware,
             ),
