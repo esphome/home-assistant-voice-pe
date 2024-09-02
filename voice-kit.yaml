@@ -1250,6 +1250,5 @@ button:
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
 
-
 debug:
   update_interval: 5s
