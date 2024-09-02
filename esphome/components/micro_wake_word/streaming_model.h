@@ -11,13 +11,14 @@
 namespace esphome {
 namespace micro_wake_word {
 
-static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
+static const uint8_t MIN_SLICES_BEFORE_DETECTION = 100;
 static const uint32_t STREAMING_MODEL_VARIABLE_ARENA_SIZE = 1024;
 
 struct DetectionEvent {
   std::string *wake_word;
   bool detected;
-  bool partially_detection;  // Set if the most recent probability exceed the threshold, but the sliding window average hasn't yet
+  bool partially_detection;  // Set if the most recent probability exceed the threshold, but the sliding window average
+                             // hasn't yet
   uint8_t max_probability;
   uint8_t average_probability;
   bool blocked_by_vad = false;
@@ -43,10 +44,15 @@ class StreamingModel {
   void unload_model();
 
   /// @brief Enable the model. The next performing_streaming_inference call will load it.
-  void enable() { this->enabled_ = true; }
+  void enable(uint8_t initial_stride = 0) {
+    this->enabled_ = true;
+    this->current_stride_step_ = initial_stride;
+  }
 
   /// @brief Disable the model. The next performing_streaming_inference call will unload it.
   void disable() { this->enabled_ = false; }
+
+  bool get_unprocessed_probability_status() { return this->unprocessed_probability_status_; }
 
  protected:
   /// @brief Allocates tensor and variable arenas and sets up the model interpreter
@@ -59,6 +65,7 @@ class StreamingModel {
 
   bool loaded_{false};
   bool enabled_{true};
+  bool unprocessed_probability_status_{false};
   uint8_t current_stride_step_{0};
   int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
 

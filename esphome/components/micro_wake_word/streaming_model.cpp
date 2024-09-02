@@ -51,8 +51,9 @@ bool StreamingModel::load_model_() {
   }
 
   if (this->interpreter_ == nullptr) {
-    this->interpreter_ = make_unique<tflite::MicroInterpreter>(
-        tflite::GetModel(this->model_start_), this->streaming_op_resolver_, this->tensor_arena_, this->tensor_arena_size_, this->mrv_);
+    this->interpreter_ =
+        make_unique<tflite::MicroInterpreter>(tflite::GetModel(this->model_start_), this->streaming_op_resolver_,
+                                              this->tensor_arena_, this->tensor_arena_size_, this->mrv_);
     if (this->interpreter_->AllocateTensors() != kTfLiteOk) {
       ESP_LOGE(TAG, "Failed to allocate tensors for the streaming model");
       return false;
@@ -124,16 +125,15 @@ bool StreamingModel::perform_streaming_inference(const int8_t features[PREPROCES
   if (this->loaded_) {
     TfLiteTensor *input = this->interpreter_->input(0);
 
+    uint8_t stride = this->interpreter_->input(0)->dims->data[1];
+    this->current_stride_step_ = this->current_stride_step_ % stride;
+
     std::memmove(
         (int8_t *) (tflite::GetTensorData<int8_t>(input)) + PREPROCESSOR_FEATURE_SIZE * this->current_stride_step_,
         features, PREPROCESSOR_FEATURE_SIZE);
     ++this->current_stride_step_;
 
-    uint8_t stride = this->interpreter_->input(0)->dims->data[1];
-
     if (this->current_stride_step_ >= stride) {
-      this->current_stride_step_ = 0;
-
       TfLiteStatus invoke_status = this->interpreter_->Invoke();
       if (invoke_status != kTfLiteOk) {
         ESP_LOGW(TAG, "Streaming interpreter invoke failed");
@@ -146,6 +146,7 @@ bool StreamingModel::perform_streaming_inference(const int8_t features[PREPROCES
       if (this->last_n_index_ == this->sliding_window_size_)
         this->last_n_index_ = 0;
       this->recent_streaming_probabilities_[this->last_n_index_] = output->data.uint8[0];  // probability;
+      this->unprocessed_probability_status_ = true;
     }
     this->ignore_windows_ = std::min(this->ignore_windows_ + 1, 0);
   }
@@ -168,6 +169,7 @@ WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cut
   this->wake_word_ = wake_word;
   this->tensor_arena_size_ = tensor_arena_size;
   this->register_streaming_ops_(this->streaming_op_resolver_);
+  // this->current_stride_step_ = initial_stride;
 };
 
 DetectionEvent WakeWordModel::determine_detected() {
@@ -190,6 +192,7 @@ DetectionEvent WakeWordModel::determine_detected() {
   detection_event.average_probability = sum / this->sliding_window_size_;
   detection_event.detected = sum > this->probability_cutoff_ * this->sliding_window_size_;
 
+  this->unprocessed_probability_status_ = false;
   return detection_event;
 }
 
