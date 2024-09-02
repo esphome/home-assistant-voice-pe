@@ -27,6 +27,8 @@ esphome:
   on_boot:
     priority: 600
     then:
+      # TODO: make it internal before launch
+      - switch.turn_on: internal_speaker_amp
       # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
       - if:
           condition:
@@ -189,7 +191,12 @@ switch:
       - script.execute: control_leds
       - delay: 15min
       - switch.turn_off: timer_ringing
-
+  # TODO: make it internal before launch
+  - platform: gpio
+    pin: GPIO47
+    id: internal_speaker_amp
+    name: "Internal speaker amp"
+    entity_category: config
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
@@ -392,6 +399,13 @@ binary_sensor:
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
+  # TODO: make it internal before launch
+  - platform: gpio
+    id: jack_plugged
+    pin:
+      number: GPIO17
+    name: "Audio Jack Plugged In"
+    entity_category: diagnostic
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -532,11 +546,7 @@ light:
             static int8_t index = 0;
             Color color(255, 0, 0);
             for (int i = 0; i < 12; i++) {
-              if (i == 2) {
-                it[i] = color;
-              } else if (i == 3) {
-                it[i] = color;
-              } else if (i == 8) {
+              if (i == 3) {
                 it[i] = color;
               } else if (i == 9) {
                 it[i] = color;
