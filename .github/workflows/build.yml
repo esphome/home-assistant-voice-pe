@@ -36,7 +36,7 @@ jobs:
         uses: actions/github-script@v7.0.1
         with:
           script: |-
-            const artifacts = github.rest.actions.listWorkflowRunArtifacts({
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: context.runId,
@@ -49,7 +49,7 @@ jobs:
               body: `Firmware built successfully! :tada:
             [Download][download] and extract the firmware to install with https://web.esphome.io
             Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
-            [download]: {artifacts['artifacts'][0]['archive_download_url']}`
+            [download]: ${artifacts['artifacts'][0]['archive_download_url']}`
             })
 
   upload:
