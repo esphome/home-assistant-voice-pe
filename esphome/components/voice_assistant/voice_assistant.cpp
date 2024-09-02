@@ -432,7 +432,7 @@ void VoiceAssistant::loop() {
       }
 #endif
       if (playing) {
-        this->set_timeout("playing", 50, [this]() {
+        this->set_timeout("playing", 250, [this]() {
           this->cancel_timeout("speaker-timeout");
           this->set_state_(State::IDLE, State::IDLE);
         });
