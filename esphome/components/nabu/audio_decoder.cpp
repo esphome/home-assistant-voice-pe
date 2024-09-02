@@ -89,7 +89,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     }
   }
 
-  if (this->potentially_failed_count_ > 5) {
+  if (this->potentially_failed_count_ > 10) {
     return AudioDecoderState::FAILED;
   }
 
@@ -97,30 +97,24 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
 
   while (state == FileDecoderState::MORE_TO_PROCESS) {
     if (this->output_buffer_length_ > 0) {
-      // Have decoded data, feed into output ring buffer
-      size_t bytes_free = this->output_ring_buffer_->free();
-      size_t bytes_to_write = std::min(this->output_buffer_length_, bytes_free);
+      // Have decoded data, write it to the output ring buffer
+      size_t bytes_to_write = this->output_buffer_length_;
 
       if (bytes_to_write > 0) {
-        size_t bytes_written = this->output_ring_buffer_->write((void *) this->output_buffer_current_, bytes_to_write);
+        size_t bytes_written = this->output_ring_buffer_->write_without_replacement(
+            (void *) this->output_buffer_current_, bytes_to_write, pdMS_TO_TICKS(20));
 
         this->output_buffer_length_ -= bytes_written;
         this->output_buffer_current_ += bytes_written;
       }
 
       if (this->output_buffer_length_ > 0) {
-        // Output ring buffer is full, so we can't do any more processing
+        // Output buffer still has decoded audio to write
         return AudioDecoderState::DECODING;
       }
     } else {
-      // Try to decode more data
-      size_t bytes_available = this->input_ring_buffer_->available();
-      size_t bytes_to_read = std::min(bytes_available, this->internal_buffer_size_ - this->input_buffer_length_);
-
-      if ((this->potentially_failed_count_ > 0) && (bytes_to_read == 0)) {
-        // We didn't have enough data last time, and we have no new data, so just return
-        return AudioDecoderState::DECODING;
-      }
+      // Decode more data
+      size_t bytes_to_read = this->internal_buffer_size_ - this->input_buffer_length_;
 
       // Shift unread data in input buffer to start
       if (this->input_buffer_length_ > 0) {
@@ -133,15 +127,16 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
 
       if (bytes_to_read > 0) {
         uint8_t *new_audio_data = this->input_buffer_ + this->input_buffer_length_;
-        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read);
+        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read, pdMS_TO_TICKS(20));
 
         this->input_buffer_length_ += bytes_read;
       }
 
-      if (this->input_buffer_length_ == 0) {
+      if ((this->input_buffer_length_ == 0) || ((this->potentially_failed_count_ > 0) && (bytes_read == 0))) {
         // No input data available, so we can't do any more processing
         state = FileDecoderState::IDLE;
       } else {
+        // vTaskSuspendAll();
         switch (this->media_file_type_) {
           case media_player::MediaFileType::FLAC:
             state = this->decode_flac_();
@@ -156,6 +151,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
             state = FileDecoderState::IDLE;
             break;
         }
+        // xTaskResumeAll();
       }
     }
     if (state == FileDecoderState::POTENTIALLY_FAILED) {
@@ -166,14 +162,6 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       return AudioDecoderState::FAILED;
     } else {
       this->potentially_failed_count_ = 0;
-    }
-    if (this->get_stream_info().has_value()) {
-      size_t monotone_samples =
-          (this->output_ring_buffer_->available() / sizeof(int16_t)) / this->get_stream_info().value().channels;
-      if (monotone_samples > this->get_stream_info().value().sample_rate/100) {
-        // We have more than 10 milliseconds of samples ready to output, we can break
-        break;
-      }
     }
   }
   return AudioDecoderState::DECODING;
@@ -253,7 +241,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
     return FileDecoderState::END_OF_FILE;
   }
 
-  return FileDecoderState::MORE_TO_PROCESS;
+  return FileDecoderState::IDLE;
 }
 
 FileDecoderState AudioDecoder::decode_mp3_() {
@@ -296,7 +284,7 @@ FileDecoderState AudioDecoder::decode_mp3_() {
       this->stream_info_ = stream_info;
     }
   }
-  // }
+
   return FileDecoderState::MORE_TO_PROCESS;
 }
 
