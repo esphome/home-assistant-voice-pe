@@ -12,12 +12,13 @@ static const size_t QUEUE_COUNT = 10;
 
 static const size_t FILE_BUFFER_SIZE = 32 * 1024;
 static const size_t FILE_RING_BUFFER_SIZE = 64 * 1024;
-static const size_t BUFFER_SIZE_SAMPLES = 32768;
+
+static const size_t BUFFER_SIZE_SAMPLES = 24000;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
-static const uint32_t READER_TASK_STACK_SIZE = 4096;
-static const uint32_t DECODER_TASK_STACK_SIZE = 4096;
-static const uint32_t RESAMPLER_TASK_STACK_SIZE = 4096;
+static const uint32_t READER_TASK_STACK_SIZE = 3072;
+static const uint32_t DECODER_TASK_STACK_SIZE = 3072;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 3072;
 static const size_t DURATION_TASK_DELAY_MS = 10;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
@@ -67,8 +68,8 @@ AudioPipeline::AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type)
 }
 
 esp_err_t AudioPipeline::start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
-                               UBaseType_t priority) {
-  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority);
+                               UBaseType_t priority, BaseType_t core) {
+  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority, core);
 
   if (err == ESP_OK) {
     this->current_uri_ = uri;
@@ -79,8 +80,8 @@ esp_err_t AudioPipeline::start(const std::string &uri, uint32_t target_sample_ra
 }
 
 esp_err_t AudioPipeline::start(media_player::MediaFile *media_file, uint32_t target_sample_rate,
-                               const std::string &task_name, UBaseType_t priority) {
-  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority);
+                               const std::string &task_name, UBaseType_t priority, BaseType_t core) {
+  esp_err_t err = this->common_start_(target_sample_rate, task_name, priority, core);
 
   if (err == ESP_OK) {
     this->current_media_file_ = media_file;
@@ -108,13 +109,16 @@ esp_err_t AudioPipeline::allocate_buffers_() {
   ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
 
   if (this->read_task_stack_buffer_ == nullptr)
-    this->read_task_stack_buffer_ = stack_allocator.allocate(READER_TASK_STACK_SIZE);
+    this->read_task_stack_buffer_ = (StackType_t *) malloc(READER_TASK_STACK_SIZE);
+  // this->read_task_stack_buffer_ = stack_allocator.allocate(READER_TASK_STACK_SIZE);
 
   if (this->decode_task_stack_buffer_ == nullptr)
-    this->decode_task_stack_buffer_ = stack_allocator.allocate(DECODER_TASK_STACK_SIZE);
+    this->decode_task_stack_buffer_ = (StackType_t *) malloc(DECODER_TASK_STACK_SIZE);
+  // this->decode_task_stack_buffer_ = stack_allocator.allocate(DECODER_TASK_STACK_SIZE);
 
   if (this->resample_task_stack_buffer_ == nullptr)
-    this->resample_task_stack_buffer_ = stack_allocator.allocate(RESAMPLER_TASK_STACK_SIZE);
+    this->resample_task_stack_buffer_ = (StackType_t *) malloc(RESAMPLER_TASK_STACK_SIZE);
+  // this->resample_task_stack_buffer_ = stack_allocator.allocate(RESAMPLER_TASK_STACK_SIZE);
 
   if ((this->read_task_stack_buffer_ == nullptr) || (this->decode_task_stack_buffer_ == nullptr) ||
       (this->resample_task_stack_buffer_ == nullptr)) {
@@ -137,27 +141,27 @@ esp_err_t AudioPipeline::allocate_buffers_() {
   return ESP_OK;
 }
 
-esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name,
-                                       UBaseType_t priority) {
+esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority,
+                                       BaseType_t core) {
   esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
     return err;
   }
 
   if (this->read_task_handle_ == nullptr) {
-    this->read_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::read_task_, (task_name + "_read").c_str(), READER_TASK_STACK_SIZE,
-                          (void *) this, priority, this->read_task_stack_buffer_, &this->read_task_stack_);
+    this->read_task_handle_ = xTaskCreateStaticPinnedToCore(
+        AudioPipeline::read_task_, (task_name + "_read").c_str(), READER_TASK_STACK_SIZE, (void *) this, priority,
+        this->read_task_stack_buffer_, &this->read_task_stack_, tskNO_AFFINITY);
   }
   if (this->decode_task_handle_ == nullptr) {
-    this->decode_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::decode_task_, (task_name + "_decode").c_str(), DECODER_TASK_STACK_SIZE,
-                          (void *) this, priority, this->decode_task_stack_buffer_, &this->decode_task_stack_);
+    this->decode_task_handle_ = xTaskCreateStaticPinnedToCore(
+        AudioPipeline::decode_task_, (task_name + "_decode").c_str(), DECODER_TASK_STACK_SIZE, (void *) this, priority,
+        this->decode_task_stack_buffer_, &this->decode_task_stack_, core);
   }
   if (this->resample_task_handle_ == nullptr) {
-    this->resample_task_handle_ =
-        xTaskCreateStatic(AudioPipeline::resample_task_, (task_name + "_resample").c_str(), RESAMPLER_TASK_STACK_SIZE,
-                          (void *) this, priority, this->resample_task_stack_buffer_, &this->resample_task_stack_);
+    this->resample_task_handle_ = xTaskCreateStaticPinnedToCore(
+        AudioPipeline::resample_task_, (task_name + "_resample").c_str(), RESAMPLER_TASK_STACK_SIZE, (void *) this,
+        priority, this->resample_task_stack_buffer_, &this->resample_task_stack_, tskNO_AFFINITY);
   }
 
   if ((this->read_task_handle_ == nullptr) || (this->decode_task_handle_ == nullptr) ||
@@ -165,7 +169,12 @@ esp_err_t AudioPipeline::common_start_(uint32_t target_sample_rate, const std::s
     return ESP_FAIL;
   }
 
+  this->priority_ = priority;
   this->target_sample_rate_ = target_sample_rate;
+
+  vTaskPrioritySet(this->read_task_handle_, this->priority_ + 1);
+  vTaskPrioritySet(this->decode_task_handle_, this->priority_ + 1);
+  vTaskPrioritySet(this->resample_task_handle_, this->priority_ + 1);
 
   return this->stop();
 }
@@ -181,6 +190,8 @@ AudioPipelineState AudioPipeline::get_state() {
           } else if (event.file_type.has_value()) {
             ESP_LOGD(TAG, "Reading %s file type",
                      media_player::media_player_file_type_to_string(event.file_type.value()));
+
+            vTaskPrioritySet(this->read_task_handle_, this->priority_);
           }
 
           break;
@@ -191,6 +202,7 @@ AudioPipelineState AudioPipeline::get_state() {
             ESP_LOGD(TAG, "Decoded audio has %d channels, %d Hz sample rate, and %d bits per sample",
                      event.stream_info.value().channels, event.stream_info.value().sample_rate,
                      event.stream_info.value().bits_per_sample);
+            vTaskPrioritySet(this->decode_task_handle_, this->priority_);
           }
           break;
         case InfoErrorSource::RESAMPLER:
@@ -203,6 +215,9 @@ AudioPipelineState AudioPipeline::get_state() {
             if (event.resample_info.value().mono_to_stereo) {
               ESP_LOGD(TAG, "Converting mono channel audio to stereo channel audio");
             }
+
+            // Made it to the resampling stage, so set reduce the task priorities to their correct value
+            vTaskPrioritySet(this->resample_task_handle_, this->priority_);
           }
           break;
       }
@@ -333,9 +348,6 @@ void AudioPipeline::read_task_(void *params) {
                              EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -406,9 +418,6 @@ void AudioPipeline::decode_task_(void *params) {
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -477,9 +486,6 @@ void AudioPipeline::resample_task_(void *params) {
                              EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }

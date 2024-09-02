@@ -52,9 +52,9 @@ class AudioPipeline {
   AudioPipeline(AudioMixer *mixer, AudioPipelineType pipeline_type);
 
   esp_err_t start(const std::string &uri, uint32_t target_sample_rate, const std::string &task_name,
-                  UBaseType_t priority = 1);
+                  UBaseType_t priority, BaseType_t core);
   esp_err_t start(media_player::MediaFile *media_file, uint32_t target_sample_rate, const std::string &task_name,
-                  UBaseType_t priority = 1);
+                  UBaseType_t priority, BaseType_t core);
 
   esp_err_t stop();
 
@@ -64,7 +64,9 @@ class AudioPipeline {
 
  protected:
   esp_err_t allocate_buffers_();
-  esp_err_t common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority);
+  esp_err_t common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority, BaseType_t core);
+
+  UBaseType_t priority_;
 
   uint32_t target_sample_rate_;
 
