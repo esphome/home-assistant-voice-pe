@@ -25,6 +25,36 @@ jobs:
       release-url: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
       release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
+  comment:
+    if: github.event_name == 'pull_request'
+    name: Comment on PR
+    runs-on: ubuntu-latest
+    needs:
+      - build-firmware
+    steps:
+      - name: Comment on PR
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |-
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            })
+            const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifacts['data']['artifacts'][0]['id']}`
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `Firmware built successfully! :tada:
+
+            [Download][download] and extract the firmware to install with https://web.esphome.io
+
+            Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
+
+            [download]: ${url}`
+            })
+
   upload:
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
     name: Upload to R2
