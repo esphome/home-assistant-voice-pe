@@ -30,6 +30,9 @@ update:
     id: update_http_request
     source: https://esphome.github.io/voice-kit/manifest.json
 
+dashboard_import:
+  package_import_url: github://esphome/voice-kit/voice-kit.yaml
+
 wifi:
   on_connect:
     - delay: 5s  # Gives time for improv results to be transmitted
