@@ -21,9 +21,6 @@ esphome:
   name_add_mac_suffix: true
   platformio_options:
     board_build.flash_mode: dio
-  project:
-    name: esphome.voice-kit
-    version: dev
   on_boot:
     priority: 600
     then:
@@ -66,11 +63,7 @@ wifi:
   ap:
   on_connect:
     - script.execute: control_leds
-    - delay: 5s  # Gives time for improv results to be transmitted
-    - ble.disable:
-    - script.execute: control_leds
   on_disconnect:
-    - ble.enable:
     - script.execute: control_leds
 
 logger:
@@ -87,21 +80,6 @@ api:
 ota:
   - platform: esphome
     id: ota_esphome
-  - platform: http_request
-    id: ota_http_request
-
-http_request:
-
-update:
-  - platform: http_request
-    name: None
-    id: update_http_request
-    source: https://esphome.github.io/voice-kit/manifest.json
-
-improv_serial:
-
-esp32_improv:
-  authorizer: center_button
 
 i2c:
   sda: GPIO5
@@ -1201,9 +1179,6 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
-    - wait_until:
-        not: ble.enabled
-    - delay: 2s
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
@@ -1273,20 +1248,7 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Check for update
-    entity_category: diagnostic
-    on_press:
-      - component.update: update_http_request
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Perform Update
-    entity_category: diagnostic
-    on_press:
-      - update.perform:
-          id: update_http_request
-          force_update: true
+
 
 debug:
   update_interval: 5s
