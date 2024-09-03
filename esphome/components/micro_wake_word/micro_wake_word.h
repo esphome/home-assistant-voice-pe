@@ -7,7 +7,6 @@
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
-#include "esphome/core/ring_buffer.h"
 
 #include "esphome/components/microphone/microphone.h"
 
@@ -67,7 +66,7 @@ class MicroWakeWord : public Component {
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
   State state_{State::IDLE};
 
-  std::unique_ptr<RingBuffer> features_ring_buffer_;
+
 
   std::vector<WakeWordModel *> wake_word_models_;
 
@@ -103,8 +102,8 @@ class MicroWakeWord : public Component {
   // Used to send messages about the model's states to the main loop
   QueueHandle_t detection_queue_;
 
-  // Used for storing most recent wake word event for the VA component to read
-  QueueHandle_t wake_word_queue_;
+  // Stores spectrogram features for inference
+  QueueHandle_t features_queue_;
 
   static void preprocessor_task_(void *params);
   TaskHandle_t preprocessor_task_handle_{nullptr};
