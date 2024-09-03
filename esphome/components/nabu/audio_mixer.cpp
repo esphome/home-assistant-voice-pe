@@ -328,10 +328,10 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
     if ((added_sample > MAX_AUDIO_SAMPLE_VALUE) || (added_sample < MIN_AUDIO_SAMPLE_VALUE)) {
       // The largest magnitude the media sample can be to avoid clipping (converted to Q30 fixed point)
       int32_t q30_media_sample_safe_max =
-          static_cast<int32_t>(MAX_AUDIO_SAMPLE_VALUE - std::abs(announcement_buffer[i])) << 15;
+          static_cast<int32_t>(std::abs(MIN_AUDIO_SAMPLE_VALUE) - std::abs(announcement_buffer[i])) << 15;
 
       // Actual media sample value (Q15 number stored in an int32 for future division)
-      int32_t media_sample_value = media_buffer[i];
+      int32_t media_sample_value = abs(media_buffer[i]);
 
       // Calculation to perform the Q15 division for media_sample_safe_max/media_sample_value
       // Reference: https://sestevenson.wordpress.com/2010/09/20/fixed-point-division-2/ (accessed August 15,
