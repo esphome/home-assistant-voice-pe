@@ -311,7 +311,8 @@ void NabuMediaPlayer::speaker_task(void *params) {
 
             size_t bytes_read = 0;
             size_t bytes_to_read = sizeof(int16_t) * SAMPLES_IN_ALL_DMA_BUFFERS;
-            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
+            bytes_read =
+                this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
 
             if (bytes_read > 0) {
               size_t bytes_written;
@@ -580,6 +581,22 @@ void NabuMediaPlayer::loop() {
 
   if (this->media_pipeline_ != nullptr)
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
+
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error reading the file.");
+  } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error decoding the file.");
+  } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error resampling the file.");
+  }
+
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error reading the file.");
+  } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error decoding the file.");
+  } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error resampling the file.");
+  }
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
