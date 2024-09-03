@@ -48,12 +48,7 @@ void AudioMixer::stop() {
 }
 
 size_t AudioMixer::read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait) {
-  size_t available_bytes = this->available();
-  size_t bytes_to_read = std::min(length, available_bytes);
-  if (bytes_to_read > 0) {
-    return this->output_ring_buffer_->read((void *) buffer, bytes_to_read, ticks_to_wait);
-  }
-  return 0;
+  return this->output_ring_buffer_->read((void *) buffer, length, ticks_to_wait);
 }
 
 void AudioMixer::audio_mixer_task_(void *params) {

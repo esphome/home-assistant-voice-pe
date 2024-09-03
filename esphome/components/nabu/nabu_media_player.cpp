@@ -75,7 +75,7 @@ static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
-static const size_t TASK_DELAY_MS = 5;
+static const size_t TASK_DELAY_MS = 10;
 
 static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
 
@@ -303,24 +303,15 @@ void NabuMediaPlayer::speaker_task(void *params) {
           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
           while (true) {
-            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(TASK_DELAY_MS));
+            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
 
             if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
               break;
             }
 
-            size_t bytes_available = this_speaker->audio_mixer_->available();
-            size_t samples_available = bytes_available / sizeof(int16_t);
-
-            size_t dma_buffers_available = samples_available / SAMPLES_IN_ONE_DMA_BUFFER;
-
-            size_t dma_buffers_to_read = std::min(dma_buffers_available, DMA_BUFFERS_COUNT);
-            dma_buffers_to_read = std::max(dma_buffers_to_read, (size_t) 1);  // always read at least 1 DMA buffer
-
-            size_t bytes_to_read = dma_buffers_to_read * SAMPLES_IN_ONE_DMA_BUFFER * sizeof(int16_t);
             size_t bytes_read = 0;
-
-            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, 0);
+            size_t bytes_to_read = sizeof(int16_t) * SAMPLES_IN_ALL_DMA_BUFFERS;
+            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
 
             if (bytes_read > 0) {
               size_t bytes_written;
