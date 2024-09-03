@@ -353,14 +353,14 @@ void NabuMediaPlayer::speaker_task(void *params) {
                 xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
               } else {
                 event.type = EventType::RUNNING;
-                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+                xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
               }
 
             } else {
               i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
               event.type = EventType::IDLE;
-              xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
             }
           }
 
