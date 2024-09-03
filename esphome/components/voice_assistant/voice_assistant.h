@@ -135,9 +135,11 @@ class VoiceAssistant : public Component {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
     }
 
+#ifdef USE_MEDIA_PLAYER
     if (this->media_player_ != nullptr) {
       flags |= VoiceAssistantFeature::FEATURE_ANNOUNCE;
     }
+#endif
 
     return flags;
   }

@@ -923,9 +923,12 @@ void VoiceAssistant::timer_tick_() {
 void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) {
 #ifdef USE_MEDIA_PLAYER
   if (this->media_player_ != nullptr) {
+    this->tts_start_trigger_->trigger(msg.text);
     this->announce_media_id_ = msg.media_id;
     this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
+    this->tts_end_trigger_->trigger(msg.media_id);
+    this->end_trigger_->trigger();
   }
 #endif
 }
