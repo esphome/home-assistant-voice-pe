@@ -296,10 +296,8 @@ esp_err_t AudioMixer::allocate_buffers_() {
     return ESP_ERR_NO_MEM;
   }
 
-  ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-
   if (this->stack_buffer_ == nullptr)
-    this->stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
+    this->stack_buffer_ = (StackType_t *) malloc(TASK_STACK_SIZE);
 
   if (this->stack_buffer_ == nullptr) {
     return ESP_ERR_NO_MEM;
