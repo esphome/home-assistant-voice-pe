@@ -7,6 +7,8 @@
 namespace esphome {
 namespace nabu {
 
+static const size_t READ_WRITE_TIMEOUT_MS = 20;
+
 AudioReader::AudioReader(esphome::RingBuffer *output_ring_buffer, size_t transfer_buffer_size) {
   this->output_ring_buffer_ = output_ring_buffer;
   this->transfer_buffer_size_ = transfer_buffer_size;
@@ -42,8 +44,8 @@ esp_err_t AudioReader::start(media_player::MediaFile *media_file, media_player::
 
   this->current_media_file_ = media_file;
 
-  this->media_file_data_current_ = media_file->data;
-  this->media_file_bytes_left_ = media_file->length;
+  this->transfer_buffer_current_ = media_file->data;
+  this->transfer_buffer_length_ = media_file->length;
   file_type = media_file->file_type;
 
   return ESP_OK;
@@ -100,6 +102,9 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
     file_type = media_player::MediaFileType::FLAC;
   }
 
+  this->transfer_buffer_current_ = this->transfer_buffer_;
+  this->transfer_buffer_length_ = 0;
+
   return ESP_OK;
 }
 
@@ -114,17 +119,11 @@ AudioReaderState AudioReader::read() {
 }
 
 AudioReaderState AudioReader::file_read_() {
-  if (this->media_file_bytes_left_ > 0) {
-    size_t bytes_to_write = std::min(this->media_file_bytes_left_, this->output_ring_buffer_->free());
-    bytes_to_write = std::min(bytes_to_write, this->transfer_buffer_size_);
-
-    if (bytes_to_write == 0) {
-      return AudioReaderState::READING;
-    }
-
-    size_t bytes_written = this->output_ring_buffer_->write((void *) this->media_file_data_current_, bytes_to_write);
-    this->media_file_bytes_left_ -= bytes_written;
-    this->media_file_data_current_ += bytes_written;
+  if (this->transfer_buffer_length_ > 0) {
+    size_t bytes_written = this->output_ring_buffer_->write_without_replacement(
+        (void *) this->transfer_buffer_current_, this->transfer_buffer_length_, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+    this->transfer_buffer_length_ -= bytes_written;
+    this->transfer_buffer_current_ += bytes_written;
 
     return AudioReaderState::READING;
   }
@@ -132,24 +131,32 @@ AudioReaderState AudioReader::file_read_() {
 }
 
 AudioReaderState AudioReader::http_read_() {
-  size_t bytes_to_read = std::min(this->output_ring_buffer_->free(), this->transfer_buffer_size_);
+  if (this->transfer_buffer_length_ > 0) {
+    size_t bytes_written = this->output_ring_buffer_->write_without_replacement(
+        (void *) this->transfer_buffer_, this->transfer_buffer_length_, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+    this->transfer_buffer_length_ -= bytes_written;
 
-  if (bytes_to_read == 0) {
-    return AudioReaderState::READING;
-  }
-
-  int received_len = esp_http_client_read(this->client_, (char *) this->transfer_buffer_, bytes_to_read);
-
-  if (received_len > 0) {
-    this->output_ring_buffer_->write((void *) this->transfer_buffer_, received_len);
-  } else if (received_len < 0) {
-    this->cleanup_connection_();
-    return AudioReaderState::FAILED;
+    // Shif remaining data to the start of the transfer buffer
+    memmove(this->transfer_buffer_, this->transfer_buffer_ + bytes_written, this->transfer_buffer_length_);
   }
 
   if (esp_http_client_is_complete_data_received(this->client_)) {
-    this->cleanup_connection_();
-    return AudioReaderState::FINISHED;
+    if (this->transfer_buffer_length_ == 0) {
+      this->cleanup_connection_();
+      return AudioReaderState::FINISHED;
+    }
+  } else {
+    size_t bytes_to_read = this->transfer_buffer_size_ - this->transfer_buffer_length_;
+    int received_len = esp_http_client_read(
+        this->client_, (char *) this->transfer_buffer_ + this->transfer_buffer_length_, bytes_to_read);
+
+    if (received_len > 0) {
+      this->transfer_buffer_length_ += received_len;
+    } else if (received_len < 0) {
+      // HTTP read error
+      this->cleanup_connection_();
+      return AudioReaderState::FAILED;
+    }
   }
 
   return AudioReaderState::READING;

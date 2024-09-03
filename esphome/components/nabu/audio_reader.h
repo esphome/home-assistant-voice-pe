@@ -36,14 +36,16 @@ class AudioReader {
   void cleanup_connection_();
 
   esphome::RingBuffer *output_ring_buffer_;
+
   uint8_t *transfer_buffer_{nullptr};
-  size_t transfer_buffer_size_;
+  const uint8_t *transfer_buffer_current_{nullptr};
+
+  size_t transfer_buffer_length_;  // Amount of data currently stored in transfer buffer (in bytes)
+  size_t transfer_buffer_size_;    // Capacity of transfer buffer (in bytes)
 
   esp_http_client_handle_t client_{nullptr};
 
   media_player::MediaFile *current_media_file_{nullptr};
-  size_t media_file_bytes_left_;
-  const uint8_t *media_file_data_current_;
 };
 }  // namespace nabu
 }  // namespace esphome
