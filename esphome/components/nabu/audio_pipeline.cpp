@@ -18,7 +18,6 @@ static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 static const uint32_t READER_TASK_STACK_SIZE = 4096;
 static const uint32_t DECODER_TASK_STACK_SIZE = 4096;
 static const uint32_t RESAMPLER_TASK_STACK_SIZE = 4096;
-static const size_t DURATION_TASK_DELAY_MS = 10;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 
@@ -333,9 +332,6 @@ void AudioPipeline::read_task_(void *params) {
                              EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -406,9 +402,6 @@ void AudioPipeline::decode_task_(void *params) {
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -477,9 +470,6 @@ void AudioPipeline::resample_task_(void *params) {
                              EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
