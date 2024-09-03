@@ -70,8 +70,8 @@ static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHAN
 static const size_t DMA_BUFFERS_COUNT = 4;
 static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = SAMPLES_IN_ONE_DMA_BUFFER * DMA_BUFFERS_COUNT;
 
-static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
-static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
+static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
