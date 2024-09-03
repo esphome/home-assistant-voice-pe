@@ -152,7 +152,7 @@ class VoiceAssistant : public Component {
   void on_event(const api::VoiceAssistantEventResponse &msg);
   void on_audio(const api::VoiceAssistantAudio &msg);
   void on_timer_event(const api::VoiceAssistantTimerEventResponse &msg);
-  void on_announce(const api::VoiceAssistantAnnounce &msg);
+  void on_announce(const api::VoiceAssistantAnnounceRequest &msg);
 
   bool is_running() const { return this->state_ != State::IDLE; }
   void set_continuous(bool continuous) { this->continuous_ = continuous; }
@@ -262,6 +262,7 @@ class VoiceAssistant : public Component {
 #endif
 #ifdef USE_MEDIA_PLAYER
   media_player::MediaPlayer *media_player_{nullptr};
+  std::string announce_media_id_{""};
 #endif
 
   bool local_output_{false};
@@ -269,8 +270,6 @@ class VoiceAssistant : public Component {
   std::string conversation_id_{""};
 
   std::string wake_word_{""};
-
-  std::string pipeline_run_id_{""};
 
   HighFrequencyLoopRequester high_freq_;
 

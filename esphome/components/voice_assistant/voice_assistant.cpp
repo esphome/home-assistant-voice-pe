@@ -300,8 +300,6 @@ void VoiceAssistant::loop() {
       msg.audio_settings = audio_settings;
       msg.wake_word_phrase = this->wake_word_;
       this->wake_word_ = "";
-      msg.pipeline_run_id = this->pipeline_run_id_;
-      this->pipeline_run_id_ = "";
 
       if (this->api_client_ == nullptr || !this->api_client_->send_voice_assistant_request(msg)) {
         ESP_LOGW(TAG, "Could not request start");
@@ -437,6 +435,11 @@ void VoiceAssistant::loop() {
         this->set_timeout("playing", 50, [this]() {
           this->cancel_timeout("speaker-timeout");
           this->set_state_(State::IDLE, State::IDLE);
+
+          api::VoiceAssistantAnnounceFinished msg;
+          msg.media_id = this->announce_media_id_;
+          this->api_client_->send_voice_assistant_announce_finished(msg);
+          this->announce_media_id_ = "";
         });
       }
       break;
@@ -758,6 +761,7 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       this->defer([this, url]() {
 #ifdef USE_MEDIA_PLAYER
         if (this->media_player_ != nullptr) {
+          this->announce_media_id_ = url;
           this->media_player_->make_call().set_media_url(url).set_announcement(true).perform();
         }
 #endif
@@ -916,10 +920,12 @@ void VoiceAssistant::timer_tick_() {
   this->timer_tick_trigger_->trigger(res);
 }
 
-void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounce &msg) {
+void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) {
 #ifdef USE_MEDIA_PLAYER
   if (this->media_player_ != nullptr) {
+    this->announce_media_id_ = msg.media_id;
     this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
+    this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
   }
 #endif
 }
