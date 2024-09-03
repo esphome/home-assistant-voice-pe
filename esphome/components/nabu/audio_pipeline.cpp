@@ -16,9 +16,8 @@ static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
 static const uint32_t READER_TASK_STACK_SIZE = 4096;
-static const uint32_t DECODER_TASK_STACK_SIZE = 4096;
-static const uint32_t RESAMPLER_TASK_STACK_SIZE = 4096;
-static const size_t DURATION_TASK_DELAY_MS = 10;
+static const uint32_t DECODER_TASK_STACK_SIZE = 3072;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 3072;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 
@@ -105,16 +104,14 @@ esp_err_t AudioPipeline::allocate_buffers_() {
     return ESP_ERR_NO_MEM;
   }
 
-  ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-
   if (this->read_task_stack_buffer_ == nullptr)
-    this->read_task_stack_buffer_ = stack_allocator.allocate(READER_TASK_STACK_SIZE);
+    this->read_task_stack_buffer_ = (StackType_t *) malloc(READER_TASK_STACK_SIZE);
 
   if (this->decode_task_stack_buffer_ == nullptr)
-    this->decode_task_stack_buffer_ = stack_allocator.allocate(DECODER_TASK_STACK_SIZE);
+    this->decode_task_stack_buffer_ = (StackType_t *) malloc(DECODER_TASK_STACK_SIZE);
 
   if (this->resample_task_stack_buffer_ == nullptr)
-    this->resample_task_stack_buffer_ = stack_allocator.allocate(RESAMPLER_TASK_STACK_SIZE);
+    this->resample_task_stack_buffer_ = (StackType_t *) malloc(RESAMPLER_TASK_STACK_SIZE);
 
   if ((this->read_task_stack_buffer_ == nullptr) || (this->decode_task_stack_buffer_ == nullptr) ||
       (this->resample_task_stack_buffer_ == nullptr)) {
@@ -333,9 +330,6 @@ void AudioPipeline::read_task_(void *params) {
                              EventGroupBits::READER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -406,9 +400,6 @@ void AudioPipeline::decode_task_(void *params) {
           // Inform the resampler that the stream information is available
           xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }
@@ -477,9 +468,6 @@ void AudioPipeline::resample_task_(void *params) {
                              EventGroupBits::RESAMPLER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
         }
-
-        // Block to give other tasks opportunity to run
-        delay(DURATION_TASK_DELAY_MS);
       }
     }
   }

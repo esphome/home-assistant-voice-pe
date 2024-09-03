@@ -17,7 +17,6 @@ namespace nabu {
 
 // TODO:
 //  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
-//  - Tune task memory requirements
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
@@ -70,12 +69,12 @@ static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHAN
 static const size_t DMA_BUFFERS_COUNT = 4;
 static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = SAMPLES_IN_ONE_DMA_BUFFER * DMA_BUFFERS_COUNT;
 
-static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 2;
-static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 7;
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
+static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
-static const size_t TASK_DELAY_MS = 5;
+static const size_t TASK_DELAY_MS = 10;
 
 static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
 
@@ -303,24 +302,16 @@ void NabuMediaPlayer::speaker_task(void *params) {
           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
           while (true) {
-            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(TASK_DELAY_MS));
+            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
 
             if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
               break;
             }
 
-            size_t bytes_available = this_speaker->audio_mixer_->available();
-            size_t samples_available = bytes_available / sizeof(int16_t);
-
-            size_t dma_buffers_available = samples_available / SAMPLES_IN_ONE_DMA_BUFFER;
-
-            size_t dma_buffers_to_read = std::min(dma_buffers_available, DMA_BUFFERS_COUNT);
-            dma_buffers_to_read = std::max(dma_buffers_to_read, (size_t) 1);  // always read at least 1 DMA buffer
-
-            size_t bytes_to_read = dma_buffers_to_read * SAMPLES_IN_ONE_DMA_BUFFER * sizeof(int16_t);
             size_t bytes_read = 0;
-
-            bytes_read = this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, 0);
+            size_t bytes_to_read = sizeof(int16_t) * SAMPLES_IN_ALL_DMA_BUFFERS;
+            bytes_read =
+                this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
 
             if (bytes_read > 0) {
               size_t bytes_written;
@@ -353,14 +344,14 @@ void NabuMediaPlayer::speaker_task(void *params) {
                 xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
               } else {
                 event.type = EventType::RUNNING;
-                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+                xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
               }
 
             } else {
               i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
               event.type = EventType::IDLE;
-              xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+              xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
             }
           }
 
@@ -589,6 +580,22 @@ void NabuMediaPlayer::loop() {
 
   if (this->media_pipeline_ != nullptr)
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
+
+  if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error reading the file.");
+  } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error decoding the file.");
+  } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Media pipeline encountered an error resampling the file.");
+  }
+
+  if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error reading the file.");
+  } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error decoding the file.");
+  } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
+    ESP_LOGE(TAG, "Announcement pipeline encountered an error resampling the file.");
+  }
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
