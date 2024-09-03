@@ -65,14 +65,16 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
     return ESP_ERR_INVALID_ARG;
   }
 
-  esp_http_client_config_t config = {
-      .url = uri.c_str(),
-      .cert_pem = nullptr,
-      .disable_auto_redirect = false,
-      .max_redirection_count = 10,
-      .keep_alive_enable = true,
-  };
-  this->client_ = esp_http_client_init(&config);
+  esp_http_client_config_t client_config = {};
+
+  client_config.url = uri.c_str();
+  client_config.cert_pem = nullptr;
+  client_config.disable_auto_redirect = false;
+  client_config.max_redirection_count = 10;
+  client_config.buffer_size = 512;
+  client_config.keep_alive_enable = true;
+
+  this->client_ = esp_http_client_init(&client_config);
 
   if (this->client_ == nullptr) {
     return ESP_FAIL;
