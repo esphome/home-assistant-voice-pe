@@ -104,16 +104,14 @@ esp_err_t AudioPipeline::allocate_buffers_() {
     return ESP_ERR_NO_MEM;
   }
 
-  ExternalRAMAllocator<StackType_t> stack_allocator(ExternalRAMAllocator<StackType_t>::ALLOW_FAILURE);
-
   if (this->read_task_stack_buffer_ == nullptr)
-    this->read_task_stack_buffer_ = stack_allocator.allocate(READER_TASK_STACK_SIZE);
+    this->read_task_stack_buffer_ = (StackType_t *) malloc(READER_TASK_STACK_SIZE);
 
   if (this->decode_task_stack_buffer_ == nullptr)
-    this->decode_task_stack_buffer_ = stack_allocator.allocate(DECODER_TASK_STACK_SIZE);
+    this->decode_task_stack_buffer_ = (StackType_t *) malloc(DECODER_TASK_STACK_SIZE);
 
   if (this->resample_task_stack_buffer_ == nullptr)
-    this->resample_task_stack_buffer_ = stack_allocator.allocate(RESAMPLER_TASK_STACK_SIZE);
+    this->resample_task_stack_buffer_ = (StackType_t *) malloc(RESAMPLER_TASK_STACK_SIZE);
 
   if ((this->read_task_stack_buffer_ == nullptr) || (this->decode_task_stack_buffer_ == nullptr) ||
       (this->resample_task_stack_buffer_ == nullptr)) {
