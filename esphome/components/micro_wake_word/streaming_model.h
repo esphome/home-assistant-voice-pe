@@ -11,12 +11,14 @@
 namespace esphome {
 namespace micro_wake_word {
 
-static const uint8_t MIN_SLICES_BEFORE_DETECTION = 74;
+static const uint8_t MIN_SLICES_BEFORE_DETECTION = 100;
 static const uint32_t STREAMING_MODEL_VARIABLE_ARENA_SIZE = 1024;
 
 struct DetectionEvent {
   std::string *wake_word;
   bool detected;
+  bool partially_detection;  // Set if the most recent probability exceed the threshold, but the sliding window average
+                             // hasn't yet
   uint8_t max_probability;
   uint8_t average_probability;
   bool blocked_by_vad = false;
@@ -30,8 +32,8 @@ class StreamingModel {
   virtual DetectionEvent determine_detected() = 0;
 
   // Performs inference on the given features.
-  //  - Will load the model if it is enabled and needed
-  //  - Will unload the model if it is disabled but still laoded
+  //  - If the model is enabled but not loaded, it will load it
+  //  - If the model is disabled but loaded, it will unload it
   // Returns true if sucessful or false if there is an error
   bool perform_streaming_inference(const int8_t features[PREPROCESSOR_FEATURE_SIZE]);
 
@@ -41,11 +43,15 @@ class StreamingModel {
   /// @brief Destroys the TFLite interpreter and frees the tensor and variable arenas' memory
   void unload_model();
 
-  /// @brief Enable the model
-  void enable() { this->enabled_ = true; }
+  /// @brief Enable the model. The next performing_streaming_inference call will load it.
+  void enable() {
+    this->enabled_ = true;
+  }
 
-  /// @brief Disable the model
+  /// @brief Disable the model. The next performing_streaming_inference call will unload it.
   void disable() { this->enabled_ = false; }
+
+  bool get_unprocessed_probability_status() { return this->unprocessed_probability_status_; }
 
  protected:
   /// @brief Allocates tensor and variable arenas and sets up the model interpreter
@@ -58,6 +64,7 @@ class StreamingModel {
 
   bool loaded_{false};
   bool enabled_{true};
+  bool unprocessed_probability_status_{false};
   uint8_t current_stride_step_{0};
   int16_t ignore_windows_{-MIN_SLICES_BEFORE_DETECTION};
 
@@ -89,8 +96,12 @@ class WakeWordModel final : public StreamingModel {
 
   const std::string &get_wake_word() const { return this->wake_word_; }
 
+  void add_trained_language(const std::string &language) { this->trained_languages_.push_back(language); }
+  const std::vector<std::string> &get_trained_languages() const { return this->trained_languages_; }
+
  protected:
   std::string wake_word_;
+  std::vector<std::string> trained_languages_;
 };
 
 class VADModel final : public StreamingModel {

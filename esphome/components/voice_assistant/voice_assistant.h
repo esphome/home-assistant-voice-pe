@@ -12,6 +12,9 @@
 #include "esphome/components/api/api_connection.h"
 #include "esphome/components/api/api_pb2.h"
 #include "esphome/components/microphone/microphone.h"
+#ifdef USE_MICRO_WAKE_WORD
+#include "esphome/components/micro_wake_word/micro_wake_word.h"
+#endif
 #ifdef USE_SPEAKER
 #include "esphome/components/speaker/speaker.h"
 #endif
@@ -87,6 +90,14 @@ class VoiceAssistant : public Component {
   void failed_to_start();
 
   void set_microphone(microphone::Microphone *mic) { this->mic_ = mic; }
+#ifdef USE_MICRO_WAKE_WORD
+  void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->micro_wake_word_ = mww; }
+#ifdef USE_MICRO_WAKE_WORD_VAD
+  void set_speech_ms(uint32_t speech_ms) { this->speech_ms_ = speech_ms; }
+  void set_timeout_ms(uint32_t timeout_ms) { this->timeout_ms_ = timeout_ms; }
+  void set_silence_ms(uint32_t silence_ms) { this->silence_ms_ = silence_ms; }
+#endif
+#endif
 #ifdef USE_SPEAKER
   void set_speaker(speaker::Speaker *speaker) {
     this->speaker_ = speaker;
@@ -113,12 +124,11 @@ class VoiceAssistant : public Component {
     uint32_t flags = 0;
     flags |= VoiceAssistantFeature::FEATURE_VOICE_ASSISTANT;
     flags |= VoiceAssistantFeature::FEATURE_API_AUDIO;
-    // TODO: Fix this hack! This makes the TTS response be sent as a wav file rather than an mp3, since the mp3 decoder isn't implemented yet
-// #ifdef USE_SPEAKER
-    // if (this->speaker_ != nullptr) {
+#ifdef USE_SPEAKER
+    if (this->speaker_ != nullptr) {
       flags |= VoiceAssistantFeature::FEATURE_SPEAKER;
-    // }
-// #endif
+    }
+#endif
 
     if (this->has_timers_) {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
@@ -129,6 +139,10 @@ class VoiceAssistant : public Component {
 
   void request_start(bool continuous, bool silence_detection);
   void request_stop();
+
+#ifdef USE_MICRO_WAKE_WORD
+  void on_wake_word(const micro_wake_word::DetectionEvent &detection_event);
+#endif
 
   void on_event(const api::VoiceAssistantEventResponse &msg);
   void on_audio(const api::VoiceAssistantAudio &msg);
@@ -276,7 +290,25 @@ class VoiceAssistant : public Component {
   AudioMode audio_mode_{AUDIO_MODE_UDP};
   bool udp_socket_running_{false};
   bool start_udp_socket_();
-};
+
+#ifdef USE_MICRO_WAKE_WORD
+  micro_wake_word::MicroWakeWord *micro_wake_word_{nullptr};
+
+#ifdef USE_MICRO_WAKE_WORD_VAD
+  uint32_t speech_ms_{500};  // This is hard to configure (HA uses 300) with the current VAD, as it may initially be
+                             // detected from the wake word
+  uint32_t timeout_ms_{15000};
+  uint32_t silence_ms_{1000};
+
+  int32_t speech_ms_left_{0};
+  int32_t silence_ms_left_{0};
+  int32_t timeout_ms_left_{0};
+
+  optional<uint32_t> last_loop_ms_;
+  bool last_vad_state_;
+#endif
+#endif
+};  // namespace voice_assistant
 
 template<typename... Ts> class StartAction : public Action<Ts...>, public Parented<VoiceAssistant> {
   TEMPLATABLE_VALUE(std::string, wake_word);

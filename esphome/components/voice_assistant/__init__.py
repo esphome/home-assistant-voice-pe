@@ -12,7 +12,8 @@ from esphome.const import (
 )
 from esphome import automation
 from esphome.automation import register_action, register_condition
-from esphome.components import microphone, speaker, media_player
+from esphome.components import microphone, micro_wake_word, speaker, media_player
+
 
 AUTO_LOAD = ["socket"]
 DEPENDENCIES = ["api", "microphone"]
@@ -42,6 +43,7 @@ CONF_AUTO_GAIN = "auto_gain"
 CONF_NOISE_SUPPRESSION_LEVEL = "noise_suppression_level"
 CONF_VOLUME_MULTIPLIER = "volume_multiplier"
 
+CONF_MICRO_WAKE_WORD = "micro_wake_word"
 CONF_WAKE_WORD = "wake_word"
 
 CONF_ON_TIMER_STARTED = "on_timer_started"
@@ -92,6 +94,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Exclusive(CONF_MEDIA_PLAYER, "output"): cv.use_id(
                 media_player.MediaPlayer
             ),
+            cv.Optional(CONF_MICRO_WAKE_WORD): cv.use_id(micro_wake_word.MicroWakeWord),
             cv.Optional(CONF_USE_WAKE_WORD, default=False): cv.boolean,
             cv.Optional(CONF_VAD_THRESHOLD): cv.All(
                 cv.requires_component("esp_adf"), cv.only_with_esp_idf, cv.uint8_t
@@ -166,6 +169,10 @@ async def to_code(config):
 
     mic = await cg.get_variable(config[CONF_MICROPHONE])
     cg.add(var.set_microphone(mic))
+
+    if CONF_MICRO_WAKE_WORD in config:
+        mww = await cg.get_variable(config[CONF_MICRO_WAKE_WORD])
+        cg.add(var.set_micro_wake_word(mww))
 
     if CONF_SPEAKER in config:
         spkr = await cg.get_variable(config[CONF_SPEAKER])
