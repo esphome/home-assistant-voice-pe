@@ -16,8 +16,8 @@ static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
 static const uint32_t READER_TASK_STACK_SIZE = 4096;
-static const uint32_t DECODER_TASK_STACK_SIZE = 4096;
-static const uint32_t RESAMPLER_TASK_STACK_SIZE = 4096;
+static const uint32_t DECODER_TASK_STACK_SIZE = 3072;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 3072;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 
