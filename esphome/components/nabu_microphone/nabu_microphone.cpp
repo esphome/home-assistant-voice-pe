@@ -15,10 +15,13 @@ namespace nabu_microphone {
 static const size_t RING_BUFFER_LENGTH = 64;  // Measured in milliseconds
 static const size_t QUEUE_LENGTH = 10;
 
-static const size_t DMA_BUF_COUNT = 4;
-static const size_t DMA_BUF_LEN = 512;
-static const size_t CHANNELS = 2;  // XMOS sends different info on left and right channels
-static const size_t DMA_SAMPLES = DMA_BUF_COUNT * DMA_BUF_LEN * CHANNELS;
+static const size_t NUMBER_OF_CHANNELS = 2;
+static const size_t DMA_BUFFER_SIZE = 160;
+static const size_t DMA_BUFFERS_COUNT = 4;
+static const size_t FRAMES_IN_ALL_DMA_BUFFERS = DMA_BUFFER_SIZE * DMA_BUFFERS_COUNT;
+static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = FRAMES_IN_ALL_DMA_BUFFERS * NUMBER_OF_CHANNELS;
+
+static const size_t TASK_DELAY_MS = 10;
 
 // TODO:
 //   - Determine optimal buffer sizes (dma included)
@@ -49,7 +52,16 @@ void NabuMicrophoneChannel::setup() {
 
 void NabuMicrophoneChannel::loop() {
   if (this->parent_->is_running()) {
-    this->state_ = microphone::STATE_RUNNING;
+    if (this->is_muted_) {
+      if (this->requested_stop_) {
+        // The microphone was muted when stopping was requested
+        this->state_ = microphone::STATE_STOPPED;
+      } else {
+        this->state_ = microphone::STATE_MUTED;
+      }
+    } else {
+      this->state_ = microphone::STATE_RUNNING;
+    }
   } else {
     this->state_ = microphone::STATE_STOPPED;
   }
@@ -77,6 +89,24 @@ void NabuMicrophone::setup() {
   this->event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(i2s_audio::TaskEvent));
 }
 
+void NabuMicrophone::mute() {
+  if (this->channel_1_ != nullptr) {
+    this->channel_1_->set_mute_state(true);
+  }
+  if (this->channel_2_ != nullptr) {
+    this->channel_2_->set_mute_state(true);
+  }
+}
+
+void NabuMicrophone::unmute() {
+  if (this->channel_1_ != nullptr) {
+    this->channel_1_->set_mute_state(false);
+  }
+  if (this->channel_2_ != nullptr) {
+    this->channel_2_->set_mute_state(false);
+  }
+}
+
 esp_err_t NabuMicrophone::start_i2s_driver_() {
   if (!this->parent_->try_lock()) {
     return ESP_ERR_INVALID_STATE;
@@ -91,8 +121,8 @@ esp_err_t NabuMicrophone::start_i2s_driver_() {
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = DMA_BUF_COUNT,
-      .dma_buf_len = DMA_BUF_LEN,
+      .dma_buf_count = DMA_BUFFERS_COUNT,
+      .dma_buf_len = DMA_BUFFER_SIZE,
       .use_apll = this->use_apll_,
       .tx_desc_auto_clear = false,
       .fixed_mclk = 0,
@@ -170,16 +200,19 @@ void NabuMicrophone::read_task_(void *params) {
 
       // Note, if we have 16 bit samples incoming, this requires modification
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
-      int32_t *buffer = allocator.allocate(DMA_SAMPLES);
+      int32_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
 
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_2_samples;
 
-      channel_1_samples.reserve(DMA_SAMPLES);
-      channel_2_samples.reserve(DMA_SAMPLES);
+      if (this_microphone->channel_1_ != nullptr)
+        channel_1_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
 
-      if ((buffer == nullptr) || (channel_1_samples.capacity() < DMA_SAMPLES) ||
-          (channel_2_samples.capacity() < DMA_SAMPLES)) {
+      if (this_microphone->channel_2_ != nullptr)
+        channel_2_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
+
+      if ((buffer == nullptr) || (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS) ||
+          (channel_2_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS)) {
         event.type = i2s_audio::TaskEventType::WARNING;
         event.err = ESP_ERR_NO_MEM;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -198,14 +231,15 @@ void NabuMicrophone::read_task_(void *params) {
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
           while (true) {
-            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
             if (notification_bits & TaskNotificationBits::COMMAND_STOP) {
               break;
             }
 
             size_t bytes_read;
-            esp_err_t err = i2s_read(this_microphone->parent_->get_port(), buffer, DMA_SAMPLES * sizeof(int32_t),
-                                     &bytes_read, (10 / portTICK_PERIOD_MS));
+            esp_err_t err =
+                i2s_read(this_microphone->parent_->get_port(), buffer, SAMPLES_IN_ALL_DMA_BUFFERS * sizeof(int32_t),
+                         &bytes_read, pdMS_TO_TICKS(TASK_DELAY_MS));
             if (err != ESP_OK) {
               event.type = i2s_audio::TaskEventType::WARNING;
               event.err = err;
@@ -215,22 +249,27 @@ void NabuMicrophone::read_task_(void *params) {
             if (bytes_read > 0) {
               // TODO: Handle 16 bits per sample, currently it won't allow that option at codegen stage
 
-              // At 48000 kHz, the current XMOS firmware is sending the same sample 3 times as a hack
-              const size_t sample_rate_factor = this_microphone->sample_rate_ / 16000;
+              const size_t samples_read = bytes_read / sizeof(int32_t);
+              const size_t frames_read =
+                  samples_read / NUMBER_OF_CHANNELS;  // Left and right channel samples combine into 1 frame
 
-              size_t samples_read = (bytes_read / sizeof(int32_t)) / (sample_rate_factor);
-              size_t frames_read = samples_read / CHANNELS;  // Left and right channel samples combine into 1 frame
-
-              uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
-              uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
+              const uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
+              const uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
 
               for (size_t i = 0; i < frames_read; i++) {
-                int32_t channel_1_sample = buffer[CHANNELS * sample_rate_factor * i] >> channel_1_shift;
-                int32_t channel_2_sample = buffer[CHANNELS * sample_rate_factor * i + 1] >> channel_2_shift;
+                int32_t channel_1_sample = 0;
+                if ((this_microphone->channel_1_ != nullptr) && (!this_microphone->channel_1_->get_mute_state())) {
+                  channel_1_sample = buffer[NUMBER_OF_CHANNELS * i] >> channel_1_shift;
+                  channel_1_samples[i] = clamp<int16_t>(channel_1_sample, INT16_MIN, INT16_MAX);
+                }
 
-                channel_1_samples[i] = clamp<int16_t>(channel_1_sample, INT16_MIN, INT16_MAX);
-                channel_2_samples[i] = clamp<int16_t>(channel_2_sample, INT16_MIN, INT16_MAX);
+                int32_t channel_2_sample = 0;
+                if ((this_microphone->channel_2_ != nullptr) && (!this_microphone->channel_2_->get_mute_state())) {
+                  channel_2_sample = buffer[NUMBER_OF_CHANNELS * i + 1] >> channel_2_shift;
+                  channel_2_samples[i] = clamp<int16_t>(channel_2_sample, INT16_MIN, INT16_MAX);
+                }
               }
+
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
               if (this_microphone->channel_1_ != nullptr) {
@@ -250,7 +289,7 @@ void NabuMicrophone::read_task_(void *params) {
           event.type = i2s_audio::TaskEventType::STOPPING;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
-          allocator.deallocate(buffer, DMA_SAMPLES);
+          allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
           i2s_stop(this_microphone->parent_->get_port());
           i2s_driver_uninstall(this_microphone->parent_->get_port());
 
@@ -289,8 +328,13 @@ void NabuMicrophone::stop() {
 }
 
 void NabuMicrophone::loop() {
-  // Note this->state_ is only modified here based on the status of the task
+  if ((this->channel_1_ != nullptr) && (this->channel_1_->get_requested_stop()) && (this->channel_2_ != nullptr) &&
+      (this->channel_2_->get_requested_stop())) {
+    // Both microphone channels have requested a stop
+    this->stop();
+  }
 
+  // Note this->state_ is only modified here based on the status of the task
   i2s_audio::TaskEvent event;
   while (xQueueReceive(this->event_queue_, &event, 0)) {
     switch (event.type) {
@@ -303,7 +347,12 @@ void NabuMicrophone::loop() {
         ESP_LOGD(TAG, "Started I2S Audio Microphone");
         break;
       case i2s_audio::TaskEventType::RUNNING:
+        this->state_ = microphone::STATE_RUNNING;
         this->status_clear_warning();
+        break;
+      case i2s_audio::TaskEventType::MUTED:
+        this->state_ = microphone::STATE_MUTED;
+        ESP_LOGD(TAG, "Muted I2S Audio Microphone");
         break;
       case i2s_audio::TaskEventType::STOPPING:
         this->state_ = microphone::STATE_STOPPING;

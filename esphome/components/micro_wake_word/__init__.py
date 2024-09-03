@@ -176,12 +176,13 @@ def _convert_manifest_v1_to_v2(v1_manifest):
         CONF_SLIDING_WINDOW_AVERAGE_SIZE
     ]
     del v2_manifest[KEY_MICRO][CONF_SLIDING_WINDOW_AVERAGE_SIZE]
-    v2_manifest[KEY_MICRO][
-        CONF_TENSOR_ARENA_SIZE
-    ] = 45672  # Original Inception-based V1 manifest models require a minimum of 45672 bytes
-    v2_manifest[KEY_MICRO][
-        CONF_FEATURE_STEP_SIZE
-    ] = 20  # Original Inception-based V1 manifest models use a 20 ms feature step size
+
+    # Original Inception-based V1 manifest models require a minimum of 45672 bytes
+    v2_manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE] = 45672
+    # Original Inception-based V1 manifest models use a 20 ms feature step size
+    v2_manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE] = 20
+    # Original Inception-based V1 manifest models were trained only on TTS English samples
+    v2_manifest[KEY_TRAINED_LANGUAGES] = ["en"]
 
     return v2_manifest
 
@@ -445,6 +446,8 @@ async def to_code(config):
     mic = await cg.get_variable(config[CONF_MICROPHONE])
     cg.add(var.set_microphone(mic))
 
+    cg.add_define("USE_MICRO_WAKE_WORD")
+
     esp32.add_idf_component(
         name="esp-tflite-micro",
         repo="https://github.com/espressif/esp-tflite-micro",
@@ -505,15 +508,13 @@ async def to_code(config):
                 manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
             )
 
+            for lang in manifest[KEY_TRAINED_LANGUAGES]:
+                cg.add(wake_word_model.add_trained_language(lang))
+
             cg.add(var.add_wake_word_model(wake_word_model))
 
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
-    cg.add_library(
-        None,
-        None,
-        "https://github.com/kahrendt/ESPMicroSpeechFeatures.git#psram-allocations",
-    )
-    # cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.0.0")
+    cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.1.0")
 
 
 MICRO_WAKE_WORD_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(MicroWakeWord)})

@@ -23,10 +23,9 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
 
   void loop() override;
 
-  // size_t read(int16_t *buf, size_t len) override;
-  // size_t read_secondary(int16_t *buf, size_t len) override;
+  void mute();
+  void unmute();
 
-  // size_t available_secondary() override { return this->comm_ring_buffer_->available(); }
   void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
   void set_channel_2(NabuMicrophoneChannel *microphone) { this->channel_2_ = microphone; }
 
@@ -78,14 +77,28 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
  public:
   void setup() override;
 
-  void start() override { this->parent_->start(); }
+  void start() override {
+    this->parent_->start();
+    this->is_muted_ = false;
+    this->requested_stop_ = false;
+  }
 
   void set_parent(NabuMicrophone *nabu_microphone) { this->parent_ = nabu_microphone; }
 
-  void stop() override {};
+  void stop() override {
+    this->requested_stop_ = true;
+    this->is_muted_ = true;  // Mute until it is actually stopped
+  };
+
   void loop() override;
 
-  size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len, 0); };
+  void set_mute_state(bool mute_state) override { this->is_muted_ = mute_state; }
+  bool get_mute_state() { return this->is_muted_; }
+
+  // void set_requested_stop() { this->requested_stop_ = true; }
+  bool get_requested_stop() { return this->requested_stop_; }
+
+  size_t read(int16_t *buf, size_t len,  TickType_t ticks_to_wait = 0) override { return this->ring_buffer_->read((void *) buf, len, ticks_to_wait); };
   size_t available() override { return this->ring_buffer_->available(); }
   void reset() override { this->ring_buffer_->reset(); }
 
@@ -99,6 +112,8 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
   std::unique_ptr<RingBuffer> ring_buffer_;
 
   bool amplify_;
+  bool is_muted_;
+  bool requested_stop_;
 };
 
 }  // namespace nabu_microphone

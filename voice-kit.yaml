@@ -19,14 +19,14 @@ esphome:
   name: esphome-voice-kit
   friendly_name: ESPHome Voice Kit
   name_add_mac_suffix: true
+  min_version: 2024.8.1
   platformio_options:
     board_build.flash_mode: dio
-  project:
-    name: esphome.voice-kit
-    version: dev
   on_boot:
     priority: 600
     then:
+      # TODO: make it internal before launch
+      - switch.turn_on: internal_speaker_amp
       # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
       - if:
           condition:
@@ -62,15 +62,28 @@ esp32:
       # CONFIG_FREERTOS_USE_TRACE_FACILITY: "y"
       # CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS: "y"
 
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM: "16"
+      CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM: "64"
+      CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM: "64"
+      CONFIG_ESP32_WIFI_AMPDU_TX_ENABLED: "y"
+      CONFIG_ESP32_WIFI_TX_BA_WIN: "32"
+      CONFIG_ESP32_WIFI_AMPDU_RX_ENABLED: "y"
+      CONFIG_ESP32_WIFI_RX_BA_WIN: "32"
+      CONFIG_LWIP_TCP_SND_BUF_DEFAULT: "65534"
+      CONFIG_LWIP_TCP_WND_DEFAULT: "65534"
+      CONFIG_LWIP_TCP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_UDP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_TCPIP_RECVMBOX_SIZE: "64"
+
+      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+
 wifi:
   ap:
   on_connect:
     - script.execute: control_leds
-    - delay: 5s  # Gives time for improv results to be transmitted
-    - ble.disable:
-    - script.execute: control_leds
   on_disconnect:
-    - ble.enable:
     - script.execute: control_leds
 
 logger:
@@ -87,21 +100,6 @@ api:
 ota:
   - platform: esphome
     id: ota_esphome
-  - platform: http_request
-    id: ota_http_request
-
-http_request:
-
-update:
-  - platform: http_request
-    name: None
-    id: update_http_request
-    source: https://esphome.github.io/voice-kit/manifest.json
-
-improv_serial:
-
-esp32_improv:
-  authorizer: center_button
 
 i2c:
   sda: GPIO5
@@ -189,13 +187,18 @@ switch:
       - script.execute: control_leds
       - delay: 15min
       - switch.turn_off: timer_ringing
-
+  # TODO: make it internal before launch
+  - platform: gpio
+    pin: GPIO47
+    id: internal_speaker_amp
+    name: "Internal speaker amp"
+    entity_category: config
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
     id: center_button
     pin:
-      number: GPIO17
+      number: GPIO0
       inverted: true
     on_press:
       - script.execute: control_leds
@@ -392,6 +395,13 @@ binary_sensor:
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
+  # TODO: make it internal before launch
+  - platform: gpio
+    id: jack_plugged
+    pin:
+      number: GPIO17
+    name: "Audio Jack Plugged In"
+    entity_category: diagnostic
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -532,11 +542,7 @@ light:
             static int8_t index = 0;
             Color color(255, 0, 0);
             for (int i = 0; i < 12; i++) {
-              if (i == 2) {
-                it[i] = color;
-              } else if (i == 3) {
-                it[i] = color;
-              } else if (i == 8) {
+              if (i == 3) {
                 it[i] = color;
               } else if (i == 9) {
                 it[i] = color;
@@ -1032,53 +1038,28 @@ script:
             - delay: 1s
 
 i2s_audio:
-  - id: i2s_input
-    i2s_lrclk_pin:
-      number: GPIO7
-      allow_other_uses: true
-    i2s_bclk_pin:
-      number: GPIO8
-      allow_other_uses: true
-    i2s_mclk_pin:
-      number: GPIO9
-      allow_other_uses: true
-    i2s_mode: secondary
-
   - id: i2s_output
     i2s_lrclk_pin:
       number: GPIO7
-      allow_other_uses: true
     i2s_bclk_pin:
       number: GPIO8
-      allow_other_uses: true
-    i2s_mclk_pin:
-      number: GPIO9
-      allow_other_uses: true
     i2s_mode: secondary
     # i2s_output data pin is gpio10
 
-  # yamllint disable rule:comments-indentation
-  # This describes the second I2S interface between ESP32 and XMOS chip. Currently unused.
-  # - id: i2s_output
-  #   i2s_lrclk_pin:
-  #     number: GPIO14
-  #     # allow_other_uses: true
-  #   i2s_bclk_pin:
-  #     number: GPIO13
-  #     # allow_other_uses: true
-  #   i2s_mclk_pin:
-  #     number: GPIO12
-  #     # allow_other_uses: true
-  #   i2s_mode: primary #secondary
-  # data line is GPIO15
-  # yamllint enable rule:comments-indentation
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO14
+    i2s_bclk_pin:
+      number: GPIO13
+    i2s_mode: secondary
+    # data line is GPIO15
 
 microphone:
   - platform: nabu_microphone
-    i2s_din_pin: GPIO11
+    i2s_din_pin: GPIO15
     adc_type: external
     pdm: false
-    sample_rate: 16000  # use 48000 for beta firmware
+    sample_rate: 16000
     bits_per_sample: 32bit
     i2s_audio_id: i2s_input
     channel_1:
@@ -1086,7 +1067,7 @@ microphone:
       amplify: false
     channel_2:
       id: comm_mic
-      amplify: false  # should be true for firmware with two different streams
+      amplify: false  # May be useful to enable, but may also result in worse wake word detection if speaking close to the device
 
 media_player:
   - platform: nabu
@@ -1094,7 +1075,7 @@ media_player:
     name: Media Player
     internal: false
     audio_dac:
-    sample_rate: 16000  # use 48000 for beta firmware
+    sample_rate: 48000
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
@@ -1226,9 +1207,6 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
-    - wait_until:
-        not: ble.enabled
-    - delay: 2s
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
@@ -1298,20 +1276,6 @@ button:
             .set_announcement(true)
             .set_local_media_file(id(timer_finished_wave_file))
             .perform();
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Check for update
-    entity_category: diagnostic
-    on_press:
-      - component.update: update_http_request
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Perform Update
-    entity_category: diagnostic
-    on_press:
-      - update.perform:
-          id: update_http_request
-          force_update: true
 
 debug:
   update_interval: 5s

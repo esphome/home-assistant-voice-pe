@@ -15,6 +15,8 @@ static const bool USE_PRE_POST_FILTER = true;
 static const uint8_t OUTPUT_CHANNELS = 2;
 static const uint8_t OUTPUT_BITS_PER_SAMPLE = 16;
 
+static const size_t READ_WRITE_TIMEOUT_MS = 20;
+
 AudioResampler::AudioResampler(RingBuffer *input_ring_buffer, RingBuffer *output_ring_buffer,
                                size_t internal_buffer_samples) {
   this->input_ring_buffer_ = input_ring_buffer;
@@ -111,7 +113,7 @@ esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t 
     //   resample_info.resample = true;
     //   this->use_effecient_upsampler_ = true;
     //   this->sample_ratio_ = upsampling_factor - 0.01f;
-    // } else 
+    // } else
     {
       // Use the general, but slower, floating point polyphase resampler
 
@@ -181,15 +183,27 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   }
 
   if (this->output_buffer_length_ > 0) {
-    size_t bytes_free = this->output_ring_buffer_->free();
-    size_t bytes_to_write = std::min(this->output_buffer_length_, bytes_free);
+    size_t bytes_to_write = this->output_buffer_length_;
 
     if (bytes_to_write > 0) {
-      size_t bytes_written = this->output_ring_buffer_->write((void *) this->output_buffer_current_, bytes_to_write);
+      size_t bytes_written = this->output_ring_buffer_->write_without_replacement(
+          (void *) this->output_buffer_current_, bytes_to_write, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
 
       this->output_buffer_current_ += bytes_written / sizeof(int16_t);
       this->output_buffer_length_ -= bytes_written;
     }
+
+    return AudioResamplerState::RESAMPLING;
+  }
+
+  // Copy audio data directly to output_buffer if resampling isn't required
+  if (!this->resample_info_.resample && !this->resample_info_.mono_to_stereo) {
+    size_t bytes_read =
+        this->input_ring_buffer_->read((void *) this->output_buffer_, this->internal_buffer_samples_ * sizeof(int16_t),
+                                       pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+
+    this->output_buffer_current_ = this->output_buffer_;
+    this->output_buffer_length_ += bytes_read;
 
     return AudioResamplerState::RESAMPLING;
   }
@@ -218,12 +232,12 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   this->input_buffer_current_ = this->input_buffer_;
 
   // Copy new data to the end of the of the buffer
-  size_t bytes_available = this->input_ring_buffer_->available();
-  size_t bytes_to_read = std::min(bytes_available, max_input_samples * sizeof(int16_t) - this->input_buffer_length_);
+  size_t bytes_to_read = max_input_samples * sizeof(int16_t) - this->input_buffer_length_;
 
   if (bytes_to_read > 0) {
     int16_t *new_input_buffer_data = this->input_buffer_ + this->input_buffer_length_ / sizeof(int16_t);
-    size_t bytes_read = this->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read);
+    size_t bytes_read = this->input_ring_buffer_->read((void *) new_input_buffer_data, bytes_to_read,
+                                                       pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
 
     this->input_buffer_length_ += bytes_read;
   }
@@ -244,55 +258,6 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
 
       this->output_buffer_current_ = this->output_buffer_;
       this->output_buffer_length_ += output_samples * sizeof(int16_t);
-
-      // if (this->resample_info_.mono_to_stereo) {
-      //   if (this->input_buffer_length_ > 0) {
-      //     size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
-
-      //     if (available_samples / 3) {
-      //       this->input_buffer_current_ = this->input_buffer_;
-      //       this->input_buffer_length_ = 0;
-      //     } else {
-      //       dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_current_, this->output_buffer_,
-      //                          available_samples / 3);
-
-      //       size_t output_samples = available_samples / 3;
-
-      //       this->input_buffer_current_ += output_samples * 3;
-      //       this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
-
-      //       this->output_buffer_current_ = this->output_buffer_;
-      //       this->output_buffer_length_ += output_samples * sizeof(int16_t);
-      //     }
-      //   }
-      // } else {
-      //   // Interleaved stereo samples
-      //   // TODO: This doesn't sound correct! I need to use separate filters for each channel so the delay line isn't
-      //   // mixed
-      //   size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
-      //   for (int i = 0; i < available_samples / 2; ++i) {
-      //     // split interleaved samples into two separate streams
-      //     this->output_buffer_[i] = this->input_buffer_[2 * i];
-      //     this->output_buffer_[i + available_samples / 2] = this->input_buffer_[2 * i + 1];
-      //   }
-      //   std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
-      //   dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_, this->output_buffer_, (available_samples / 3) /
-      //   2); dsps_fird_s16_aes3(&this->fir_filter_, this->input_buffer_ + available_samples / 2,
-      //                      this->output_buffer_ + (available_samples / 3) / 2, (available_samples / 3) / 2);
-      //   std::memcpy(this->input_buffer_, this->output_buffer_, available_samples * sizeof(int16_t));
-      //   for (int i = 0; i < available_samples / 2; ++i) {
-      //     this->output_buffer_[2 * i] = this->input_buffer_[i];
-      //     this->output_buffer_[2 * i + 1] = this->input_buffer_[available_samples / 2 + i];
-      //   }
-
-      //   size_t output_samples = available_samples / 3;
-
-      //   this->input_buffer_current_ += output_samples * 3;
-      //   this->input_buffer_length_ -= output_samples * 3 * sizeof(int16_t);
-
-      //   this->output_buffer_current_ = this->output_buffer_;
-      //   this->output_buffer_length_ += output_samples * sizeof(int16_t);
-      // }
     } else {
       if (this->input_buffer_length_ > 0) {
         // Samples are indiviudal int16 values. Frames include 1 sample for mono and 2 samples for stereo
