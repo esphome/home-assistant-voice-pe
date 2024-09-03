@@ -25,7 +25,7 @@ void VoiceKit::setup() {
     if (!this->dfu_get_version_()) {
       ESP_LOGE(TAG, "Communication with Voice Kit failed");
       this->mark_failed();
-    } else if (!versions_match() && this->firmware_bin_ != nullptr && this->firmware_bin_length_) {
+    } else if (!this->versions_match() && this->firmware_bin_ != nullptr && this->firmware_bin_length_) {
       ESP_LOGW(TAG, "XMOS firmware version is incorrect -- updating...");
       this->flash();
     }

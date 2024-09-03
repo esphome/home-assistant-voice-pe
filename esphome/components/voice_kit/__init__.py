@@ -43,8 +43,8 @@ def download_firmware(config):
     try:
         with open(path, "r+b") as f:
             firmware_bin = f.read()
-    except Exception as e:
-        raise core.EsphomeError(f"Could not open firmware file {path}: {e}")
+    except FileNotFoundError as e:
+        raise cv.Invalid(f"Could not open firmware file {path}: {e}") from e
 
     firmware_bin_md5 = hashlib.md5(firmware_bin).hexdigest()
     if firmware_bin_md5 != config[CONF_MD5]:
@@ -108,8 +108,8 @@ async def to_code(config):
         try:
             with open(path, "r+b") as f:
                 firmware_bin = f.read()
-        except Exception as e:
-            raise core.EsphomeError(f"Could not open firmware file {path}: {e}")
+        except FileNotFoundError as e:
+            raise cv.Invalid(f"Could not open firmware file {path}: {e}")
 
         # Convert retrieved binary file to an array of ints
         rhs = [HexInt(x) for x in firmware_bin]

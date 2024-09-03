@@ -94,7 +94,7 @@ class VoiceKit : public Component, public i2c::I2CDevice {
     this->firmware_bin_ = data;
     this->firmware_bin_length_ = len;
   }
-  void set_firmware_version(const uint8_t major, const uint8_t minor, const uint8_t patch) {
+  void set_firmware_version(uint8_t major, uint8_t minor, uint8_t patch) {
     this->firmware_bin_version_major_ = major;
     this->firmware_bin_version_minor_ = minor;
     this->firmware_bin_version_patch_ = patch;
