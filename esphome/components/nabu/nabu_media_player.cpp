@@ -721,6 +721,8 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
 
   this->is_muted_ = mute_state;
 
+  this->save_volume_restore_state_();
+
   if (this->is_muted_ != mute_state) {
     if (mute_state) {
       this->mute_trigger_->trigger();
@@ -728,8 +730,6 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
       this->unmute_trigger_->trigger();
     }
   }
-
-  this->save_volume_restore_state_();
 }
 
 void NabuMediaPlayer::set_volume_(float volume, bool publish) {
