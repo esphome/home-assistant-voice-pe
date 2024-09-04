@@ -109,7 +109,7 @@ async def to_code(config):
             with open(path, "r+b") as f:
                 firmware_bin = f.read()
         except FileNotFoundError as e:
-            raise cv.Invalid(f"Could not open firmware file {path}: {e}")
+            raise core.EsphomeError(f"Could not open firmware file {path}: {e}")
 
         # Convert retrieved binary file to an array of ints
         rhs = [HexInt(x) for x in firmware_bin]
