@@ -719,6 +719,14 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
     }
   }
 
+  if (this->is_muted_ != mute_state) {
+    if (mute_state) {
+      this->mute_trigger_->trigger();
+    } else {
+      this->unmute_trigger_->trigger();
+    }
+  }
+
   this->is_muted_ = mute_state;
 
   this->save_volume_restore_state_();
@@ -735,6 +743,8 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
     ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
     this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
   }
+
+  this->volume_trigger_->trigger(volume);
 
   if (publish) {
     this->volume = volume;
