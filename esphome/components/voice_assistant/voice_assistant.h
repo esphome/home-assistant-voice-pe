@@ -264,7 +264,6 @@ class VoiceAssistant : public Component {
 #endif
 #ifdef USE_MEDIA_PLAYER
   media_player::MediaPlayer *media_player_{nullptr};
-  std::string announce_media_id_{""};
 #endif
 
   bool local_output_{false};

@@ -437,9 +437,7 @@ void VoiceAssistant::loop() {
           this->set_state_(State::IDLE, State::IDLE);
 
           api::VoiceAssistantAnnounceFinished msg;
-          msg.media_id = this->announce_media_id_;
           this->api_client_->send_voice_assistant_announce_finished(msg);
-          this->announce_media_id_ = "";
         });
       }
       break;
@@ -761,7 +759,6 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       this->defer([this, url]() {
 #ifdef USE_MEDIA_PLAYER
         if (this->media_player_ != nullptr) {
-          this->announce_media_id_ = url;
           this->media_player_->make_call().set_media_url(url).set_announcement(true).perform();
         }
 #endif
@@ -924,7 +921,6 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 #ifdef USE_MEDIA_PLAYER
   if (this->media_player_ != nullptr) {
     this->tts_start_trigger_->trigger(msg.text);
-    this->announce_media_id_ = msg.media_id;
     this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
     this->tts_end_trigger_->trigger(msg.media_id);
