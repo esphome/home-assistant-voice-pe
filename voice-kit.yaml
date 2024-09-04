@@ -403,11 +403,8 @@ binary_sensor:
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
-  # TODO: make it internal before launch
   - platform: gpio
     id: jack_plugged
-    name: Audio Jack Plugged In
-    entity_category: config
     filters:
       - delayed_on: 200ms
       - delayed_off: 200ms
