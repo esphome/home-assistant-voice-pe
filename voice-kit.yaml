@@ -411,17 +411,17 @@ binary_sensor:
     pin:
       number: GPIO17
     on_press:
-        - lambda: id(jack_plugged_recently) = true;
-        - script.execute: control_leds
-        - delay: 1s
-        - lambda: id(jack_plugged_recently) = false;
-        - script.execute: control_leds
+      - lambda: id(jack_plugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 1s
+      - lambda: id(jack_plugged_recently) = false;
+      - script.execute: control_leds
     on_release:
-        - lambda: id(jack_unplugged_recently) = true;
-        - script.execute: control_leds
-        - delay: 1s
-        - lambda: id(jack_unplugged_recently) = false;
-        - script.execute: control_leds
+      - lambda: id(jack_unplugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 1s
+      - lambda: id(jack_unplugged_recently) = false;
+      - script.execute: control_leds
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -830,7 +830,7 @@ script:
                         # - Jack Plugged / Unplugged
                         # - Dial touched
                         # - Timer ringing
-                        # - All the active state of the voice assistant 
+                        # - All the active state of the voice assistant
                         # - Muted / Silent
                         # - The idle state of the voice assistant
                         - lambda: |
@@ -1014,7 +1014,6 @@ script:
           id: voice_assistant_leds
           effect: "Jack Plugged"
 
-
   # Script executed when the center button is touched
   # The complete LED ring turns on
   - id: control_leds_center_button_touched
@@ -1157,11 +1156,11 @@ media_player:
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
     on_mute:
-        - script.execute: control_leds
+      - script.execute: control_leds
     on_unmute:
-        - script.execute: control_leds
+      - script.execute: control_leds
     on_volume:
-        - script.execute: control_leds
+      - script.execute: control_leds
     files:
       - id: timer_finished_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
