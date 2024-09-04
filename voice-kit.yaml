@@ -131,6 +131,14 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: jack_plugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: jack_unplugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -395,13 +403,25 @@ binary_sensor:
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
-  # TODO: make it internal before launch
   - platform: gpio
     id: jack_plugged
+    filters:
+      - delayed_on: 200ms
+      - delayed_off: 200ms
     pin:
       number: GPIO17
-    name: "Audio Jack Plugged In"
-    entity_category: diagnostic
+    on_press:
+      - lambda: id(jack_plugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 1s
+      - lambda: id(jack_plugged_recently) = false;
+      - script.execute: control_leds
+    on_release:
+      - lambda: id(jack_unplugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 1s
+      - lambda: id(jack_unplugged_recently) = false;
+      - script.execute: control_leds
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -536,15 +556,17 @@ light:
               }
             }
       - addressable_lambda:
-          name: "Muted"
+          name: "Muted or Silent"
           update_interval: 16ms
           lambda: |-
             static int8_t index = 0;
             Color color(255, 0, 0);
             for (int i = 0; i < 12; i++) {
-              if (i == 3) {
+              if (i == 3  && id(master_mute_switch).state ) {
                 it[i] = color;
-              } else if (i == 9) {
+              } else if (i == 9 && id(master_mute_switch).state ) {
+                it[i] = color;
+              } else if (i == 6 && (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) ) {
                 it[i] = color;
               } else {
                 it[i] = Color::BLACK;
@@ -646,6 +668,52 @@ light:
               }
             }
             index = (index + 1) % 12;
+      - addressable_lambda:
+          name: "Jack Plugged"
+          update_interval: 40ms
+          lambda: |-
+              static uint8_t index = 0;
+              if (initial_run) {
+                index = 0;
+              }
+              auto light_color = id(led_ring).current_values;
+              Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                    light_color.get_blue() * 255);
+              if (index <= 6) {
+                for (int i = 0; i < 12; i++) {
+                  if (i == index) {
+                    it[i] = color;
+                  } else if (i == (12 - index) % 12) {
+                    it[i] = color;
+                  } else {
+                    it[i] = Color::BLACK;
+                  }
+                }
+              }
+              index = (index + 1);
+      - addressable_lambda:
+          name: "Jack Unplugged"
+          update_interval: 40ms
+          lambda: |-
+              static uint8_t index = 0;
+              if (initial_run) {
+                index = 0;
+              }
+              auto light_color = id(led_ring).current_values;
+              Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                    light_color.get_blue() * 255);
+              if (index <= 6) {
+                for (int i = 0; i < 12; i++) {
+                  if (i == 6 - index) {
+                    it[i] = color;
+                  } else if (i == (6 + index) % 12) {
+                    it[i] = color;
+                  } else {
+                    it[i] = Color::BLACK;
+                  }
+                }
+              }
+              index = (index + 1);
 
   # User facing LED ring. Remapping of the internal LEDs.
   # Exposed to be used by the user.
@@ -757,54 +825,44 @@ script:
                       condition:
                         api.connected:
                       then:
-                        - if:
-                            condition:
-                              binary_sensor.is_off: center_button
-                            then:
-                              - if:
-                                  condition:
-                                    lambda: return !id(dial_touched);
-                                  then:
-                                    - if:
-                                        condition:
-                                          switch.is_off: timer_ringing
-                                        then:
-                                          - if:
-                                              condition:
-                                                switch.is_off: master_mute_switch
-                                              then:
-                                                - lambda: |
-                                                    switch(id(voice_assistant_phase)) {
-                                                      case ${voice_assist_waiting_for_command_phase_id}:
-                                                        id(control_leds_voice_assistant_waiting_for_command_phase).execute();
-                                                        break;
-                                                      case ${voice_assist_listening_for_command_phase_id}:
-                                                        id(control_leds_voice_assistant_listening_for_command_phase).execute();
-                                                        break;
-                                                      case ${voice_assist_thinking_phase_id}:
-                                                        id(control_leds_voice_assistant_thinking_phase).execute();
-                                                        break;
-                                                      case ${voice_assist_replying_phase_id}:
-                                                        id(control_leds_voice_assistant_replying_phase).execute();
-                                                        break;
-                                                      case ${voice_assist_error_phase_id}:
-                                                        id(control_leds_voice_assistant_error_phase).execute();
-                                                        break;
-                                                      case ${voice_assist_not_ready_phase_id}:
-                                                        id(control_leds_voice_assistant_not_ready_phase).execute();
-                                                        break;
-                                                      default:
-                                                        id(control_leds_voice_assistant_idle_phase).execute();
-                                                        break;
-                                                    }
-                                              else:
-                                                - script.execute: control_leds_muted
-                                        else:
-                                          - script.execute: control_leds_timer_ringing
-                                  else:
-                                    - script.execute: control_leds_dial_touched
-                            else:
-                              - script.execute: control_leds_center_button_touched
+                        # One the initial connection is done, this is the master order in which the animationd are displayed. Higer priority takes precendence
+                        # - Center button touched
+                        # - Jack Plugged / Unplugged
+                        # - Dial touched
+                        # - Timer ringing
+                        # - All the active state of the voice assistant
+                        # - Muted / Silent
+                        # - The idle state of the voice assistant
+                        - lambda: |
+                            if (id(center_button).state) {
+                              id(control_leds_center_button_touched).execute();
+                            } else if (id(jack_plugged_recently)) {
+                              id(control_leds_jack_plugged_recently).execute();
+                            } else if (id(jack_unplugged_recently)) {
+                              id(control_leds_jack_unplugged_recently).execute();
+                            } else if (id(dial_touched)) {
+                              id(control_leds_dial_touched).execute();
+                            } else if (id(timer_ringing).state) {
+                              id(control_leds_timer_ringing).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
+                              id(control_leds_voice_assistant_waiting_for_command_phase).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
+                              id(control_leds_voice_assistant_listening_for_command_phase).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_thinking_phase_id}) {
+                              id(control_leds_voice_assistant_thinking_phase).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
+                              id(control_leds_voice_assistant_replying_phase).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
+                              id(control_leds_voice_assistant_error_phase).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
+                              id(control_leds_voice_assistant_not_ready_phase).execute();
+                            } else if (id(master_mute_switch).state) {
+                              id(control_leds_muted_or_silent).execute();
+                            } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
+                              id(control_leds_muted_or_silent).execute();
+                            } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
+                              id(control_leds_voice_assistant_idle_phase).execute();
+                            }
                       else:
                         - script.execute: control_leds_no_ha_connection_state
                 else:
@@ -909,14 +967,14 @@ script:
           id: voice_assistant_leds
           effect: "Fast Pulse"
 
-  # Script executed when the voice assistant is muted
-  # The LED next to the 2 microphones turn red.
-  - id: control_leds_muted
+  # Script executed when the voice assistant is muted or silent
+  # The LED next to the 2 microphones turn red / one red LED next to the speaker grill
+  - id: control_leds_muted_or_silent
     then:
       - light.turn_on:
           brightness: 50%
           id: voice_assistant_leds
-          effect: "Muted"
+          effect: "Muted or Silent"
 
   # Script executed when the voice assistant is not ready
   - id: control_leds_voice_assistant_not_ready_phase
@@ -937,6 +995,24 @@ script:
           brightness: 100%
           id: voice_assistant_leds
           effect: "Volume Display"
+
+  # Script executed when the jack has just been unplugged
+  # A ripple effect
+  - id: control_leds_jack_unplugged_recently
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: voice_assistant_leds
+          effect: "Jack Unplugged"
+
+  # Script executed when the jack has just been plugged
+  # A ripple effect
+  - id: control_leds_jack_plugged_recently
+    then:
+      - light.turn_on:
+          brightness: 100%
+          id: voice_assistant_leds
+          effect: "Jack Plugged"
 
   # Script executed when the center button is touched
   # The complete LED ring turns on
@@ -1079,6 +1155,12 @@ media_player:
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
+    on_mute:
+      - script.execute: control_leds
+    on_unmute:
+      - script.execute: control_leds
+    on_volume:
+      - script.execute: control_leds
     files:
       - id: timer_finished_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
