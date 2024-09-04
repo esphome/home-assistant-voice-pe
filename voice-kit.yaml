@@ -569,7 +569,7 @@ light:
                 it[i] = color;
               } else if (i == 9 && id(master_mute_switch).state ) {
                 it[i] = color;
-              } else if (i == 6 && id(nabu_media_player).volume == 0.0f ) {
+              } else if (i == 6 && (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) ) {
                 it[i] = color;
               } else {
                 it[i] = Color::BLACK;
@@ -833,7 +833,7 @@ script:
                         # - Jack Plugged / Unplugged
                         # - Dial touched
                         # - Timer ringing
-                        # - All the active state of the voice assistant
+                        # - All the active state of the voice assistant 
                         # - Muted / Silent
                         # - The idle state of the voice assistant
                         - lambda: |
@@ -861,29 +861,11 @@ script:
                               id(control_leds_voice_assistant_not_ready_phase).execute();
                             } else if (id(master_mute_switch).state) {
                               id(control_leds_muted_or_silent).execute();
-                            } else if (id(nabu_media_player).volume == 0.0f) {
+                            } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
                               id(control_leds_muted_or_silent).execute();
                             } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
                               id(control_leds_voice_assistant_idle_phase).execute();
-                                                    }
-                                                    }
-                                              else:
-                                                - script.execute: control_leds_muted
-                                        else:
-                                          - script.execute: control_leds_timer_ringing
-                                  else:
-                                    - script.execute: control_leds_dial_touched
-                            else:
-                              - script.execute: control_leds_center_button_touched
                             }
-                                              else:
-                                                - script.execute: control_leds_muted
-                                        else:
-                                          - script.execute: control_leds_timer_ringing
-                                  else:
-                                    - script.execute: control_leds_dial_touched
-                            else:
-                              - script.execute: control_leds_center_button_touched
                       else:
                         - script.execute: control_leds_no_ha_connection_state
                 else:
@@ -1177,12 +1159,12 @@ media_player:
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
     i2s_audio_id: i2s_output
-    on_state: # TODO: need to find a way to refresh LED ring when it's unmutted. Otherwise it cause issues if the user wants the LED ring on.
-      - if:
-          condition:
-            lambda: return id(nabu_media_player).volume == 0.0f;
-          then:
-            - script.execute: control_leds
+    on_mute:
+        - script.execute: control_leds
+    on_unmute:
+        - script.execute: control_leds
+    on_volume:
+        - script.execute: control_leds
     files:
       - id: timer_finished_wave_file
         file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
