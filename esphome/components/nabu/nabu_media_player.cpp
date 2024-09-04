@@ -719,15 +719,16 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
     }
   }
 
+  bool old_mute_state = this->is_muted_;
   this->is_muted_ = mute_state;
 
   this->save_volume_restore_state_();
 
-  if (this->is_muted_ != mute_state) {
+  if (old_mute_state != mute_state) {
     if (mute_state) {
-      this->mute_trigger_->trigger();
+      this->defer([this]() { this->mute_trigger_->trigger(); });
     } else {
-      this->unmute_trigger_->trigger();
+      this->defer([this]() { this->unmute_trigger_->trigger(); });
     }
   }
 }
@@ -749,7 +750,7 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
     this->save_volume_restore_state_();
   }
 
-  this->volume_trigger_->trigger(volume);
+    this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
 }
 
 }  // namespace nabu
