@@ -55,6 +55,10 @@ CONF_FILES = "files"
 CONF_SAMPLE_RATE = "sample_rate"
 CONF_VOLUME_INCREMENT = "volume_increment"
 
+CONF_ON_MUTE = "on_mute"
+CONF_ON_UNMUTE = "on_unmute"
+CONF_ON_VOLUME = "on_volume"
+
 nabu_ns = cg.esphome_ns.namespace("nabu")
 NabuMediaPlayer = nabu_ns.class_("NabuMediaPlayer")
 NabuMediaPlayer = nabu_ns.class_(
@@ -189,6 +193,9 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         ),
         cv.Optional(CONF_VOLUME_INCREMENT, default=0.05): cv.percentage,
         cv.Optional(CONF_FILES): cv.ensure_list(MEDIA_FILE_TYPE_SCHEMA),
+        cv.Optional(CONF_ON_MUTE): automation.validate_automation(single=True),
+        cv.Optional(CONF_ON_UNMUTE): automation.validate_automation(single=True),
+        cv.Optional(CONF_ON_VOLUME): automation.validate_automation(single=True),
     }
 )
 
@@ -246,6 +253,25 @@ async def to_code(config):
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
 
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
+
+    if on_mute := config.get(CONF_ON_MUTE):
+        await automation.build_automation(
+            var.get_mute_trigger(),
+            [],
+            on_mute,
+        )
+    if on_unmute := config.get(CONF_ON_UNMUTE):
+        await automation.build_automation(
+            var.get_unmute_trigger(),
+            [],
+            on_unmute,
+        )
+    if on_volume := config.get(CONF_ON_VOLUME):
+        await automation.build_automation(
+            var.get_volume_trigger(),
+            [(cg.float_, "x")],
+            on_volume,
+        )
 
     if audio_dac_config := config.get(CONF_AUDIO_DAC):
         aud_dac = await cg.get_variable(audio_dac_config)

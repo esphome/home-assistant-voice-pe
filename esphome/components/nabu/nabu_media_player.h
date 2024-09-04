@@ -73,6 +73,10 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   void set_audio_dac(audio_dac::AudioDac *audio_dac) { this->audio_dac_ = audio_dac; }
 #endif
 
+  Trigger<> *get_mute_trigger() const { return this->mute_trigger_; }
+  Trigger<> *get_unmute_trigger() const { return this->unmute_trigger_; }
+  Trigger<float> *get_volume_trigger() const { return this->volume_trigger_; }
+
  protected:
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
@@ -138,6 +142,10 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 
   // Used to save volume/mute state for restoration
   ESPPreferenceObject pref_;
+
+  Trigger<> *mute_trigger_ = new Trigger<>();
+  Trigger<> *unmute_trigger_ = new Trigger<>();
+  Trigger<float> *volume_trigger_ = new Trigger<float>();
 };
 
 template<typename... Ts> class DuckingSetAction : public Action<Ts...>, public Parented<NabuMediaPlayer> {
