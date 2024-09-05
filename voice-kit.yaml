@@ -1184,7 +1184,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: kahrendt-20240904-prepare-i2s-merge
+      ref: dev
     components:
       - aic3204
       - audio_dac
