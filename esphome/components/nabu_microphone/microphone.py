@@ -10,6 +10,9 @@ from esphome.components.i2s_audio import (
     # i2s_audio_ns,
     I2SAudioComponent,
     I2SAudioIn,
+    CONF_I2S_MODE,
+    CONF_PRIMARY,
+    I2S_MODE_OPTIONS,
     BITS_PER_SAMPLE,
     CONF_BITS_PER_SAMPLE,
     CONF_I2S_AUDIO_ID,
@@ -67,6 +70,9 @@ BASE_SCHEMA = cv.Schema(
         cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
         cv.Optional(CONF_BITS_PER_SAMPLE, default="32bit"): cv.All(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
+        ),
+        cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.enum(
+            I2S_MODE_OPTIONS, lower=True
         ),
         cv.Optional(CONF_USE_APLL, default=False): cv.boolean,
         cv.Optional(CONF_CHANNEL_1): microphone.MICROPHONE_SCHEMA.extend(
@@ -139,3 +145,4 @@ async def to_code(config):
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_use_apll(config[CONF_USE_APLL]))
+    cg.add(var.set_i2s_mode(config[CONF_I2S_MODE]))
