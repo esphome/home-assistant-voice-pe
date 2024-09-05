@@ -226,7 +226,7 @@ esp_err_t NabuMediaPlayer::start_i2s_driver_() {
   }
 
   i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this->parent_->get_i2s_mode() | I2S_MODE_TX),
+      .mode = (i2s_mode_t) (this->i2s_mode_ | I2S_MODE_TX),
       .sample_rate = this->sample_rate_,
       .bits_per_sample = this->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,

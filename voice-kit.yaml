@@ -1115,20 +1115,18 @@ script:
 
 i2s_audio:
   - id: i2s_output
+    # i2s_output data pin is gpio10
     i2s_lrclk_pin:
       number: GPIO7
     i2s_bclk_pin:
       number: GPIO8
-    i2s_mode: secondary
-    # i2s_output data pin is gpio10
 
   - id: i2s_input
+    # data line is GPIO15
     i2s_lrclk_pin:
       number: GPIO14
     i2s_bclk_pin:
       number: GPIO13
-    i2s_mode: secondary
-    # data line is GPIO15
 
 microphone:
   - platform: nabu_microphone
@@ -1137,6 +1135,7 @@ microphone:
     pdm: false
     sample_rate: 16000
     bits_per_sample: 32bit
+    i2s_mode: secondary
     i2s_audio_id: i2s_input
     channel_1:
       id: asr_mic
@@ -1154,6 +1153,7 @@ media_player:
     sample_rate: 48000
     i2s_dout_pin: GPIO10
     bits_per_sample: 32bit
+    i2s_mode: secondary
     i2s_audio_id: i2s_output
     on_mute:
       - script.execute: control_leds
@@ -1184,7 +1184,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: kahrendt-20240904-prepare-i2s-merge
     components:
       - aic3204
       - audio_dac

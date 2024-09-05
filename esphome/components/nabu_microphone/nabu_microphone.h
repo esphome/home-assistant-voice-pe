@@ -13,6 +13,22 @@
 namespace esphome {
 namespace nabu_microphone {
 
+enum class TaskEventType : uint8_t {
+  STARTING = 0,
+  STARTED,
+  RUNNING,
+  IDLE,
+  STOPPING,
+  STOPPED,
+  MUTED,
+  WARNING = 255,
+};
+
+struct TaskEvent {
+  TaskEventType type;
+  esp_err_t err;
+};
+
 class NabuMicrophoneChannel;
 
 class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
@@ -36,6 +52,7 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
   }
 #endif
 
+  void set_i2s_mode(i2s_mode_t mode) { this->i2s_mode_ = mode; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
   void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
@@ -70,6 +87,7 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
 
   i2s_bits_per_sample_t bits_per_sample_;
   i2s_channel_fmt_t channel_;
+  i2s_mode_t i2s_mode_{};
   uint32_t sample_rate_;
 };
 
@@ -98,8 +116,10 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
   // void set_requested_stop() { this->requested_stop_ = true; }
   bool get_requested_stop() { return this->requested_stop_; }
 
-  size_t read(int16_t *buf, size_t len,  TickType_t ticks_to_wait = 0) override { return this->ring_buffer_->read((void *) buf, len, ticks_to_wait); };
-  size_t available() override { return this->ring_buffer_->available(); }
+  size_t read(int16_t *buf, size_t len, TickType_t ticks_to_wait = 0) override {
+    return this->ring_buffer_->read((void *) buf, len, ticks_to_wait);
+  };
+  size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len); };
   void reset() override { this->ring_buffer_->reset(); }
 
   RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
