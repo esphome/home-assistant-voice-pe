@@ -29,6 +29,16 @@ CONF_I2S_MODE = "i2s_mode"
 CONF_PRIMARY = "primary"
 CONF_SECONDARY = "secondary"
 
+CONF_BITS_PER_SAMPLE = "bits_per_sample"
+i2s_bits_per_sample_t = cg.global_ns.enum("i2s_bits_per_sample_t")
+BITS_PER_SAMPLE = {
+    16: i2s_bits_per_sample_t.I2S_BITS_PER_SAMPLE_16BIT,
+    32: i2s_bits_per_sample_t.I2S_BITS_PER_SAMPLE_32BIT,
+}
+
+_validate_bits = cv.float_with_unit("bits", "bit")
+
+
 i2s_audio_ns = cg.esphome_ns.namespace("i2s_audio")
 I2SAudioComponent = i2s_audio_ns.class_("I2SAudioComponent", cg.Component)
 I2SAudioIn = i2s_audio_ns.class_("I2SAudioIn", cg.Parented.template(I2SAudioComponent))
