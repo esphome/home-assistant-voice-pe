@@ -91,7 +91,6 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
                                           0, 0};        // additional payload length (set below)
                                                         // followed by payload data with null terminator
   if (millis() > this->last_ready_ + DFU_TIMEOUT_MS) {
-    this->mark_failed();
     ESP_LOGE(TAG, "DFU update timed out");
     return UPDATE_TIMEOUT;
   }
