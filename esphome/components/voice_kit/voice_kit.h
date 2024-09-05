@@ -13,7 +13,9 @@ namespace voice_kit {
 static const uint8_t DFU_CONTROLLER_SERVICER_RESID = 240;
 static const uint8_t CONFIGURATION_SERVICER_RESID = 241;
 static const uint8_t DFU_COMMAND_READ_BIT = 0x80;
+
 static const uint16_t DFU_TIMEOUT_MS = 1000;
+static const uint16_t MAX_XFER = 128;  // maximum number of bytes we can transfer per block
 
 enum TransportProtocolReturnCode : uint8_t {
   CTRL_DONE = 0,
@@ -26,6 +28,11 @@ enum VoiceKitUpdaterStatus : uint8_t {
   UPDATE_COMMUNICATION_ERROR,
   UPDATE_READ_VERSION_ERROR,
   UPDATE_TIMEOUT,
+  UPDATE_FAILED,
+  UPDATE_BAD_STATE,
+  UPDATE_IN_PROGRESS,
+  UPDATE_REBOOT_PENDING,
+  UPDATE_VERIFY_NEW_VERSION,
 };
 
 // DFU enums from https://github.com/xmos/sln_voice/blob/develop/examples/ffva/src/dfu_int/dfu_state_machine.h
@@ -85,8 +92,12 @@ enum DfuCommands : uint8_t {
 class VoiceKit : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
+  bool can_proceed() override {
+    return this->is_failed() || (this->version_read_() && (this->versions_match_() || !this->firmware_bin_is_valid_()));
+  }
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::IO; }
+  void loop() override;
 
   void set_reset_pin(GPIOPin *reset_pin) { reset_pin_ = reset_pin; }
 
@@ -100,18 +111,22 @@ class VoiceKit : public Component, public i2c::I2CDevice {
     this->firmware_bin_version_patch_ = patch;
   }
 
-  void flash();
+  void start_dfu_update();
 
  protected:
-  uint8_t do_ota_();
+  VoiceKitUpdaterStatus dfu_update_send_block_();
   uint32_t load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t offset);
-  bool versions_match();
+  bool firmware_bin_is_valid_() { return this->firmware_bin_ != nullptr && this->firmware_bin_length_; }
+  bool version_read_();
+  bool versions_match_();
 
   bool dfu_get_status_();
   bool dfu_get_version_();
   bool dfu_reboot_();
   bool dfu_set_alternate_();
-  bool dfu_wait_for_idle_();
+  bool dfu_check_if_ready_();
+
+  GPIOPin *reset_pin_;
 
   uint8_t dfu_state_{0};
   uint8_t dfu_status_{0};
@@ -127,9 +142,12 @@ class VoiceKit : public Component, public i2c::I2CDevice {
   uint8_t firmware_version_minor_{0};
   uint8_t firmware_version_patch_{0};
 
-  static const uint16_t MAX_XFER = 128;  // maximum number of bytes we can transfer per block
-
-  GPIOPin *reset_pin_;
+  uint32_t bytes_written_{0};
+  uint32_t last_progress_{0};
+  uint32_t last_ready_{0};
+  uint32_t status_last_read_ms_{0};
+  uint32_t update_start_time_{0};
+  VoiceKitUpdaterStatus dfu_update_status_{UPDATE_OK};
 };
 
 }  // namespace voice_kit

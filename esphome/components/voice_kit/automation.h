@@ -9,7 +9,7 @@ namespace voice_kit {
 template<typename... Ts> class VoiceKitFlashAction : public Action<Ts...> {
  public:
   VoiceKitFlashAction(VoiceKit *parent) : parent_(parent) {}
-  void play(Ts... x) override { this->parent_->flash(); }
+  void play(Ts... x) override { this->parent_->start_dfu_update(); }
 
  protected:
   VoiceKit *parent_;
