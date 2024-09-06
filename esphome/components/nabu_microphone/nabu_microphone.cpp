@@ -86,7 +86,7 @@ void NabuMicrophone::setup() {
     }
   }
 
-  this->event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(i2s_audio::TaskEvent));
+  this->event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
 }
 
 void NabuMicrophone::mute() {
@@ -115,7 +115,7 @@ esp_err_t NabuMicrophone::start_i2s_driver_() {
   esp_err_t err;
 
   i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this->parent_->get_i2s_mode() | I2S_MODE_RX),
+      .mode = (i2s_mode_t) (this->i2s_mode_ | I2S_MODE_RX),
       .sample_rate = this->sample_rate_,
       .bits_per_sample = this->bits_per_sample_,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
@@ -170,7 +170,7 @@ esp_err_t NabuMicrophone::start_i2s_driver_() {
 
 void NabuMicrophone::read_task_(void *params) {
   NabuMicrophone *this_microphone = (NabuMicrophone *) params;
-  i2s_audio::TaskEvent event;
+  TaskEvent event;
   esp_err_t err;
 
   while (true) {
@@ -181,18 +181,18 @@ void NabuMicrophone::read_task_(void *params) {
                     portMAX_DELAY);      // how long to wait
 
     if (notification_bits & TaskNotificationBits::COMMAND_START) {
-      event.type = i2s_audio::TaskEventType::STARTING;
+      event.type = TaskEventType::STARTING;
       xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
       if ((this_microphone->channel_1_ != nullptr) && this_microphone->channel_1_->is_failed()) {
-        event.type = i2s_audio::TaskEventType::WARNING;
+        event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_INVALID_STATE;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         continue;
       }
 
       if ((this_microphone->channel_2_ != nullptr) && this_microphone->channel_2_->is_failed()) {
-        event.type = i2s_audio::TaskEventType::WARNING;
+        event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_INVALID_STATE;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         continue;
@@ -213,13 +213,13 @@ void NabuMicrophone::read_task_(void *params) {
 
       if ((buffer == nullptr) || (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS) ||
           (channel_2_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS)) {
-        event.type = i2s_audio::TaskEventType::WARNING;
+        event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_NO_MEM;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
       } else {
         err = this_microphone->start_i2s_driver_();
         if (err != ESP_OK) {
-          event.type = i2s_audio::TaskEventType::WARNING;
+          event.type = TaskEventType::WARNING;
           event.err = err;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         } else {
@@ -227,7 +227,7 @@ void NabuMicrophone::read_task_(void *params) {
           this_microphone->channel_1_->get_ring_buffer()->reset();
           this_microphone->channel_2_->get_ring_buffer()->reset();
 
-          event.type = i2s_audio::TaskEventType::STARTED;
+          event.type = TaskEventType::STARTED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
           while (true) {
@@ -241,7 +241,7 @@ void NabuMicrophone::read_task_(void *params) {
                 i2s_read(this_microphone->parent_->get_port(), buffer, SAMPLES_IN_ALL_DMA_BUFFERS * sizeof(int32_t),
                          &bytes_read, pdMS_TO_TICKS(TASK_DELAY_MS));
             if (err != ESP_OK) {
-              event.type = i2s_audio::TaskEventType::WARNING;
+              event.type = TaskEventType::WARNING;
               event.err = err;
               xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
             }
@@ -282,11 +282,11 @@ void NabuMicrophone::read_task_(void *params) {
               }
             }
 
-            event.type = i2s_audio::TaskEventType::RUNNING;
+            event.type = TaskEventType::RUNNING;
             xQueueSend(this_microphone->event_queue_, &event, 0);
           }
 
-          event.type = i2s_audio::TaskEventType::STOPPING;
+          event.type = TaskEventType::STOPPING;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
           allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
@@ -295,12 +295,12 @@ void NabuMicrophone::read_task_(void *params) {
 
           this_microphone->parent_->unlock();
 
-          event.type = i2s_audio::TaskEventType::STOPPED;
+          event.type = TaskEventType::STOPPED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         }
       }
     }
-    event.type = i2s_audio::TaskEventType::STOPPED;
+    event.type = TaskEventType::STOPPED;
     event.err = ESP_OK;
     xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
   }
@@ -335,38 +335,38 @@ void NabuMicrophone::loop() {
   }
 
   // Note this->state_ is only modified here based on the status of the task
-  i2s_audio::TaskEvent event;
+  TaskEvent event;
   while (xQueueReceive(this->event_queue_, &event, 0)) {
     switch (event.type) {
-      case i2s_audio::TaskEventType::STARTING:
+      case TaskEventType::STARTING:
         this->state_ = microphone::STATE_STARTING;
         ESP_LOGD(TAG, "Starting I2S Audio Microphne");
         break;
-      case i2s_audio::TaskEventType::STARTED:
+      case TaskEventType::STARTED:
         this->state_ = microphone::STATE_RUNNING;
         ESP_LOGD(TAG, "Started I2S Audio Microphone");
         break;
-      case i2s_audio::TaskEventType::RUNNING:
+      case TaskEventType::RUNNING:
         this->state_ = microphone::STATE_RUNNING;
         this->status_clear_warning();
         break;
-      case i2s_audio::TaskEventType::MUTED:
+      case TaskEventType::MUTED:
         this->state_ = microphone::STATE_MUTED;
         ESP_LOGD(TAG, "Muted I2S Audio Microphone");
         break;
-      case i2s_audio::TaskEventType::STOPPING:
+      case TaskEventType::STOPPING:
         this->state_ = microphone::STATE_STOPPING;
         ESP_LOGD(TAG, "Stopping I2S Audio Microphone");
         break;
-      case i2s_audio::TaskEventType::STOPPED:
+      case TaskEventType::STOPPED:
         this->state_ = microphone::STATE_STOPPED;
         ESP_LOGD(TAG, "Stopped I2S Audio Microphone");
         break;
-      case i2s_audio::TaskEventType::WARNING:
+      case TaskEventType::WARNING:
         ESP_LOGW(TAG, "Error involving I2S: %s", esp_err_to_name(event.err));
         this->status_set_warning();
         break;
-      case i2s_audio::TaskEventType::IDLE:
+      case TaskEventType::IDLE:
         break;
     }
   }

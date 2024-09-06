@@ -189,7 +189,7 @@ void MicroWakeWord::preprocessor_task_(void *params) {
           features_buffer[i] = clamp<int8_t>(value, INT8_MIN, INT8_MAX);
         }
 
-        if (!xQueueSend(this_mww->features_queue_, features_buffer, 0)) {
+        if (!xQueueSendToBack(this_mww->features_queue_, features_buffer, 0)) {
           // Features queue is too full, so we fell behind on inferring!
 
           xEventGroupSetBits(this_mww->event_group_, EventGroupBits::PREPROCESSOR_MESSAGE_WARNING_FEATURES_FULL);
@@ -393,7 +393,7 @@ void MicroWakeWord::stop() {
   xEventGroupWaitBits(this->event_group_,
                       (PREPROCESSOR_MESSAGE_IDLE | INFERENCE_MESSAGE_IDLE),  // Bit message to read
                       pdTRUE,                                                // Clear the bit on exit
-                      pdTRUE,                                                  // Wait for all the bits,
+                      pdTRUE,                                                // Wait for all the bits,
                       pdMS_TO_TICKS(STOPPING_TIMEOUT_MS));                   // Block to wait until the tasks stop
 
   xEventGroupClearBits(this->event_group_, ALL_BITS);

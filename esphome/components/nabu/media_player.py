@@ -26,6 +26,9 @@ from esphome.core import HexInt, CORE
 from esphome.components.i2s_audio import (
     BITS_PER_SAMPLE,
     CONF_BITS_PER_SAMPLE,
+    CONF_I2S_MODE,
+    CONF_PRIMARY,
+    I2S_MODE_OPTIONS,
     CONF_I2S_AUDIO_ID,
     CONF_I2S_DOUT_PIN,
     I2SAudioComponent,
@@ -187,6 +190,9 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
         cv.Optional(CONF_AUDIO_DAC): cv.use_id(audio_dac.AudioDac),
         cv.Required(CONF_I2S_DOUT_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.enum(
+            I2S_MODE_OPTIONS, lower=True
+        ),
         cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
         cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
             _validate_bits, cv.enum(BITS_PER_SAMPLE)
@@ -251,6 +257,7 @@ async def to_code(config):
     cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
+    cg.add(var.set_i2s_mode(config[CONF_I2S_MODE]))
 
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
 
