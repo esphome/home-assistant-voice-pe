@@ -141,7 +141,7 @@ void MicroWakeWord::preprocessor_task_(void *params) {
       int8_t features_buffer[PREPROCESSOR_FEATURE_SIZE];
       int16_t *audio_buffer = int16_allocator.allocate(new_samples_to_read);
 
-      if ((audio_buffer == nullptr) || (features_buffer == nullptr)) {
+      if (audio_buffer == nullptr) {
         xEventGroupSetBits(this_mww->event_group_,
                            EventGroupBits::PREPROCESSOR_MESSAGE_ERROR | EventGroupBits::COMMAND_STOP);
       }
