@@ -185,7 +185,7 @@ AudioPipelineState AudioPipeline::get_state() {
           if (event.err.has_value()) {
             ESP_LOGE(TAG, "Decoder encountered an error: %s", esp_err_to_name(event.err.value()));
           } else if (event.stream_info.has_value()) {
-            ESP_LOGD(TAG, "Decoded audio has %d channels, %d Hz sample rate, and %d bits per sample",
+            ESP_LOGD(TAG, "Decoded audio has %d channels, %" PRId32 " Hz sample rate, and %d bits per sample",
                      event.stream_info.value().channels, event.stream_info.value().sample_rate,
                      event.stream_info.value().bits_per_sample);
           }
