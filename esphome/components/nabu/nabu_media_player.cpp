@@ -469,14 +469,14 @@ void NabuMediaPlayer::watch_media_commands_() {
     if (media_command.command.has_value()) {
       switch (media_command.command.value()) {
         case media_player::MEDIA_PLAYER_COMMAND_PLAY:
-          if (this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if (!this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && !this->is_paused_) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
@@ -485,17 +485,21 @@ void NabuMediaPlayer::watch_media_commands_() {
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           command_event.command = CommandEventType::STOP;
           if (media_command.announce.has_value() && media_command.announce.value()) {
-            this->announcement_pipeline_->stop();
+            if (this->announcement_pipeline_ != nullptr) {
+              this->announcement_pipeline_->stop();
+            }
           } else {
-            this->media_pipeline_->stop();
+            if (this->media_pipeline_ != nullptr) {
+              this->media_pipeline_->stop();
+            }
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
-          if (this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
             this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = false;
-          } else {
+          } else if (this->audio_mixer_ != nullptr) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = true;
@@ -750,7 +754,7 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
     this->save_volume_restore_state_();
   }
 
-    this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
+  this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
 }
 
 }  // namespace nabu
