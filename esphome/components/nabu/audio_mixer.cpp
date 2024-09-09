@@ -51,6 +51,18 @@ size_t AudioMixer::read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait
   return this->output_ring_buffer_->read((void *) buffer, length, ticks_to_wait);
 }
 
+void AudioMixer::suspend_task() {
+  if (this->task_handle_ != nullptr) {
+    vTaskSuspend(this->task_handle_);
+  }
+}
+
+void AudioMixer::resume_task() {
+  if (this->task_handle_ != nullptr) {
+    vTaskResume(task_handle_);
+  }
+}
+
 void AudioMixer::audio_mixer_task_(void *params) {
   AudioMixer *this_mixer = (AudioMixer *) params;
 
@@ -259,7 +271,7 @@ void AudioMixer::audio_mixer_task_(void *params) {
         }
       } else {
         // No audio data available in either buffer
-        
+
         delay(TASK_DELAY_MS);
       }
     }

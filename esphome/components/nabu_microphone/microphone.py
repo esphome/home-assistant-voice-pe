@@ -146,3 +146,5 @@ async def to_code(config):
     cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_use_apll(config[CONF_USE_APLL]))
     cg.add(var.set_i2s_mode(config[CONF_I2S_MODE]))
+
+    cg.add_define("USE_OTA_STATE_CALLBACK")

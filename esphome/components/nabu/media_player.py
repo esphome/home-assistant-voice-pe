@@ -252,6 +252,8 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await media_player.register_media_player(var, config)
+    
+    cg.add_define("USE_OTA_STATE_CALLBACK")
 
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
     cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))

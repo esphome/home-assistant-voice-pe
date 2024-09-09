@@ -185,7 +185,7 @@ AudioPipelineState AudioPipeline::get_state() {
           if (event.err.has_value()) {
             ESP_LOGE(TAG, "Decoder encountered an error: %s", esp_err_to_name(event.err.value()));
           } else if (event.stream_info.has_value()) {
-            ESP_LOGD(TAG, "Decoded audio has %d channels, %d Hz sample rate, and %d bits per sample",
+            ESP_LOGD(TAG, "Decoded audio has %d channels, %" PRId32 " Hz sample rate, and %d bits per sample",
                      event.stream_info.value().channels, event.stream_info.value().sample_rate,
                      event.stream_info.value().bits_per_sample);
           }
@@ -267,6 +267,30 @@ void AudioPipeline::reset_ring_buffers() {
   this->raw_file_ring_buffer_->reset();
   this->decoded_ring_buffer_->reset();
   this->resampled_ring_buffer_->reset();
+}
+
+void AudioPipeline::suspend_tasks() {
+  if (this->read_task_handle_ != nullptr) {
+    vTaskSuspend(this->read_task_handle_);
+  }
+  if (this->decode_task_handle_ != nullptr) {
+    vTaskSuspend(this->decode_task_handle_);
+  }
+  if (this->resample_task_handle_ != nullptr) {
+    vTaskSuspend(this->resample_task_handle_);
+  }
+}
+
+void AudioPipeline::resume_tasks() {
+  if (this->read_task_handle_ != nullptr) {
+    vTaskResume(this->read_task_handle_);
+  }
+  if (this->decode_task_handle_ != nullptr) {
+    vTaskResume(this->decode_task_handle_);
+  }
+  if (this->resample_task_handle_ != nullptr) {
+    vTaskResume(this->resample_task_handle_);
+  }
 }
 
 void AudioPipeline::read_task_(void *params) {

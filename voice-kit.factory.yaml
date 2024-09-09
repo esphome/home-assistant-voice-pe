@@ -28,7 +28,7 @@ update:
   - platform: http_request
     name: None
     id: update_http_request
-    source: https://esphome.github.io/voice-kit/manifest.json
+    source: https://firmware.esphome.io/voice-kit/esphome-voice-kit/manifest.json
 
 dashboard_import:
   package_import_url: github://esphome/voice-kit/voice-kit.yaml

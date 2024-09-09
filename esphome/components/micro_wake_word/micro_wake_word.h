@@ -66,8 +66,6 @@ class MicroWakeWord : public Component {
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
   State state_{State::IDLE};
 
-
-
   std::vector<WakeWordModel *> wake_word_models_;
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
@@ -80,6 +78,11 @@ class MicroWakeWord : public Component {
   struct FrontendState frontend_state_;
 
   uint8_t features_step_size_;
+
+  /// @brief Suspends the preprocessor and inference tasks
+  void suspend_tasks_();
+  /// @brief Resumes the preprocessor and inference tasks
+  void resume_tasks_();
 
   void set_state_(State state);
 

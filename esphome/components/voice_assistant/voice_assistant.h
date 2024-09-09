@@ -43,6 +43,7 @@ enum VoiceAssistantFeature : uint32_t {
   FEATURE_SPEAKER = 1 << 1,
   FEATURE_API_AUDIO = 1 << 2,
   FEATURE_TIMERS = 1 << 3,
+  FEATURE_ANNOUNCE = 1 << 4,
 };
 
 enum class State {
@@ -134,6 +135,12 @@ class VoiceAssistant : public Component {
       flags |= VoiceAssistantFeature::FEATURE_TIMERS;
     }
 
+#ifdef USE_MEDIA_PLAYER
+    if (this->media_player_ != nullptr) {
+      flags |= VoiceAssistantFeature::FEATURE_ANNOUNCE;
+    }
+#endif
+
     return flags;
   }
 
@@ -147,6 +154,7 @@ class VoiceAssistant : public Component {
   void on_event(const api::VoiceAssistantEventResponse &msg);
   void on_audio(const api::VoiceAssistantAudio &msg);
   void on_timer_event(const api::VoiceAssistantTimerEventResponse &msg);
+  void on_announce(const api::VoiceAssistantAnnounceRequest &msg);
 
   bool is_running() const { return this->state_ != State::IDLE; }
   void set_continuous(bool continuous) { this->continuous_ = continuous; }
