@@ -1212,6 +1212,11 @@ external_components:
       - voice_assistant
       - voice_kit
     refresh: 0s
+  # TODO: Remove this once ESPHome:dev tag is fixed
+  - source: github://esphome/esphome@dev
+    components:
+      - api
+    refresh: 0s
 
 audio_dac:
   - platform: aic3204
