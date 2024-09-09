@@ -447,6 +447,7 @@ async def to_code(config):
     cg.add(var.set_microphone(mic))
 
     cg.add_define("USE_MICRO_WAKE_WORD")
+    cg.add_define("USE_OTA_STATE_CALLBACK")
 
     esp32.add_idf_component(
         name="esp-tflite-micro",
