@@ -1252,6 +1252,11 @@ micro_wake_word:
                           not:
                             lambda: |-
                               return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                - if:
+                    condition:
+                      voice_assistant.is_running:
+                    then:
+                      - voice_assistant.stop:
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
 
