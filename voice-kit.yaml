@@ -1257,6 +1257,9 @@ micro_wake_word:
                       voice_assistant.is_running:
                     then:
                       - voice_assistant.stop:
+                      - wait_until:
+                          not:
+                            voice_assistant.is_running:
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
 
