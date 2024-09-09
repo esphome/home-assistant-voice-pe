@@ -62,6 +62,11 @@ class AudioPipeline {
 
   void reset_ring_buffers();
 
+  /// @brief Suspends any running tasks
+  void suspend_tasks();
+  /// @brief Resumes any running tasks
+  void resume_tasks();
+
  protected:
   esp_err_t allocate_buffers_();
   esp_err_t common_start_(uint32_t target_sample_rate, const std::string &task_name, UBaseType_t priority);

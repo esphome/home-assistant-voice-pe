@@ -12,6 +12,10 @@
 
 #include "esp_dsp.h"
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
 namespace esphome {
 namespace nabu {
 
@@ -216,6 +220,39 @@ void NabuMediaPlayer::setup() {
     this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
     this->set_mute_state_(false);
   }
+
+#ifdef USE_OTA
+  ota::get_global_ota_callback()->add_on_state_callback(
+      [this](ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *comp) {
+        if (state == ota::OTA_STARTED) {
+          if (this->speaker_task_handle_ != nullptr) {
+            vTaskSuspend(this->speaker_task_handle_);
+          }
+          if (this->audio_mixer_ != nullptr) {
+            this->audio_mixer_->suspend_task();
+          }
+          if (this->media_pipeline_ != nullptr) {
+            this->media_pipeline_->suspend_tasks();
+          }
+          if (this->announcement_pipeline_ != nullptr) {
+            this->announcement_pipeline_->suspend_tasks();
+          }
+        } else if (state == ota::OTA_ERROR) {
+          if (this->speaker_task_handle_ != nullptr) {
+            vTaskResume(this->speaker_task_handle_);
+          }
+          if (this->audio_mixer_ != nullptr) {
+            this->audio_mixer_->resume_task();
+          }
+          if (this->media_pipeline_ != nullptr) {
+            this->media_pipeline_->resume_tasks();
+          }
+          if (this->announcement_pipeline_ != nullptr) {
+            this->announcement_pipeline_->resume_tasks();
+          }
+        }
+      });
+#endif
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }
@@ -469,14 +506,14 @@ void NabuMediaPlayer::watch_media_commands_() {
     if (media_command.command.has_value()) {
       switch (media_command.command.value()) {
         case media_player::MEDIA_PLAYER_COMMAND_PLAY:
-          if (this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if (!this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && !this->is_paused_) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
           }
@@ -485,17 +522,21 @@ void NabuMediaPlayer::watch_media_commands_() {
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           command_event.command = CommandEventType::STOP;
           if (media_command.announce.has_value() && media_command.announce.value()) {
-            this->announcement_pipeline_->stop();
+            if (this->announcement_pipeline_ != nullptr) {
+              this->announcement_pipeline_->stop();
+            }
           } else {
-            this->media_pipeline_->stop();
+            if (this->media_pipeline_ != nullptr) {
+              this->media_pipeline_->stop();
+            }
           }
           break;
         case media_player::MEDIA_PLAYER_COMMAND_TOGGLE:
-          if (this->is_paused_) {
+          if ((this->audio_mixer_ != nullptr) && this->is_paused_) {
             command_event.command = CommandEventType::RESUME_MEDIA;
             this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = false;
-          } else {
+          } else if (this->audio_mixer_ != nullptr) {
             command_event.command = CommandEventType::PAUSE_MEDIA;
             this->audio_mixer_->send_command(&command_event);
             this->is_paused_ = true;
@@ -750,7 +791,7 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
     this->save_volume_restore_state_();
   }
 
-    this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
+  this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
 }
 
 }  // namespace nabu

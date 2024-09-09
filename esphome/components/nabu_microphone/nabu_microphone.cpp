@@ -9,6 +9,10 @@
 #include "esphome/core/log.h"
 #include "esphome/core/ring_buffer.h"
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
 namespace esphome {
 namespace nabu_microphone {
 
@@ -87,6 +91,21 @@ void NabuMicrophone::setup() {
   }
 
   this->event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
+
+#ifdef USE_OTA
+  ota::get_global_ota_callback()->add_on_state_callback(
+      [this](ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *comp) {
+        if (state == ota::OTA_STARTED) {
+          if (this->read_task_handle_ != nullptr) {
+            vTaskSuspend(this->read_task_handle_);
+          }
+        } else if (state == ota::OTA_ERROR) {
+          if (this->read_task_handle_ != nullptr) {
+            vTaskResume(this->read_task_handle_);
+          }
+        }
+      });
+#endif
 }
 
 void NabuMicrophone::mute() {

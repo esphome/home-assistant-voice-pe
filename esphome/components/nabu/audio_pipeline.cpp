@@ -269,6 +269,30 @@ void AudioPipeline::reset_ring_buffers() {
   this->resampled_ring_buffer_->reset();
 }
 
+void AudioPipeline::suspend_tasks() {
+  if (this->read_task_handle_ != nullptr) {
+    vTaskSuspend(this->read_task_handle_);
+  }
+  if (this->decode_task_handle_ != nullptr) {
+    vTaskSuspend(this->decode_task_handle_);
+  }
+  if (this->resample_task_handle_ != nullptr) {
+    vTaskSuspend(this->resample_task_handle_);
+  }
+}
+
+void AudioPipeline::resume_tasks() {
+  if (this->read_task_handle_ != nullptr) {
+    vTaskResume(this->read_task_handle_);
+  }
+  if (this->decode_task_handle_ != nullptr) {
+    vTaskResume(this->decode_task_handle_);
+  }
+  if (this->resample_task_handle_ != nullptr) {
+    vTaskResume(this->resample_task_handle_);
+  }
+}
+
 void AudioPipeline::read_task_(void *params) {
   AudioPipeline *this_pipeline = (AudioPipeline *) params;
 
