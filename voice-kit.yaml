@@ -1263,6 +1263,7 @@ select:
       - "Hey Jarvis"
       - "Hey Mycroft"
     optimistic: true
+    restore_value: true
     on_value:
       then:
         - lambda: |-
