@@ -12,6 +12,10 @@
 
 #include "esp_dsp.h"
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
 namespace esphome {
 namespace nabu {
 
@@ -216,6 +220,39 @@ void NabuMediaPlayer::setup() {
     this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
     this->set_mute_state_(false);
   }
+
+#ifdef USE_OTA
+  ota::get_global_ota_callback()->add_on_state_callback(
+      [this](ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *comp) {
+        if (state == ota::OTA_STARTED) {
+          if (this->speaker_task_handle_ != nullptr) {
+            vTaskSuspend(this->speaker_task_handle_);
+          }
+          if (this->audio_mixer_ != nullptr) {
+            this->audio_mixer_->suspend_task();
+          }
+          if (this->media_pipeline_ != nullptr) {
+            this->media_pipeline_->suspend_tasks();
+          }
+          if (this->announcement_pipeline_ != nullptr) {
+            this->announcement_pipeline_->suspend_tasks();
+          }
+        } else if (state == ota::OTA_ERROR) {
+          if (this->speaker_task_handle_ != nullptr) {
+            vTaskResume(this->speaker_task_handle_);
+          }
+          if (this->audio_mixer_ != nullptr) {
+            this->audio_mixer_->resume_task();
+          }
+          if (this->media_pipeline_ != nullptr) {
+            this->media_pipeline_->resume_tasks();
+          }
+          if (this->announcement_pipeline_ != nullptr) {
+            this->announcement_pipeline_->resume_tasks();
+          }
+        }
+      });
+#endif
 
   ESP_LOGI(TAG, "Set up nabu media player");
 }

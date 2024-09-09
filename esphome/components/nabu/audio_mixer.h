@@ -115,6 +115,11 @@ class AudioMixer {
   /// @return pointer to announcement ring buffer
   RingBuffer *get_announcement_ring_buffer() { return this->announcement_ring_buffer_.get(); }
 
+  /// @brief Suspends the mixer task
+  void suspend_task();
+  /// @brief Resumes the mixer task
+  void resume_task();
+
  protected:
   /// @brief Allocates the ring buffers, task stack, and queues
   /// @return ESP_OK if successful or an error otherwise

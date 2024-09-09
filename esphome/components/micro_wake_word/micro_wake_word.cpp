@@ -9,6 +9,10 @@
 
 #include "esphome/components/voice_assistant/voice_assistant.h"
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
 #include <frontend.h>
 #include <frontend_util.h>
 
@@ -111,6 +115,18 @@ void MicroWakeWord::setup() {
   this->inference_task_stack_buffer_ = (StackType_t *) malloc(INFERENCE_TASK_STACK_SIZE);
 
   ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
+
+
+#ifdef USE_OTA
+  ota::get_global_ota_callback()->add_on_state_callback(
+      [this](ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *comp) {
+        if (state == ota::OTA_STARTED) {
+          this->suspend_tasks_();
+        } else if (state == ota::OTA_ERROR) {
+          this->resume_tasks_();
+        }
+      });
+#endif
 }
 
 void MicroWakeWord::preprocessor_task_(void *params) {
@@ -271,6 +287,24 @@ void MicroWakeWord::add_vad_model(const uint8_t *model_start, uint8_t probabilit
   this->vad_model_ = make_unique<VADModel>(model_start, probability_cutoff, sliding_window_size, tensor_arena_size);
 }
 #endif
+
+void MicroWakeWord::suspend_tasks_() {
+  if (this->preprocessor_task_handle_ != nullptr) {
+    vTaskSuspend(this->preprocessor_task_handle_);
+  }
+  if (this->inference_task_handle_ != nullptr) {
+    vTaskSuspend(this->inference_task_handle_);
+  }
+}
+
+void MicroWakeWord::resume_tasks_() {
+  if (this->preprocessor_task_handle_ != nullptr) {
+    vTaskResume(this->preprocessor_task_handle_);
+  }
+  if (this->inference_task_handle_ != nullptr) {
+    vTaskResume(this->inference_task_handle_);
+  }
+}
 
 void MicroWakeWord::loop() {
   // Determines the state of microWakeWord by monitoring the Event Group state.
