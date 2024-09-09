@@ -77,7 +77,6 @@ void VoiceKit::start_dfu_update() {
     return;
   }
 
-  this->dfu_update_status_ = UPDATE_IN_PROGRESS;
   this->bytes_written_ = 0;
   this->last_progress_ = 0;
   this->last_ready_ = millis();
@@ -91,7 +90,7 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
                                           0, 0};        // additional payload length (set below)
                                                         // followed by payload data with null terminator
   if (millis() > this->last_ready_ + DFU_TIMEOUT_MS) {
-    ESP_LOGE(TAG, "DFU update timed out");
+    ESP_LOGE(TAG, "DFU timed out");
     return UPDATE_TIMEOUT;
   }
 
@@ -168,7 +167,7 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
         return UPDATE_OK;
 
       default:
-        ESP_LOGI(TAG, "Unknown state");
+        ESP_LOGW(TAG, "Unknown state");
         return UPDATE_BAD_STATE;
     }
   }
