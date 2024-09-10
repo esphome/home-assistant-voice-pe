@@ -1198,6 +1198,24 @@ voice_kit:
     url: https://github.com/esphome/voice-kit-xmos-firmware/releases/download/v1.2.0/ffva_v1.2.0_upgrade.bin
     version: "1.2.0"
     md5: 912b84ea15df4a0081e39ffd9740b884
+    on_begin:
+      then:
+        - light.turn_on:
+            brightness: 50%
+            id: voice_assistant_leds
+            effect: "None"
+            red: 27%
+            green: 73%
+            blue: 95%
+    on_progress:
+      then:
+        - light.addressable_set:
+            id: voice_assistant_leds
+            range_from: 0
+            range_to: !lambda "return uint8_t(12.0f * x / 100.0f);"
+            red: 60%
+            green: 85%
+            blue: 3%
 
 external_components:
   - source:
