@@ -113,7 +113,6 @@ class AudioPipeline {
 
   std::unique_ptr<RingBuffer> raw_file_ring_buffer_;
   std::unique_ptr<RingBuffer> decoded_ring_buffer_;
-  std::unique_ptr<RingBuffer> resampled_ring_buffer_;
 
   // Handles basic control/state of the three tasks
   EventGroupHandle_t event_group_{nullptr};
