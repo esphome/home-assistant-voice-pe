@@ -7,8 +7,10 @@ from esphome import automation, core, external_files
 from esphome.components import i2c
 from esphome.const import (
     CONF_ID,
+    CONF_ON_ERROR,
     CONF_RAW_DATA_ID,
     CONF_RESET_PIN,
+    CONF_TRIGGER_ID,
     CONF_URL,
     CONF_VERSION,
 )
@@ -19,12 +21,22 @@ DEPENDENCIES = ["i2c"]
 
 CONF_FIRMWARE = "firmware"
 CONF_MD5 = "md5"
+CONF_ON_BEGIN = "on_begin"
+CONF_ON_END = "on_end"
+CONF_ON_PROGRESS = "on_progress"
 
 DOMAIN = "voice_kit"
 
 voice_kit_ns = cg.esphome_ns.namespace("voice_kit")
 VoiceKit = voice_kit_ns.class_("VoiceKit", cg.Component, i2c.I2CDevice)
 VoiceKitFlashAction = voice_kit_ns.class_("VoiceKitFlashAction", automation.Action)
+
+DFUEndTrigger = voice_kit_ns.class_("DFUEndTrigger", automation.Trigger.template())
+DFUErrorTrigger = voice_kit_ns.class_("DFUErrorTrigger", automation.Trigger.template())
+DFUProgressTrigger = voice_kit_ns.class_(
+    "DFUProgressTrigger", automation.Trigger.template()
+)
+DFUStartTrigger = voice_kit_ns.class_("DFUStartTrigger", automation.Trigger.template())
 
 
 def _compute_local_file_path(url: str) -> Path:
@@ -64,6 +76,34 @@ CONFIG_SCHEMA = (
                     cv.Required(CONF_URL): cv.url,
                     cv.Required(CONF_VERSION): cv.version_number,
                     cv.Required(CONF_MD5): cv.All(cv.string, cv.Length(min=32, max=32)),
+                    cv.Optional(CONF_ON_BEGIN): automation.validate_automation(
+                        {
+                            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                                DFUStartTrigger
+                            ),
+                        }
+                    ),
+                    cv.Optional(CONF_ON_END): automation.validate_automation(
+                        {
+                            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                                DFUEndTrigger
+                            ),
+                        }
+                    ),
+                    cv.Optional(CONF_ON_ERROR): automation.validate_automation(
+                        {
+                            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                                DFUErrorTrigger
+                            ),
+                        }
+                    ),
+                    cv.Optional(CONF_ON_PROGRESS): automation.validate_automation(
+                        {
+                            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                                DFUProgressTrigger
+                            ),
+                        }
+                    ),
                 },
                 download_firmware,
             ),
@@ -101,9 +141,9 @@ async def to_code(config):
     pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
     cg.add(var.set_reset_pin(pin))
 
-    if CONF_FIRMWARE in config:
-        firmware_version = config[CONF_FIRMWARE][CONF_VERSION].split(".")
-        path = _compute_local_file_path(config[CONF_FIRMWARE][CONF_URL])
+    if config_fw := config[CONF_FIRMWARE]:
+        firmware_version = config_fw[CONF_VERSION].split(".")
+        path = _compute_local_file_path(config_fw[CONF_URL])
 
         try:
             with open(path, "r+b") as f:
@@ -123,3 +163,23 @@ async def to_code(config):
                 int(firmware_version[2]),
             )
         )
+
+        use_state_callback = False
+        for conf in config_fw.get(CONF_ON_BEGIN, []):
+            trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+            await automation.build_automation(trigger, [], conf)
+            use_state_callback = True
+        for conf in config_fw.get(CONF_ON_PROGRESS, []):
+            trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+            await automation.build_automation(trigger, [(float, "x")], conf)
+            use_state_callback = True
+        for conf in config_fw.get(CONF_ON_END, []):
+            trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+            await automation.build_automation(trigger, [], conf)
+            use_state_callback = True
+        for conf in config_fw.get(CONF_ON_ERROR, []):
+            trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+            await automation.build_automation(trigger, [(cg.uint8, "x")], conf)
+            use_state_callback = True
+        if use_state_callback:
+            cg.add_define("USE_VOICE_KIT_STATE_CALLBACK")
