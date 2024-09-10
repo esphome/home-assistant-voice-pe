@@ -18,17 +18,17 @@ namespace nabu {
 //  - The media stream intended for music playback
 //    - Able to duck (made quieter)
 //    - Able to pause
-//  - The annoucnement stream is intended for TTS reponses or various beeps/sound effects
+//  - The announcement stream is intended for TTS reponses or various beeps/sound effects
 //    - Unable to duck
 //    - Unable to pause
 //  - Each stream has a corresponding input ring buffer. Retrieved via the `get_media_ring_buffer` and
 //    `get_announcement_ring_buffer` functions
-//  - The mixed audio is stored in the output ring buffer. Use the `available` and `read` functions to access
+//  - The mixed audio is stored in the output ring buffer. Use the `read` function to access
 //  - The mixer runs as a FreeRTOS task
 //    - The task reports its state using the TaskEvent queue. Regularly call the  `read_event` function to obtain the
-//      state
+//      current state
 //    - Commands are sent to the task using a the CommandEvent queue. Use the `send_command` function to do so.
-//    - Use the `start` function to initiate. The `stop` function deletes the task, but be sure to send a STOP comman
+//    - Use the `start` function to initiate. The `stop` function deletes the task, but be sure to send a STOP command
 //      first to avoid memory leaks.
 
 enum class EventType : uint8_t {
