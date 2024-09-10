@@ -141,7 +141,7 @@ async def to_code(config):
     pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
     cg.add(var.set_reset_pin(pin))
 
-    if config_fw := config[CONF_FIRMWARE]:
+    if config_fw := config.get(CONF_FIRMWARE):
         firmware_version = config_fw[CONF_VERSION].split(".")
         path = _compute_local_file_path(config_fw[CONF_URL])
 
