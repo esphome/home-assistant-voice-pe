@@ -44,10 +44,6 @@ AudioResampler::~AudioResampler() {
     resampleFree(this->resampler_);
     this->resampler_ = nullptr;
   }
-
-  if (this->use_effecient_upsampler_) {
-    delete this->effecient_upsampler_;
-  }
 }
 
 esp_err_t AudioResampler::allocate_buffers_() {
@@ -103,69 +99,55 @@ esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t 
   }
 
   if (stream_info.sample_rate != target_sample_rate) {
-    // if ((target_sample_rate % stream_info.sample_rate == 0) && (stream_info.channels == 1)) {
-    //   // Integer upsampling mono samples case. Use esp-dsp optimized code
+    int flags = 0;
 
-    //   uint8_t upsampling_factor = target_sample_rate / stream_info.sample_rate;
+    resample_info.resample = true;
 
-    //   this->effecient_upsampler_ = new ESPIntegerUpsampler(upsampling_factor);
+    this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(stream_info.sample_rate);
 
-    //   resample_info.resample = true;
-    //   this->use_effecient_upsampler_ = true;
-    //   this->sample_ratio_ = upsampling_factor - 0.01f;
-    // } else
-    {
-      // Use the general, but slower, floating point polyphase resampler
+    if (this->sample_ratio_ < 1.0) {
+      this->lowpass_ratio_ -= (10.24 / 16);
 
-      int flags = 0;
-
-      resample_info.resample = true;
-
-      this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(stream_info.sample_rate);
-
-      if (this->sample_ratio_ < 1.0) {
-        this->lowpass_ratio_ -= (10.24 / 16);
-
-        if (this->lowpass_ratio_ < 0.84) {
-          this->lowpass_ratio_ = 0.84;
-        }
-
-        if (this->lowpass_ratio_ < this->sample_ratio_) {
-          // avoid discontinuities near unity sample ratios
-          this->lowpass_ratio_ = this->sample_ratio_;
-        }
-      }
-      if (this->lowpass_ratio_ * this->sample_ratio_ < 0.98 && USE_PRE_POST_FILTER) {
-        float cutoff = this->lowpass_ratio_ * this->sample_ratio_ / 2.0;
-        biquad_lowpass(&this->lowpass_coeff_, cutoff);
-        this->pre_filter_ = true;
+      if (this->lowpass_ratio_ < 0.84) {
+        this->lowpass_ratio_ = 0.84;
       }
 
-      if (this->lowpass_ratio_ / this->sample_ratio_ < 0.98 && USE_PRE_POST_FILTER && !this->pre_filter_) {
-        float cutoff = this->lowpass_ratio_ / this->sample_ratio_ / 2.0;
-        biquad_lowpass(&this->lowpass_coeff_, cutoff);
-        this->post_filter_ = true;
+      if (this->lowpass_ratio_ < this->sample_ratio_) {
+        // avoid discontinuities near unity sample ratios
+        this->lowpass_ratio_ = this->sample_ratio_;
       }
-
-      if (this->pre_filter_ || this->post_filter_) {
-        for (int i = 0; i < stream_info.channels; ++i) {
-          biquad_init(&this->lowpass_[i][0], &this->lowpass_coeff_, 1.0);
-          biquad_init(&this->lowpass_[i][1], &this->lowpass_coeff_, 1.0);
-        }
-      }
-
-      if (this->sample_ratio_ < 1.0) {
-        this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS,
-                                        this->sample_ratio_ * this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
-      } else if (this->lowpass_ratio_ < 1.0) {
-        this->resampler_ =
-            resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
-      } else {
-        this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, 1.0, flags);
-      }
-
-      resampleAdvancePosition(this->resampler_, NUM_TAPS / 2.0);
     }
+    if (this->lowpass_ratio_ * this->sample_ratio_ < 0.98 && USE_PRE_POST_FILTER) {
+      float cutoff = this->lowpass_ratio_ * this->sample_ratio_ / 2.0;
+      biquad_lowpass(&this->lowpass_coeff_, cutoff);
+      this->pre_filter_ = true;
+    }
+
+    if (this->lowpass_ratio_ / this->sample_ratio_ < 0.98 && USE_PRE_POST_FILTER && !this->pre_filter_) {
+      float cutoff = this->lowpass_ratio_ / this->sample_ratio_ / 2.0;
+      biquad_lowpass(&this->lowpass_coeff_, cutoff);
+      this->post_filter_ = true;
+    }
+
+    if (this->pre_filter_ || this->post_filter_) {
+      for (int i = 0; i < stream_info.channels; ++i) {
+        biquad_init(&this->lowpass_[i][0], &this->lowpass_coeff_, 1.0);
+        biquad_init(&this->lowpass_[i][1], &this->lowpass_coeff_, 1.0);
+      }
+    }
+
+    if (this->sample_ratio_ < 1.0) {
+      this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS,
+                                      this->sample_ratio_ * this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
+    } else if (this->lowpass_ratio_ < 1.0) {
+      this->resampler_ =
+          resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
+    } else {
+      this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, 1.0, flags);
+    }
+
+    resampleAdvancePosition(this->resampler_, NUM_TAPS / 2.0);
+
   } else {
     resample_info.resample = false;
   }
@@ -247,75 +229,62 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   }
 
   if (this->resample_info_.resample) {
-    if (this->use_effecient_upsampler_) {
-      size_t available_samples = this->input_buffer_length_ / sizeof(int16_t);
+    if (this->input_buffer_length_ > 0) {
+      // Samples are indiviudal int16 values. Frames include 1 sample for mono and 2 samples for stereo
+      // Be careful converting between bytes, samples, and frames!
+      // 1 sample = 2 bytes = sizeof(int16_t)
+      // if mono:
+      //    1 frame = 1 sample
+      // if stereo:
+      //    1 frame = 2 samples (left and right)
 
-      size_t output_samples =
-          this->effecient_upsampler_->upsample(this->input_buffer_current_, this->output_buffer_, available_samples);
+      size_t samples_read = this->input_buffer_length_ / sizeof(int16_t);
 
-      this->input_buffer_current_ += available_samples;
-      this->input_buffer_length_ -= available_samples * sizeof(int16_t);
+      for (int i = 0; i < samples_read; ++i) {
+        this->float_input_buffer_[i] = static_cast<float>(this->input_buffer_[i]) / 32768.0f;
+      }
+
+      size_t frames_read = samples_read / this->stream_info_.channels;
+
+      if (this->pre_filter_) {
+        for (int i = 0; i < this->stream_info_.channels; ++i) {
+          biquad_apply_buffer(&this->lowpass_[i][0], this->float_input_buffer_ + i, frames_read,
+                              this->stream_info_.channels);
+          biquad_apply_buffer(&this->lowpass_[i][1], this->float_input_buffer_ + i, frames_read,
+                              this->stream_info_.channels);
+        }
+      }
+
+      ResampleResult res;
+
+      res = resampleProcessInterleaved(this->resampler_, this->float_input_buffer_, frames_read,
+                                       this->float_output_buffer_,
+                                       this->internal_buffer_samples_ / this->channel_factor_, this->sample_ratio_);
+
+      size_t frames_used = res.input_used;
+      size_t samples_used = frames_used * this->stream_info_.channels;
+
+      size_t frames_generated = res.output_generated;
+      if (this->post_filter_) {
+        for (int i = 0; i < this->stream_info_.channels; ++i) {
+          biquad_apply_buffer(&this->lowpass_[i][0], this->float_output_buffer_ + i, frames_generated,
+                              this->stream_info_.channels);
+          biquad_apply_buffer(&this->lowpass_[i][1], this->float_output_buffer_ + i, frames_generated,
+                              this->stream_info_.channels);
+        }
+      }
+
+      size_t samples_generated = frames_generated * this->stream_info_.channels;
+
+      for (int i = 0; i < samples_generated; ++i) {
+        this->output_buffer_[i] = static_cast<int16_t>(this->float_output_buffer_[i] * 32767);
+      }
+
+      this->input_buffer_current_ += samples_used;
+      this->input_buffer_length_ -= samples_used * sizeof(int16_t);
 
       this->output_buffer_current_ = this->output_buffer_;
-      this->output_buffer_length_ += output_samples * sizeof(int16_t);
-    } else {
-      if (this->input_buffer_length_ > 0) {
-        // Samples are indiviudal int16 values. Frames include 1 sample for mono and 2 samples for stereo
-        // Be careful converting between bytes, samples, and frames!
-        // 1 sample = 2 bytes = sizeof(int16_t)
-        // if mono:
-        //    1 frame = 1 sample
-        // if stereo:
-        //    1 frame = 2 samples (left and right)
-
-        size_t samples_read = this->input_buffer_length_ / sizeof(int16_t);
-
-        for (int i = 0; i < samples_read; ++i) {
-          this->float_input_buffer_[i] = static_cast<float>(this->input_buffer_[i]) / 32768.0f;
-        }
-
-        size_t frames_read = samples_read / this->stream_info_.channels;
-
-        if (this->pre_filter_) {
-          for (int i = 0; i < this->stream_info_.channels; ++i) {
-            biquad_apply_buffer(&this->lowpass_[i][0], this->float_input_buffer_ + i, frames_read,
-                                this->stream_info_.channels);
-            biquad_apply_buffer(&this->lowpass_[i][1], this->float_input_buffer_ + i, frames_read,
-                                this->stream_info_.channels);
-          }
-        }
-
-        ResampleResult res;
-
-        res = resampleProcessInterleaved(this->resampler_, this->float_input_buffer_, frames_read,
-                                         this->float_output_buffer_,
-                                         this->internal_buffer_samples_ / this->channel_factor_, this->sample_ratio_);
-
-        size_t frames_used = res.input_used;
-        size_t samples_used = frames_used * this->stream_info_.channels;
-
-        size_t frames_generated = res.output_generated;
-        if (this->post_filter_) {
-          for (int i = 0; i < this->stream_info_.channels; ++i) {
-            biquad_apply_buffer(&this->lowpass_[i][0], this->float_output_buffer_ + i, frames_generated,
-                                this->stream_info_.channels);
-            biquad_apply_buffer(&this->lowpass_[i][1], this->float_output_buffer_ + i, frames_generated,
-                                this->stream_info_.channels);
-          }
-        }
-
-        size_t samples_generated = frames_generated * this->stream_info_.channels;
-
-        for (int i = 0; i < samples_generated; ++i) {
-          this->output_buffer_[i] = static_cast<int16_t>(this->float_output_buffer_[i] * 32767);
-        }
-
-        this->input_buffer_current_ += samples_used;
-        this->input_buffer_length_ -= samples_used * sizeof(int16_t);
-
-        this->output_buffer_current_ = this->output_buffer_;
-        this->output_buffer_length_ += samples_generated * sizeof(int16_t);
-      }
+      this->output_buffer_length_ += samples_generated * sizeof(int16_t);
     }
   } else {
     size_t bytes_to_transfer =
@@ -339,57 +308,6 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
     this->output_buffer_length_ *= 2;  // double the bytes for stereo samples
   }
   return AudioResamplerState::RESAMPLING;
-}
-
-int16_t ESPIntegerUpsampler::float_to_q15_(float q, uint32_t shift) { return (int16_t) (q * pow(2, 15 + shift)); }
-
-int8_t ESPIntegerUpsampler::generate_q15_fir_coefficients_(int16_t *fir_coeffs, const unsigned int fir_len,
-                                                           const float ft) {
-  // Even or odd length of the FIR filter
-  const bool is_odd = (fir_len % 2) ? (true) : (false);
-  const float fir_order = (float) (fir_len - 1);
-
-  // Window coefficients
-  float *fir_window = (float *) malloc(fir_len * sizeof(float));
-  dsps_wind_blackman_harris_f32(fir_window, fir_len);
-
-  float *float_coeffs = (float *) malloc(fir_len * sizeof(float));
-
-  float max_coeff = 0.0;
-  float min_coeff = 0.0;
-  for (int i = 0; i < fir_len; i++) {
-    if ((i == fir_order / 2) && (is_odd)) {
-      float_coeffs[i] = 2 * ft;
-    } else {
-      float_coeffs[i] = sinf((2 * M_PI * ft * (i - fir_order / 2))) / (M_PI * (i - fir_order / 2));
-    }
-
-    float_coeffs[i] *= fir_window[i];
-    if (float_coeffs[i] > max_coeff) {
-      max_coeff = float_coeffs[i];
-    }
-    if (float_coeffs[i] < min_coeff) {
-      min_coeff = float_coeffs[i];
-    }
-  }
-
-  float max_abs_coeffs = fmaxf(fabsf(min_coeff), max_coeff);
-
-  int32_t shift = 0;
-  for (int i = 1; i < 15; ++i) {
-    if (max_abs_coeffs < pow(2, -i)) {
-      ++shift;
-    }
-  }
-
-  for (int i = 0; i < fir_len; ++i) {
-    fir_coeffs[i] = float_to_q15_(float_coeffs[i], shift);
-  }
-
-  free(fir_window);
-  free(float_coeffs);
-
-  return shift;
 }
 
 }  // namespace nabu
