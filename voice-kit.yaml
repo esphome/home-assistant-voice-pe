@@ -1194,6 +1194,10 @@ media_player:
 
 voice_kit:
   reset_pin: GPIO4
+  firmware:
+    url: https://github.com/esphome/voice-kit-xmos-firmware/releases/download/v1.2.0/ffva_v1.2.0_upgrade.bin
+    version: "1.2.0"
+    md5: 912b84ea15df4a0081e39ffd9740b884
 
 external_components:
   - source:
