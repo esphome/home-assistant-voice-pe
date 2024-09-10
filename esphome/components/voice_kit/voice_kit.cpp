@@ -26,7 +26,9 @@ void VoiceKit::setup() {
       ESP_LOGE(TAG, "Communication with Voice Kit failed");
       this->mark_failed();
     } else if (!this->versions_match_() && this->firmware_bin_is_valid_()) {
-      ESP_LOGW(TAG, "XMOS firmware version is incorrect -- updating...");
+      ESP_LOGW(TAG, "Expected XMOS version: %u.%u.%u; found: %u.%u.%u. Updating...", this->firmware_bin_version_major_,
+               this->firmware_bin_version_minor_, this->firmware_bin_version_patch_, this->firmware_version_major_,
+               this->firmware_version_minor_, this->firmware_version_patch_);
       this->start_dfu_update();
     }
   });
@@ -54,6 +56,10 @@ void VoiceKit::loop() {
     case UPDATE_TIMEOUT:
     case UPDATE_FAILED:
     case UPDATE_BAD_STATE:
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+      this->state_callback_.call(DFU_ERROR, this->bytes_written_ * 100.0f / this->firmware_bin_length_,
+                                 this->dfu_update_status_);
+#endif
       this->mark_failed();
       break;
 
@@ -70,6 +76,9 @@ void VoiceKit::start_dfu_update() {
 
   ESP_LOGI(TAG, "Starting update from %u.%u.%u...", this->firmware_version_major_, this->firmware_version_minor_,
            this->firmware_version_patch_);
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+  this->state_callback_.call(DFU_START, 0, UPDATE_OK);
+#endif
 
   if (!this->dfu_set_alternate_()) {
     ESP_LOGE(TAG, "Set alternate request failed");
@@ -120,6 +129,9 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
       this->last_progress_ = now;
       float percentage = this->bytes_written_ * 100.0f / this->firmware_bin_length_;
       ESP_LOGD(TAG, "Progress: %0.1f%%", percentage);
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+      this->state_callback_.call(DFU_IN_PROGRESS, percentage, UPDATE_IN_PROGRESS);
+#endif
     }
     return UPDATE_IN_PROGRESS;
   } else {  // writing the main payload is done; work out what to do next
@@ -161,9 +173,11 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
         if (!this->versions_match_()) {
           ESP_LOGE(TAG, "Update failed");
           return UPDATE_FAILED;
-        } else {
-          ESP_LOGI(TAG, "Update complete");
         }
+        ESP_LOGI(TAG, "Update complete");
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+        this->state_callback_.call(DFU_COMPLETE, 100.0f, UPDATE_OK);
+#endif
         return UPDATE_OK;
 
       default:

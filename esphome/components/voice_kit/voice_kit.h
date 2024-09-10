@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/components/i2c/i2c.h"
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
@@ -89,6 +90,13 @@ enum DfuCommands : uint8_t {
   DFU_CONTROLLER_SERVICER_RESID_DFU_REBOOT = 89,
 };
 
+enum DFUAutomationState {
+  DFU_COMPLETE = 0,
+  DFU_START,
+  DFU_IN_PROGRESS,
+  DFU_ERROR,
+};
+
 class VoiceKit : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
@@ -96,9 +104,14 @@ class VoiceKit : public Component, public i2c::I2CDevice {
     return this->is_failed() || (this->version_read_() && (this->versions_match_() || !this->firmware_bin_is_valid_()));
   }
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::IO; }
+  float get_setup_priority() const override { return setup_priority::HARDWARE - 1; }
   void loop() override;
 
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+  void add_on_state_callback(std::function<void(DFUAutomationState, float, VoiceKitUpdaterStatus)> &&callback) {
+    this->state_callback_.add(std::move(callback));
+  }
+#endif
   void set_reset_pin(GPIOPin *reset_pin) { reset_pin_ = reset_pin; }
 
   void set_firmware_bin(const uint8_t *data, const uint32_t len) {
@@ -114,6 +127,9 @@ class VoiceKit : public Component, public i2c::I2CDevice {
   void start_dfu_update();
 
  protected:
+#ifdef USE_VOICE_KIT_STATE_CALLBACK
+  CallbackManager<void(DFUAutomationState, float, VoiceKitUpdaterStatus)> state_callback_{};
+#endif
   VoiceKitUpdaterStatus dfu_update_send_block_();
   uint32_t load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t offset);
   bool firmware_bin_is_valid_() { return this->firmware_bin_ != nullptr && this->firmware_bin_length_; }
