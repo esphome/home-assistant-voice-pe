@@ -250,18 +250,12 @@ void AudioMixer::audio_mixer_task_(void *params) {
                                                             samples_read);
 
             combination_buffer_length = samples_read * sizeof(int16_t);
-            // output_bytes_written = this_mixer->output_ring_buffer_->write((void *) combination_buffer,
-            // bytes_to_read);
           } else if (media_bytes_read > 0) {
             memcpy(combination_buffer, media_buffer, media_bytes_read);
             combination_buffer_length = media_bytes_read;
-            // output_bytes_written = this_mixer->output_ring_buffer_->write((void *) media_buffer, media_bytes_read);
-
           } else if (announcement_bytes_read > 0) {
             memcpy(combination_buffer, announcement_buffer, announcement_bytes_read);
             combination_buffer_length = announcement_bytes_read;
-            // output_bytes_written =
-            //     this_mixer->output_ring_buffer_->write((void *) announcement_buffer, announcement_bytes_read);
           }
 
           size_t samples_written = combination_buffer_length / sizeof(int16_t);
@@ -373,8 +367,6 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
 
   if (q15_scaling_factor < MAX_AUDIO_SAMPLE_VALUE) {
     // Need to scale to avoid clipping
-
-    printf("scaling media stream to avoid clipping\n");
 
     this->scale_audio_samples_(media_buffer, media_buffer, q15_scaling_factor, samples_to_mix);
 

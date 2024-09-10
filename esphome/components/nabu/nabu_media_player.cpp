@@ -5,11 +5,6 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "sdkconfig.h"
-
 #include "esp_dsp.h"
 
 #ifdef USE_OTA
@@ -20,7 +15,6 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
@@ -29,6 +23,7 @@ namespace nabu {
 // Framework:
 //  - Media player that can handle two streams; one for media and one for announcements
 //    - If played together, they are mixed with the announcement stream staying at full volume
+//    - The media audio is scaled, if necessary, to avoid clipping when mixing an announcement stream
 //    - The media audio can be further ducked via the ``set_ducking_reduction`` function
 //  - Each stream is handled by an ``AudioPipeline`` object with three parts/tasks
 //    - ``AudioReader`` handles reading from an HTTP source or from a PROGMEM flash set at compile time
@@ -38,7 +33,7 @@ namespace nabu {
 //      - MP3 (based on the libhelix decoder - a random mp3 file may be incompatible)
 //    - ``AudioResampler`` handles converting the sample rate to the configured output sample rate and converting mono
 //      to stereo
-//      - The quality is not good, and it is slow! Please send audio at the configured sample rate to avoid these issues
+//      - The quality is not good, and it is slow! Please use audio at the configured sample rate to avoid these issues
 //    - Each task will always run once started, but they will not doing anything until they are needed
 //    - FreeRTOS Event Groups make up the inter-task communication
 //    - The ``AudioPipeline`` sets up an output ring buffer for the Reader and Decoder parts. The next part/task
@@ -54,8 +49,8 @@ namespace nabu {
 //  - Media player commands are received by the ``control`` function. The commands are added to the
 //    ``media_control_command_queue_`` to be processed in the component's loop
 //    - Starting a stream intializes the appropriate pipeline or stops it if it is already running
-//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. They communicate
-//      directly with the DAC over I2C.
+//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. Volume changes use
+//      an ``audio_dac`` component if configured. If one isn't, software volume control is used.
 //      - Volume commands are ignored if the media control queue is full to avoid crashing when the track wheel is spun
 //      fast
 //    - Pausing is sent to the ``AudioMixer`` task. It only effects the media stream.
@@ -87,124 +82,9 @@ enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_STOP = (1 << 1),   // stops the main task
 };
 
-#define STATS_TASK_PRIO 3
-#define STATS_TICKS pdMS_TO_TICKS(5000)
-#define ARRAY_SIZE_OFFSET 5  // Increase this if print_real_time_stats returns ESP_ERR_INVALID_SIZE
-#define configRUN_TIME_COUNTER_TYPE uint32_t
-#define CONFIG_FREERTOS_NUMBER_OF_CORES 2
-static esp_err_t print_real_time_stats(TickType_t xTicksToWait) {
-  TaskStatus_t *start_array = NULL, *end_array = NULL;
-  UBaseType_t start_array_size, end_array_size;
-  configRUN_TIME_COUNTER_TYPE start_run_time, end_run_time;
-  esp_err_t ret;
-
-  // Allocate array to store current task states
-  start_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
-  size_t size = start_array_size * sizeof(TaskStatus_t);
-  start_array = static_cast<TaskStatus_t *>(malloc(size));
-  if (start_array == NULL) {
-    ret = ESP_ERR_NO_MEM;
-    free(start_array);
-    free(end_array);
-    return ret;
-  }
-  // Get current task states
-  start_array_size = uxTaskGetSystemState(start_array, start_array_size, &start_run_time);
-  if (start_array_size == 0) {
-    ret = ESP_ERR_INVALID_SIZE;
-    free(start_array);
-    free(end_array);
-    return ret;
-  }
-
-  vTaskDelay(xTicksToWait);
-
-  // Allocate array to store tasks states post delay
-  end_array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
-  end_array = static_cast<TaskStatus_t *>(malloc(sizeof(TaskStatus_t) * end_array_size));
-  if (end_array == NULL) {
-    ret = ESP_ERR_NO_MEM;
-    free(start_array);
-    free(end_array);
-    return ret;
-  }
-  // Get post delay task states
-  end_array_size = uxTaskGetSystemState(end_array, end_array_size, &end_run_time);
-  if (end_array_size == 0) {
-    ret = ESP_ERR_INVALID_SIZE;
-    free(start_array);
-    free(end_array);
-    return ret;
-  }
-
-  // Calculate total_elapsed_time in units of run time stats clock period.
-  uint32_t total_elapsed_time = (end_run_time - start_run_time);
-  if (total_elapsed_time == 0) {
-    ret = ESP_ERR_INVALID_STATE;
-    free(start_array);
-    free(end_array);
-    return ret;
-  }
-
-  printf("| Task | Run Time | Percentage\n");
-  // Match each task in start_array to those in the end_array
-  for (int i = 0; i < start_array_size; i++) {
-    int k = -1;
-    for (int j = 0; j < end_array_size; j++) {
-      if (start_array[i].xHandle == end_array[j].xHandle) {
-        k = j;
-        // Mark that task have been matched by overwriting their handles
-        start_array[i].xHandle = NULL;
-        end_array[j].xHandle = NULL;
-        break;
-      }
-    }
-    // Check if matching task found
-    if (k >= 0) {
-      uint32_t task_elapsed_time = end_array[k].ulRunTimeCounter - start_array[i].ulRunTimeCounter;
-      uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time * CONFIG_FREERTOS_NUMBER_OF_CORES);
-      printf("| %s | %" PRIu32 " | %" PRIu32 "%%\n", start_array[i].pcTaskName, task_elapsed_time, percentage_time);
-    }
-  }
-
-  // Print unmatched tasks
-  for (int i = 0; i < start_array_size; i++) {
-    if (start_array[i].xHandle != NULL) {
-      printf("| %s | Deleted\n", start_array[i].pcTaskName);
-    }
-  }
-  for (int i = 0; i < end_array_size; i++) {
-    if (end_array[i].xHandle != NULL) {
-      printf("| %s | Created\n", end_array[i].pcTaskName);
-    }
-  }
-  ret = ESP_OK;
-
-  // exit:  // Common return path
-  free(start_array);
-  free(end_array);
-  return ret;
-}
-
-static void stats_task(void *arg) {
-  // Print real time stats periodically
-  while (1) {
-    printf("\n\nGetting real time stats over %" PRIu32 " ticks\n", STATS_TICKS);
-    esp_err_t err = print_real_time_stats(STATS_TICKS);
-    if (err == ESP_OK) {
-      printf("Real time stats obtained\n");
-    } else {
-      printf("Error getting real time stats\n");
-      printf("Error: %s", esp_err_to_name(err));
-    }
-  }
-}
-
 static const char *const TAG = "nabu_media_player";
 
 void NabuMediaPlayer::setup() {
-  // xTaskCreatePinnedToCore(stats_task, "stats", 4096, NULL, STATS_TASK_PRIO, NULL, tskNO_AFFINITY);
-
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
   this->media_control_command_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(MediaCallCommand));

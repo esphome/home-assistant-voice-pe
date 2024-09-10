@@ -96,11 +96,7 @@ esp_err_t AudioPipeline::allocate_buffers_() {
   if (this->decoded_ring_buffer_ == nullptr)
     this->decoded_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
 
-  if (this->resampled_ring_buffer_ == nullptr)
-    this->resampled_ring_buffer_ = RingBuffer::create(BUFFER_SIZE_BYTES);
-
-  if ((this->raw_file_ring_buffer_ == nullptr) || (this->decoded_ring_buffer_ == nullptr) ||
-      (this->resampled_ring_buffer_ == nullptr)) {
+  if ((this->raw_file_ring_buffer_ == nullptr) || (this->decoded_ring_buffer_ == nullptr)) {
     return ESP_ERR_NO_MEM;
   }
 
@@ -266,7 +262,6 @@ esp_err_t AudioPipeline::stop() {
 void AudioPipeline::reset_ring_buffers() {
   this->raw_file_ring_buffer_->reset();
   this->decoded_ring_buffer_->reset();
-  this->resampled_ring_buffer_->reset();
 }
 
 void AudioPipeline::suspend_tasks() {

@@ -63,11 +63,13 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   /// @param duration (float) The duration (in seconds) for transitioning to the new ducking level
   void set_ducking_reduction(uint8_t decibel_reduction, float duration);
 
+  // I2S configuration
   void set_i2s_mode(i2s_mode_t mode) { this->i2s_mode_ = mode; }
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = pin; }
   void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
 
+  // Percentage to increase or decrease the volume for volume up or volume down commands
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
 
 #ifdef USE_AUDIO_DAC
@@ -96,12 +98,6 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 
   esp_err_t start_i2s_driver_();
 
-  optional<std::string> media_url_{};                        // only modified by control function
-  optional<std::string> announcement_url_{};                 // only modified by control function
-  optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
-  optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
-  QueueHandle_t media_control_command_queue_;
-
   // Reads commands from media_control_command_queue_. Starts pipelines and mixer if necessary.
   void watch_media_commands_();
 
@@ -125,6 +121,13 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
 
+  optional<std::string> media_url_{};                        // only modified by control function
+  optional<std::string> announcement_url_{};                 // only modified by control function
+  optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
+  optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
+  
+  QueueHandle_t media_control_command_queue_;
+
   i2s_bits_per_sample_t bits_per_sample_;
   i2s_mode_t i2s_mode_{};
   uint32_t sample_rate_;
@@ -142,7 +145,7 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 
   int16_t software_volume_scale_factor_;  // Q15 fixed point scale factor
 
-  // Used to save volume/mute state for restoration
+  // Used to save volume/mute state for restoration on reboot
   ESPPreferenceObject pref_;
 
   Trigger<> *mute_trigger_ = new Trigger<>();
