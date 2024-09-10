@@ -20,7 +20,6 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
-//  - Cleanup AudioResampler code (remove or refactor the esp_dsp fir filter)
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
@@ -29,6 +28,7 @@ namespace nabu {
 // Framework:
 //  - Media player that can handle two streams; one for media and one for announcements
 //    - If played together, they are mixed with the announcement stream staying at full volume
+//    - The media audio is scaled, if necessary, to avoid clipping when mixing an announcement stream
 //    - The media audio can be further ducked via the ``set_ducking_reduction`` function
 //  - Each stream is handled by an ``AudioPipeline`` object with three parts/tasks
 //    - ``AudioReader`` handles reading from an HTTP source or from a PROGMEM flash set at compile time
@@ -38,7 +38,7 @@ namespace nabu {
 //      - MP3 (based on the libhelix decoder - a random mp3 file may be incompatible)
 //    - ``AudioResampler`` handles converting the sample rate to the configured output sample rate and converting mono
 //      to stereo
-//      - The quality is not good, and it is slow! Please send audio at the configured sample rate to avoid these issues
+//      - The quality is not good, and it is slow! Please use audio at the configured sample rate to avoid these issues
 //    - Each task will always run once started, but they will not doing anything until they are needed
 //    - FreeRTOS Event Groups make up the inter-task communication
 //    - The ``AudioPipeline`` sets up an output ring buffer for the Reader and Decoder parts. The next part/task
@@ -54,8 +54,8 @@ namespace nabu {
 //  - Media player commands are received by the ``control`` function. The commands are added to the
 //    ``media_control_command_queue_`` to be processed in the component's loop
 //    - Starting a stream intializes the appropriate pipeline or stops it if it is already running
-//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. They communicate
-//      directly with the DAC over I2C.
+//    - Volume and mute commands are achieved by the ``mute``, ``unmute``, ``set_volume`` functions. Volume changes use
+//      an ``audio_dac`` component if configured. If one isn't, software volume control is used.
 //      - Volume commands are ignored if the media control queue is full to avoid crashing when the track wheel is spun
 //      fast
 //    - Pausing is sent to the ``AudioMixer`` task. It only effects the media stream.
