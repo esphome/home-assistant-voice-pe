@@ -50,6 +50,8 @@ CONF_SLIDING_WINDOW_AVERAGE_SIZE = "sliding_window_average_size"
 CONF_SLIDING_WINDOW_SIZE = "sliding_window_size"
 CONF_TENSOR_ARENA_SIZE = "tensor_arena_size"
 CONF_VAD = "vad"
+CONF_UPLOAD_HOST = "upload_host"
+CONF_UPLOAD_PORT = "upload_port"
 
 TYPE_HTTP = "http"
 
@@ -368,6 +370,8 @@ CONFIG_SCHEMA = cv.All(
                 single=True
             ),
             cv.Optional(CONF_VAD): _maybe_empty_vad_schema,
+            cv.Required(CONF_UPLOAD_HOST): cv.string_strict,
+            cv.Optional(CONF_UPLOAD_PORT, default=11223): cv.port,
             cv.Optional(CONF_MODEL): cv.invalid(
                 f"The {CONF_MODEL} parameter has moved to be a list element under the {CONF_MODELS} parameter."
             ),
@@ -515,6 +519,8 @@ async def to_code(config):
 
             cg.add(var.add_wake_word_model(wake_word_model))
 
+    cg.add(var.set_upload_hostname(config[CONF_UPLOAD_HOST]))
+    cg.add(var.set_upload_port(config[CONF_UPLOAD_PORT]))
     cg.add(var.set_features_step_size(manifest[KEY_MICRO][CONF_FEATURE_STEP_SIZE]))
     cg.add_library("kahrendt/ESPMicroSpeechFeatures", "1.1.0")
 
