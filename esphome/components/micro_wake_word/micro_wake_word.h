@@ -10,6 +10,9 @@
 
 // TODO: remove before production
 #include "esphome/core/ring_buffer.h"
+#include <esp_http_client.h>
+#include <string>
+#include <sstream>
 
 #include "esphome/components/microphone/microphone.h"
 
@@ -66,12 +69,25 @@ class MicroWakeWord : public Component {
 
   // TODO: Remove before production
   void set_upload_status(bool upload_status) { this->upload_status_ = upload_status; }
+  void set_upload_hostname(std::string hostname) { this->upload_hostname_ = hostname; }
+  void set_upload_port(int port) { this->upload_port_ = port; }
+  const char *get_upload_url() {
+    std::stringstream ss;
+    ss.str("");
+    ss << "http://" << this->upload_hostname_ << ":" << this->upload_port_ << "/upload";
+    this->upload_url_ = ss.str();
+    return this->upload_url_.c_str();
+  }
 
  protected:
   // TODO: Remove before production!
   std::unique_ptr<RingBuffer> sample_ring_buffer_;
   bool upload_status_{false};
-
+  esp_http_client_handle_t client_{nullptr};
+  int16_t *sample_buffer_{nullptr};
+  std::string upload_hostname_;
+  int upload_port_;
+  std::string upload_url_{""};
 
   microphone::Microphone *microphone_{nullptr};
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();

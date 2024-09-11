@@ -43,7 +43,6 @@ static const UBaseType_t INFERENCE_TASK_PRIORITY = 3;
 static const size_t SAMPLE_RING_BUFFER_TOTAL_SAMPLES = 4 * 16000;  // 4 seconds of pcm audio at 16 kHz
 static const size_t SAMPLE_RING_BUFFER_UPLOAD_DELAY_MS = 500;
 
-
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
 
@@ -118,6 +117,8 @@ void MicroWakeWord::setup() {
     this->mark_failed();
     return;
   }
+  ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+  this->sample_buffer_ = int16_allocator.allocate(SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
 
   ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
 
@@ -365,16 +366,45 @@ void MicroWakeWord::loop() {
       if (this->upload_status_) {
         // Wait 200 ms before sending the sample
         this->set_timeout(SAMPLE_RING_BUFFER_UPLOAD_DELAY_MS, [this]() {
-          ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-          int16_t *samples_buffer = int16_allocator.allocate(SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
+          const char *url = this->get_upload_url();
 
-          size_t bytes_read = this->sample_ring_buffer_->read((void *) samples_buffer,
+          size_t bytes_read = this->sample_ring_buffer_->read((void *) this->sample_buffer_,
                                                               SAMPLE_RING_BUFFER_TOTAL_SAMPLES * sizeof(int16_t));
 
-          // TODO: upload `bytes_read` bytes in the samples_buffer
-          ESP_LOGD(TAG, "Sending sample with %d bytes", bytes_read);
+          ESP_LOGD(TAG, "Uploading audio to %s", url);
 
-          int16_allocator.deallocate(samples_buffer, SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
+          if (this->client_ != nullptr) {
+            esp_http_client_cleanup(this->client_);
+            this->client_ = nullptr;
+          }
+          esp_http_client_config_t config = {
+              .url = url, .cert_pem = nullptr, .disable_auto_redirect = false, .max_redirection_count = 10,
+              // .is_async = true,
+          };
+          this->client_ = esp_http_client_init(&config);
+
+          ESP_LOGD(TAG, "Uploading %d byte(s)", bytes_read);
+
+          // stringify payload size
+          std::stringstream ss;
+          ss << bytes_read;
+
+          esp_http_client_set_method(this->client_, HTTP_METHOD_POST);
+          esp_http_client_set_header(this->client_, "Content-Type", "application/octet-stream");
+          esp_http_client_set_header(this->client_, "Content-Length", ss.str().c_str());
+          esp_http_client_set_post_field(this->client_, (const char *) this->sample_buffer_, bytes_read);
+
+          this->set_retry("upload", 15, 15, [this](const uint8_t remaining_attempts) {
+            esp_err_t err = esp_http_client_perform(this->client_);
+            if (err == ESP_ERR_HTTP_EAGAIN) {
+              ESP_LOGD(TAG, "Uploading...");
+              return RetryResult::RETRY;
+            } else {
+              esp_http_client_cleanup(this->client_);
+              this->client_ = nullptr;
+              return RetryResult::DONE;
+            }
+          });
         });
       }
 
