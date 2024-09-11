@@ -23,8 +23,11 @@ esphome:
   platformio_options:
     board_build.flash_mode: dio
   on_boot:
-    priority: 600
+    priority: 375
     then:
+      # Run the script to refresh the LED status
+      - script.execute: control_leds
+      - delay: 1s
       # TODO: make it internal before launch
       - switch.turn_on: internal_speaker_amp
       # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
@@ -35,8 +38,6 @@ esphome:
             - switch.template.publish:
                 id: master_mute_switch
                 state: ON
-      # Run the script to refresh the LED status
-      - script.execute: control_leds
       # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
       - delay: 10min
       - if:
@@ -214,6 +215,7 @@ switch:
     id: internal_speaker_amp
     name: "Internal speaker amp"
     entity_category: config
+    restore_mode: ALWAYS_OFF
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
