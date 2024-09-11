@@ -40,7 +40,9 @@ static const UBaseType_t PREPROCESSOR_TASK_PRIORITY = 3;
 static const UBaseType_t INFERENCE_TASK_PRIORITY = 3;
 
 // TODO: Remove before production
-static const size_t SAMPLE_RING_BUFFER_TOTAL_SAMPLES = 3 * 16000;  // 3 seconds of pcm audio at 16 kHz
+static const size_t SAMPLE_RING_BUFFER_TOTAL_SAMPLES = 4 * 16000;  // 4 seconds of pcm audio at 16 kHz
+static const size_t SAMPLE_RING_BUFFER_UPLOAD_DELAY_MS = 500;
+
 
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
@@ -362,7 +364,7 @@ void MicroWakeWord::loop() {
 
       if (this->upload_status_) {
         // Wait 200 ms before sending the sample
-        this->set_timeout(200, [this]() {
+        this->set_timeout(SAMPLE_RING_BUFFER_UPLOAD_DELAY_MS, [this]() {
           ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
           int16_t *samples_buffer = int16_allocator.allocate(SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
 
