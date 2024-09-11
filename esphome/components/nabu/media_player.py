@@ -24,7 +24,7 @@ from esphome.core import HexInt, CORE
 
 
 from esphome.components.i2s_audio import (
-    BITS_PER_SAMPLE,
+    I2S_BITS_PER_SAMPLE,
     CONF_BITS_PER_SAMPLE,
     CONF_I2S_MODE,
     CONF_PRIMARY,
@@ -195,7 +195,7 @@ CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
         ),
         cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
         cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
-            _validate_bits, cv.enum(BITS_PER_SAMPLE)
+            _validate_bits, cv.enum(I2S_BITS_PER_SAMPLE)
         ),
         cv.Optional(CONF_VOLUME_INCREMENT, default=0.05): cv.percentage,
         cv.Optional(CONF_FILES): cv.ensure_list(MEDIA_FILE_TYPE_SCHEMA),

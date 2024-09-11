@@ -7,13 +7,12 @@ from esphome.components import microphone, esp32
 from esphome.components.adc import ESP32_VARIANT_ADC1_PIN_TO_CHANNEL, validate_adc_pin
 
 from esphome.components.i2s_audio import (
-    # i2s_audio_ns,
     I2SAudioComponent,
     I2SAudioIn,
     CONF_I2S_MODE,
     CONF_PRIMARY,
     I2S_MODE_OPTIONS,
-    BITS_PER_SAMPLE,
+    I2S_BITS_PER_SAMPLE,
     CONF_BITS_PER_SAMPLE,
     CONF_I2S_AUDIO_ID,
     CONF_I2S_DIN_PIN,
@@ -69,7 +68,7 @@ BASE_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
         cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
         cv.Optional(CONF_BITS_PER_SAMPLE, default="32bit"): cv.All(
-            _validate_bits, cv.enum(BITS_PER_SAMPLE)
+            _validate_bits, cv.enum(I2S_BITS_PER_SAMPLE)
         ),
         cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.enum(
             I2S_MODE_OPTIONS, lower=True
