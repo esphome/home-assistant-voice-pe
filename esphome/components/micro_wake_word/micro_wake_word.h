@@ -8,6 +8,9 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 
+// TODO: remove before production
+#include "esphome/core/ring_buffer.h"
+
 #include "esphome/components/microphone/microphone.h"
 
 #include <frontend_util.h>
@@ -61,7 +64,15 @@ class MicroWakeWord : public Component {
   // TODO: Should this logic be in the voice_assistant component?
   void enable_wake_words(std::vector<std::string> &wake_words_to_enable);
 
+  // TODO: Remove before production
+  void set_upload_status(bool upload_status) { this->upload_status_ = upload_status; }
+
  protected:
+  // TODO: Remove before production!
+  std::unique_ptr<RingBuffer> sample_ring_buffer_;
+  bool upload_status_{false};
+
+
   microphone::Microphone *microphone_{nullptr};
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
   State state_{State::IDLE};

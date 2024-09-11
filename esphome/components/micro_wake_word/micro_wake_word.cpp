@@ -39,6 +39,9 @@ static const uint32_t INFERENCE_TASK_STACK_SIZE = 3072;
 static const UBaseType_t PREPROCESSOR_TASK_PRIORITY = 3;
 static const UBaseType_t INFERENCE_TASK_PRIORITY = 3;
 
+// TODO: Remove before production
+static const size_t SAMPLE_RING_BUFFER_TOTAL_SAMPLES = 3 * 16000;  // 3 seconds of pcm audio at 16 kHz
+
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Stops all activity in the mWW tasks
 
@@ -106,6 +109,14 @@ void MicroWakeWord::setup() {
   this->preprocessor_task_stack_buffer_ = (StackType_t *) malloc(PREPROCESSOR_TASK_STACK_SIZE);
   this->inference_task_stack_buffer_ = (StackType_t *) malloc(INFERENCE_TASK_STACK_SIZE);
 
+  // TODO: Do not include in production
+  this->sample_ring_buffer_ = RingBuffer::create(SAMPLE_RING_BUFFER_TOTAL_SAMPLES * sizeof(int16_t));
+  if (this->sample_ring_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Could not allocate sample ring buffer");
+    this->mark_failed();
+    return;
+  }
+
   ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
 
 #ifdef USE_OTA
@@ -168,6 +179,8 @@ void MicroWakeWord::preprocessor_task_(void *params) {
           // This shouldn't ever happen, but if we somehow don't have enough samples, just drop this frame
           continue;
         }
+
+        this_mww->sample_ring_buffer_->write((void *) audio_buffer, new_samples_to_read * sizeof(int16_t));
 
         size_t num_samples_processed;
         struct FrontendOutput frontend_output = FrontendProcessSamples(&this_mww->frontend_state_, audio_buffer,
@@ -346,6 +359,29 @@ void MicroWakeWord::loop() {
                detection_event.wake_word->c_str(), (detection_event.average_probability / uint8_to_float_divisor),
                (detection_event.max_probability / uint8_to_float_divisor));
       this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
+
+      if (this->upload_status_) {
+        // Wait 200 ms before sending the sample
+        this->set_timeout(200, [this]() {
+          ExternalRAMAllocator<int16_t> int16_allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+          int16_t *samples_buffer = int16_allocator.allocate(SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
+
+          size_t bytes_read = this->sample_ring_buffer_->read((void *) samples_buffer,
+                                                              SAMPLE_RING_BUFFER_TOTAL_SAMPLES * sizeof(int16_t));
+
+          // TODO: upload `bytes_read` bytes in the samples_buffer
+          ESP_LOGD(TAG, "Sending sample with %d bytes", bytes_read);
+
+          int16_allocator.deallocate(samples_buffer, SAMPLE_RING_BUFFER_TOTAL_SAMPLES);
+        });
+      }
+
+#ifdef USE_VOICE_ASSISTANT
+      // TODO: potentially remove, as it currently only logs in the voice assistant component
+      if (voice_assistant::global_voice_assistant != nullptr) {
+        voice_assistant::global_voice_assistant->on_wake_word(detection_event);
+      }
+#endif
     }
   }
 }
