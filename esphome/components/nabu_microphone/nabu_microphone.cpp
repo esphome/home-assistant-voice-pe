@@ -272,8 +272,8 @@ void NabuMicrophone::read_task_(void *params) {
               const size_t frames_read =
                   samples_read / NUMBER_OF_CHANNELS;  // Left and right channel samples combine into 1 frame
 
-              const uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
-              const uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
+              const uint8_t channel_1_shift = 16 - this_microphone->channel_1_->get_amplify_shift();
+              const uint8_t channel_2_shift = 16 - this_microphone->channel_2_->get_amplify_shift();
 
               for (size_t i = 0; i < frames_read; i++) {
                 int32_t channel_1_sample = 0;

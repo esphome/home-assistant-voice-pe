@@ -124,14 +124,14 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
 
   RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
 
-  void set_amplify(bool amplify) { this->amplify_ = amplify; }
-  bool get_amplify() { return this->amplify_; }
+  void set_amplify_shift(uint8_t amplify_shift) { this->amplify_shift_ = amplify_shift; }
+  uint8_t get_amplify_shift() { return this->amplify_shift_; }
 
  protected:
   NabuMicrophone *parent_;
   std::unique_ptr<RingBuffer> ring_buffer_;
 
-  bool amplify_;
+  uint8_t amplify_shift_;
   bool is_muted_;
   bool requested_stop_;
 };
