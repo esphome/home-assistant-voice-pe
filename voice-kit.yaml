@@ -1207,7 +1207,6 @@ external_components:
     components:
       - aic3204
       - audio_dac
-      - i2s_audio
       - media_player
       - micro_wake_word
       - microphone
