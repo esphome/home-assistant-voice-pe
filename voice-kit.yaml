@@ -1261,7 +1261,6 @@ media_player:
       - id: easter_egg_tada_sound
         file: sounds/easter_egg_tada.mp3
 
-
 voice_kit:
   reset_pin: GPIO4
   firmware:
