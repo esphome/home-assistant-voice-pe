@@ -207,6 +207,7 @@ switch:
     on_turn_on:
       - nabu.set_ducking:
           decibel_reduction: 20
+          duration: 0.0s
       - script.execute: ring_timer
       - script.execute: control_leds
       - delay: 15min
@@ -1227,6 +1228,23 @@ media_player:
       - script.execute: control_leds
     on_volume:
       - script.execute: control_leds
+    on_announcement:
+      - nabu.set_ducking:
+          decibel_reduction: 20
+          duration: 0.0s
+    on_state:
+      if:
+        condition:
+          and:
+            - switch.is_off: timer_ringing
+            - not:
+                voice_assistant.is_running:
+            - not:
+                lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+        then:
+          - nabu.set_ducking:
+              decibel_reduction: 0
+              duration: 1.0s
     files:
       - id: center_button_press_sound
         file: sounds/center_button_press.flac
