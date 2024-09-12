@@ -212,13 +212,13 @@ switch:
       - script.execute: control_leds
       - delay: 15min
       - switch.turn_off: timer_ringing
-  # TODO: make it internal before launch
   - platform: gpio
     pin: GPIO47
     id: internal_speaker_amp
     name: "Internal speaker amp"
     entity_category: config
     restore_mode: ALWAYS_OFF
+    internal: true
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
@@ -1373,7 +1373,9 @@ micro_wake_word:
 
 select:
   - platform: template
-    name: "Wake word select"
+    name: "Active wake word"
+    icon: "mdi:bullhorn"
+    entity_category: config
     options:
       - "OK Nabu"
       - "Hey Jarvis"
