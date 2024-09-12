@@ -232,10 +232,12 @@ binary_sensor:
       - script.execute: control_leds
     on_multi_click:
       # Simple Click:
-      #   . Stops timer if a timer is ringing
-      #   . Pauses music if music is playing
-      #   . Resumes music if music is paused
-      #   . Starts the voice assistant if it is not yet running and if the device is not muted.
+      #   - Abort "things" in order
+      #     - Timer
+      #     - Announcements
+      #     - Voice Assistant Pipeline run
+      #     - Music
+      #   - Starts the voice assistant if it is not yet running and if the device is not muted.
       - timing:
           - ON for at most 1s
           - OFF for at least 0.5s
@@ -248,35 +250,46 @@ binary_sensor:
               else:
                 - if:
                     condition:
-                      media_player.is_playing:
+                      lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                     then:
-                      - media_player.pause:
+                      - lambda: |
+                          id(nabu_media_player)
+                            ->make_call()
+                            .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+                            .set_announcement(true)
+                            .perform();
                     else:
                       - if:
                           condition:
-                            media_player.is_paused:
+                            voice_assistant.is_running:
                           then:
-                            - media_player.play:
+                            - voice_assistant.stop:
                           else:
-                            if:
-                              condition:
-                                and:
-                                  - switch.is_off: master_mute_switch
-                                  - not:
-                                      voice_assistant.is_running
-                              then:
-                                - script.execute:
-                                    id: play_sound
-                                    priority: true
-                                    sound_file: !lambda return id(center_button_press_sound);
-                                - wait_until:
-                                    lambda: |-
-                                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                                - wait_until:
-                                    not:
-                                      lambda: |-
-                                        return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                                - voice_assistant.start:
+                            - if:
+                                condition:
+                                  media_player.is_playing:
+                                then:
+                                  - media_player.pause:
+                                else:
+                                  - if:
+                                      condition:
+                                        and:
+                                          - switch.is_off: master_mute_switch
+                                          - not:
+                                              voice_assistant.is_running
+                                      then:
+                                        - script.execute:
+                                            id: play_sound
+                                            priority: true
+                                            sound_file: !lambda return id(center_button_press_sound);
+                                        - wait_until:
+                                            lambda: |-
+                                              return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                        - wait_until:
+                                            not:
+                                              lambda: |-
+                                                return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                        - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
