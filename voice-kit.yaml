@@ -232,12 +232,12 @@ binary_sensor:
       - script.execute: control_leds
     on_multi_click:
       # Simple Click:
-      #   . Abort "things" in order
-            # . Timer
-            # . Announcements
-            # . Voice Assistant Pipeline run
-            # . Music
-      #   . Starts the voice assistant if it is not yet running and if the device is not muted.
+      #   - Abort "things" in order
+      #     - Timer
+      #     - Announcements
+      #     - Voice Assistant Pipeline run
+      #     - Music
+      #   - Starts the voice assistant if it is not yet running and if the device is not muted.
       - timing:
           - ON for at most 1s
           - OFF for at least 0.5s
