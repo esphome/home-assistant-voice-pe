@@ -145,10 +145,12 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable tracking if the jack has been plugged touched.
   - id: jack_plugged_recently
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable tracking if the jack has been unplugged touched.
   - id: jack_unplugged_recently
     type: bool
     restore_value: no
@@ -262,6 +264,17 @@ binary_sensor:
                                   - not:
                                       voice_assistant.is_running
                               then:
+                                - script.execute:
+                                    id: play_sound
+                                    priority: true
+                                    sound_file: !lambda return id(center_button_press_sound);
+                                - wait_until:
+                                    lambda: |-
+                                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                - wait_until:
+                                    not:
+                                      lambda: |-
+                                        return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                                 - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
@@ -271,6 +284,10 @@ binary_sensor:
           - ON for at most 1s
           - OFF for at least 0.5s
         then:
+          - script.execute:
+              id: play_sound
+              priority: false
+              sound_file: !lambda return id(center_button_double_press_sound);
           - event.trigger:
               id: button_press_event
               event_type: "double_press"
@@ -284,6 +301,10 @@ binary_sensor:
           - ON for at most 1s
           - OFF for at least 0.5s
         then:
+          - script.execute:
+              id: play_sound
+              priority: false
+              sound_file: !lambda return id(center_button_triple_press_sound);
           - event.trigger:
               id: button_press_event
               event_type: "triple_press"
@@ -296,6 +317,10 @@ binary_sensor:
               condition:
                 lambda: return !id(dial_touched);
               then:
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: !lambda return id(center_button_long_press_sound);
                 - light.turn_off: voice_assistant_leds
                 - event.trigger:
                     id: button_press_event
@@ -350,20 +375,16 @@ binary_sensor:
               brightness: 100%
               id: voice_assistant_leds
               effect: "Tick"
-          - lambda: |-
-              id(nabu_media_player)
-                ->make_call()
-                .set_announcement(true)
-                .set_local_media_file(id(tick_wave_file))
-                .perform();
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: !lambda return id(easter_egg_tick_sound);
           - delay: 4s
           - light.turn_off: voice_assistant_leds
-          - lambda: |-
-              id(nabu_media_player)
-                ->make_call()
-                .set_announcement(true)
-                .set_local_media_file(id(party_wave_file))
-                .perform();
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: !lambda return id(easter_egg_tada_sound);
           - light.turn_on:
               brightness: 100%
               id: voice_assistant_leds
@@ -381,21 +402,17 @@ binary_sensor:
                     brightness: 100%
                     id: voice_assistant_leds
                     effect: "Factory Reset Coming Up"
-                - lambda: |-
-                    id(nabu_media_player)
-                      ->make_call()
-                      .set_announcement(true)
-                      .set_local_media_file(id(facotry_reset_initiated_wave_file))
-                      .perform();
+                - script.execute:
+                    id: play_sound
+                    priority: true
+                    sound_file: !lambda return id(factory_reset_initiated_sound);
                 - wait_until:
                     binary_sensor.is_off: center_button
                 - light.turn_off: voice_assistant_leds
-                - lambda: |-
-                    id(nabu_media_player)
-                      ->make_call()
-                      .set_announcement(true)
-                      .set_local_media_file(id(facotry_reset_cancelled_wave_file))
-                      .perform();
+                - script.execute:
+                    id: play_sound
+                    priority: true
+                    sound_file: !lambda return id(factory_reset_cancelled_sound);
       # Factory Reset
       - timing:
           - ON for at least 22s
@@ -411,10 +428,18 @@ binary_sensor:
     internal: true
     pin: GPIO3
     on_press:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(mute_switch_on_sound);
       - switch.template.publish:
           id: master_mute_switch
           state: ON
     on_release:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(mute_switch_off_sound);
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
@@ -426,12 +451,20 @@ binary_sensor:
     pin:
       number: GPIO17
     on_press:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_connected_sound);
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
       - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
     on_release:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_disconnected_sound);
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
@@ -774,12 +807,10 @@ sensor:
                   - sensor.rotary_encoder.set_value:
                       id: dial
                       value: 0
-                  - lambda: |-
-                      id(nabu_media_player)
-                        ->make_call()
-                        .set_announcement(true)
-                        .set_local_media_file(id(rewind_wave_file))
-                        .perform();
+                  - script.execute:
+                      id: play_sound
+                      priority: true
+                      sound_file: !lambda return id(easter_egg_rewind_sound);
           else:
             - script.execute:
                 id: control_hue
@@ -1120,13 +1151,33 @@ script:
           condition:
             switch.is_on: timer_ringing
           then:
-            - lambda: |-
-                id(nabu_media_player)
-                  ->make_call()
-                  .set_announcement(true)
-                  .set_local_media_file(id(timer_finished_wave_file))
-                  .perform();
+            - script.execute:
+                id: play_sound
+                priority: true
+                sound_file: !lambda return id(timer_finished_sound);
             - delay: 1s
+
+  # Script executed when we want to play sounds on the device.
+  - id: play_sound
+    parameters:
+      priority: bool
+      sound_file: "media_player::MediaFile*"
+    then:
+      - lambda: |-
+          if (priority) {
+            id(nabu_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+              .set_announcement(true)
+              .perform();
+          }
+          if ( (id(nabu_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
+            id(nabu_media_player)
+              ->make_call()
+              .set_announcement(true)
+              .set_local_media_file(sound_file)
+              .perform();
+          }
 
 i2s_audio:
   - id: i2s_output
@@ -1177,20 +1228,38 @@ media_player:
     on_volume:
       - script.execute: control_leds
     files:
-      - id: timer_finished_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/timer_finished.wav
-      - id: tick_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/tick.wav
-      - id: party_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/party.wav
-      - id: rewind_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/rewind.wav
-      - id: awake_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/awake.wav
-      - id: facotry_reset_initiated_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_initiated.wav
-      - id: facotry_reset_cancelled_wave_file
-        file: https://github.com/esphome/voice-kit/raw/dev/sounds/facotry_reset_cancelled.wav
+      - id: center_button_press_sound
+        file: sounds/center_button_press.flac
+      - id: center_button_double_press_sound
+        file: sounds/center_button_double_press.flac
+      - id: center_button_triple_press_sound
+        file: sounds/center_button_triple_press.flac
+      - id: center_button_long_press_sound
+        file: sounds/center_button_long_press.flac
+      - id: device_connected_sound
+        file: sounds/device_connected.mp3
+      - id: factory_reset_initiated_sound
+        file: sounds/factory_reset_initiated.mp3
+      - id: factory_reset_cancelled_sound
+        file: sounds/factory_reset_cancelled.mp3
+      - id: jack_connected_sound
+        file: sounds/jack_connected.flac
+      - id: jack_disconnected_sound
+        file: sounds/jack_disconnected.flac
+      - id: mute_switch_on_sound
+        file: sounds/mute_switch_on.flac
+      - id: mute_switch_off_sound
+        file: sounds/mute_switch_off.flac
+      - id: timer_finished_sound
+        file: sounds/timer_finished.flac
+      - id: wake_word_triggered_sound
+        file: sounds/wake_word_triggered.flac
+      - id: easter_egg_rewind_sound
+        file: sounds/easter_egg_rewind.mp3
+      - id: easter_egg_tick_sound
+        file: sounds/easter_egg_tick.mp3
+      - id: easter_egg_tada_sound
+        file: sounds/easter_egg_tada.mp3
 
 voice_kit:
   reset_pin: GPIO4
@@ -1257,12 +1326,10 @@ micro_wake_word:
                     condition:
                       switch.is_on: wake_sound
                     then:
-                      - lambda: |-
-                          id(nabu_media_player)
-                            ->make_call()
-                            .set_announcement(true)
-                            .set_local_media_file(id(awake_wave_file))
-                            .perform();
+                      - script.execute:
+                          id: play_sound
+                          priority: true
+                          sound_file: !lambda return id(wake_word_triggered_sound);
                       - wait_until:
                           lambda: |-
                             return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
@@ -1308,6 +1375,14 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
+    - if:
+        condition:
+          lambda: return id(init_in_progress);
+        then:
+          - script.execute:
+              id: play_sound
+              priority: false
+              sound_file: !lambda return id(device_connected_sound);
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
@@ -1371,12 +1446,10 @@ button:
     name: "timer beep"
     entity_category: diagnostic
     on_press:
-      - lambda: |-
-          id(nabu_media_player)
-            ->make_call()
-            .set_announcement(true)
-            .set_local_media_file(id(timer_finished_wave_file))
-            .perform();
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: !lambda return id(timer_finished_sound);
 
 debug:
   update_interval: 5s
