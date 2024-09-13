@@ -19,7 +19,7 @@ esphome:
   name: esphome-voice-kit
   friendly_name: ESPHome Voice Kit
   name_add_mac_suffix: true
-  min_version: 2024.8.1
+  min_version: 2024.9.0
   platformio_options:
     board_build.flash_mode: dio
   on_boot:
