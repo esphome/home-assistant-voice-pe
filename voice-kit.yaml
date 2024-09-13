@@ -240,7 +240,7 @@ binary_sensor:
       #   - Starts the voice assistant if it is not yet running and if the device is not muted.
       - timing:
           - ON for at most 1s
-          - OFF for at least 0.5s
+          - OFF for at least 0.25s
         then:
           - if:
               condition:
@@ -294,9 +294,9 @@ binary_sensor:
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
           - ON for at most 1s
-          - OFF for at most 0.5s
+          - OFF for at most 0.25s
           - ON for at most 1s
-          - OFF for at least 0.5s
+          - OFF for at least 0.25s
         then:
           - script.execute:
               id: play_sound
@@ -309,11 +309,11 @@ binary_sensor:
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
           - ON for at most 1s
-          - OFF for at most 0.5s
+          - OFF for at most 0.25s
           - ON for at most 1s
-          - OFF for at most 0.5s
+          - OFF for at most 0.25s
           - ON for at most 1s
-          - OFF for at least 0.5s
+          - OFF for at least 0.25s
         then:
           - script.execute:
               id: play_sound
@@ -465,25 +465,25 @@ binary_sensor:
     pin:
       number: GPIO17
     on_press:
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_connected_sound);
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
       - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
-    on_release:
       - script.execute:
           id: play_sound
           priority: false
-          sound_file: !lambda return id(jack_disconnected_sound);
+          sound_file: !lambda return id(jack_connected_sound);
+    on_release:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_disconnected_sound);
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -814,17 +814,6 @@ sensor:
             - script.execute:
                 id: control_volume
                 increase_volume: true
-            - if:
-                condition:
-                  lambda: return(id(dial).state > 120);
-                then:
-                  - sensor.rotary_encoder.set_value:
-                      id: dial
-                      value: 0
-                  - script.execute:
-                      id: play_sound
-                      priority: true
-                      sound_file: !lambda return id(easter_egg_rewind_sound);
           else:
             - script.execute:
                 id: control_hue
@@ -1110,9 +1099,6 @@ script:
       - delay: 2s
       - lambda: id(dial_touched) = false;
       - script.execute: control_leds
-      - sensor.rotary_encoder.set_value:
-          id: dial
-          value: 0
 
   # Script executed when the hue is increased/decreased from the dial
   - id: control_hue
@@ -1150,9 +1136,6 @@ script:
                       green,
                       blue);
           id(led_ring).make_call().set_rgb(red, green, blue).perform();
-      - sensor.rotary_encoder.set_value:
-          id: dial
-          value: 0
       - wait_until:
           binary_sensor.is_off: center_button
       - lambda: id(dial_touched) = false;
@@ -1169,7 +1152,7 @@ script:
                 id: play_sound
                 priority: true
                 sound_file: !lambda return id(timer_finished_sound);
-            - delay: 1s
+            - delay: 3s
 
   # Script executed when we want to play sounds on the device.
   - id: play_sound
@@ -1285,8 +1268,6 @@ media_player:
         file: sounds/timer_finished.flac
       - id: wake_word_triggered_sound
         file: sounds/wake_word_triggered.flac
-      - id: easter_egg_rewind_sound
-        file: sounds/easter_egg_rewind.mp3
       - id: easter_egg_tick_sound
         file: sounds/easter_egg_tick.mp3
       - id: easter_egg_tada_sound
@@ -1361,13 +1342,14 @@ micro_wake_word:
                           id: play_sound
                           priority: true
                           sound_file: !lambda return id(wake_word_triggered_sound);
-                      - wait_until:
-                          lambda: |-
-                            return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                      - wait_until:
-                          not:
-                            lambda: |-
-                              return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      # - wait_until:
+                      #     lambda: |-
+                      #       return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      # - wait_until:
+                      #     not:
+                      #       lambda: |-
+                      #         return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      - delay: 600ms
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
 
