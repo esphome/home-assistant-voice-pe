@@ -606,12 +606,14 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
       media_player::MediaPlayerSupportedFormat{.format = "flac",
                                                .sample_rate = 48000,
                                                .num_channels = 2,
-                                               .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT});
+                                               .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT,
+                                               .sample_bytes = 2});
   traits.get_supported_formats().push_back(media_player::MediaPlayerSupportedFormat{
       .format = "flac",
       .sample_rate = 48000,
       .num_channels = 1,
-      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT});
+      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT,
+      .sample_bytes = 2});
   return traits;
 };
 
