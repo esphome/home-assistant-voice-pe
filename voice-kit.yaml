@@ -1152,7 +1152,13 @@ script:
                 id: play_sound
                 priority: true
                 sound_file: !lambda return id(timer_finished_sound);
-            - delay: 3s
+            - wait_until:
+                lambda: |-
+                  return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+            - wait_until:
+                not:
+                  lambda: |-
+                    return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
 
   # Script executed when we want to play sounds on the device.
   - id: play_sound
@@ -1349,7 +1355,7 @@ micro_wake_word:
                       #     not:
                       #       lambda: |-
                       #         return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                      - delay: 600ms
+                      - delay: 300ms
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
 
