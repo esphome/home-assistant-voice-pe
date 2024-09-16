@@ -55,6 +55,7 @@ struct MediaPlayerSupportedFormat {
   uint32_t sample_rate;
   uint32_t num_channels;
   MediaPlayerFormatPurpose purpose;
+  uint32_t sample_bytes;
 };
 
 struct MediaFile {
