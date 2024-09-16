@@ -28,7 +28,6 @@ esphome:
       # Run the script to refresh the LED status
       - script.execute: control_leds
       - delay: 1s
-      # TODO: make it internal before launch
       - switch.turn_on: internal_speaker_amp
       # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
       - if:
@@ -856,17 +855,6 @@ sensor:
                 id: control_hue
                 increase_hue: false
 
-  # To be removed before launch
-  - platform: debug
-    free:
-      name: "Heap Free"
-    block:
-      name: "Max Block Free"
-    loop_time:
-      name: "Loop Time"
-    psram:
-      name: "PSRAM Free"
-
 event:
   # Event entity exposed to the user to automate on complex center button presses.
   # The simple press is not exposed as it is used to control the device itself.
@@ -1477,24 +1465,11 @@ voice_assistant:
     - switch.turn_on: timer_ringing
 
 button:
-  # TODO: Remove before launch, added for testing/development
-  - platform: restart
-    name: "Restart"
-    entity_category: diagnostic
-  # TODO: make it internal before launch
   - platform: factory_reset
     id: factory_reset_button
     name: "Factory Reset"
     entity_category: diagnostic
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: "timer beep"
-    entity_category: diagnostic
-    on_press:
-      - script.execute:
-          id: play_sound
-          priority: true
-          sound_file: !lambda return id(timer_finished_sound);
+    internal: true
 
 debug:
   update_interval: 5s

@@ -43,19 +43,3 @@ improv_serial:
 
 esp32_improv:
   authorizer: center_button
-
-button:
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Check for update
-    entity_category: diagnostic
-    on_press:
-      - component.update: update_http_request
-  # TODO: Remove before launch, added for testing/development
-  - platform: template
-    name: Perform Update
-    entity_category: diagnostic
-    on_press:
-      - update.perform:
-          id: update_http_request
-          force_update: true
