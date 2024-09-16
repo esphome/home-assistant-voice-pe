@@ -1236,6 +1236,9 @@ media_player:
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_output
+    volume_increment: 0.05
+    volume_min: 0.4
+    volume_max: 0.85
     on_mute:
       - script.execute: control_leds
     on_unmute:
