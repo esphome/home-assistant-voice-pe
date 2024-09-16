@@ -112,6 +112,10 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
     file_type = media_player::MediaFileType::MP3;
   } else if (str_endswith(url_string, ".flac")) {
     file_type = media_player::MediaFileType::FLAC;
+  } else {
+    file_type = media_player::MediaFileType::NONE;
+    this->cleanup_connection_();
+    return ESP_ERR_NOT_SUPPORTED;
   }
 
   this->transfer_buffer_current_ = this->transfer_buffer_;
@@ -127,7 +131,7 @@ AudioReaderState AudioReader::read() {
     return this->file_read_();
   }
 
-  return AudioReaderState::INITIALIZED;
+  return AudioReaderState::FAILED;
 }
 
 AudioReaderState AudioReader::file_read_() {
@@ -148,7 +152,7 @@ AudioReaderState AudioReader::http_read_() {
         (void *) this->transfer_buffer_, this->transfer_buffer_length_, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
     this->transfer_buffer_length_ -= bytes_written;
 
-    // Shif remaining data to the start of the transfer buffer
+    // Shift remaining data to the start of the transfer buffer
     memmove(this->transfer_buffer_, this->transfer_buffer_ + bytes_written, this->transfer_buffer_length_);
   }
 

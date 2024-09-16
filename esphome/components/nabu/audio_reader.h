@@ -11,8 +11,7 @@ namespace esphome {
 namespace nabu {
 
 enum class AudioReaderState : uint8_t {
-  INITIALIZED = 0,
-  READING,
+  READING = 0,
   FINISHED,
   FAILED,
 };
