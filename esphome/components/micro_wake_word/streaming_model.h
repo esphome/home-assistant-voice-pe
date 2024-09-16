@@ -51,6 +51,9 @@ class StreamingModel {
   /// @brief Disable the model. The next performing_streaming_inference call will unload it.
   void disable() { this->enabled_ = false; }
 
+  /// @brief Return true if the model is enabled.
+  bool is_enabled() { return this->enabled_; }
+
   bool get_unprocessed_probability_status() { return this->unprocessed_probability_status_; }
 
  protected:

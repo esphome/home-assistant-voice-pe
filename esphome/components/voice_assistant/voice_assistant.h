@@ -155,6 +155,8 @@ class VoiceAssistant : public Component {
   bool is_running() const { return this->state_ != State::IDLE; }
   void set_continuous(bool continuous) { this->continuous_ = continuous; }
   bool is_continuous() const { return this->continuous_; }
+  void on_set_configuration(const api::VoiceAssistantSetConfiguration &msg);
+  const api::VoiceAssistantConfigurationResponse &get_configuration();
 
   void set_use_wake_word(bool use_wake_word) { this->use_wake_word_ = use_wake_word; }
 #ifdef USE_ESP_ADF
@@ -294,6 +296,8 @@ class VoiceAssistant : public Component {
   AudioMode audio_mode_{AUDIO_MODE_UDP};
   bool udp_socket_running_{false};
   bool start_udp_socket_();
+
+  api::VoiceAssistantConfigurationResponse config_response_{};
 
 #ifdef USE_MICRO_WAKE_WORD
   micro_wake_word::MicroWakeWord *micro_wake_word_{nullptr};
