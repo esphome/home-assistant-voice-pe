@@ -199,17 +199,33 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
     on_turn_off:
-      - delay: 200ms
+      # Stop any current annoucement (ie: stop the timer ring mid playback)
+      - if:
+          condition:
+            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+          then:
+            lambda: |-
+              id(nabu_media_player)
+                ->make_call()
+                .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+                .set_announcement(true)
+                .perform();
+      # Set back ducking ratio to zero
       - nabu.set_ducking:
           decibel_reduction: 0
           duration: 1.0s
+      # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
+      # Duck audio
       - nabu.set_ducking:
           decibel_reduction: 20
           duration: 0.0s
+      # Ring timer
       - script.execute: ring_timer
+      # Refresh LED
       - script.execute: control_leds
+      # If 15 minutes have passed and the timer is still ringing, stop it.
       - delay: 15min
       - switch.turn_off: timer_ringing
   - platform: gpio
@@ -457,13 +473,18 @@ binary_sensor:
       - switch.template.publish:
           id: master_mute_switch
           state: OFF
+  # Audio Jack PLugged sensor
   - platform: gpio
     id: jack_plugged
+    # Debouncing it a bit because it can be activated back and forth as you plug the audio jack
     filters:
       - delayed_on: 200ms
       - delayed_off: 200ms
     pin:
       number: GPIO17
+    # When the jack is plugged in:
+    #  - LED animation
+    #  - Sound played
     on_press:
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
@@ -474,6 +495,9 @@ binary_sensor:
           id: play_sound
           priority: false
           sound_file: !lambda return id(jack_connected_sound);
+    # When the jack is unplugged:
+    #  - LED animation
+    #  - Sound played
     on_release:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
