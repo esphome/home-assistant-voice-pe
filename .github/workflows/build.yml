@@ -60,7 +60,7 @@ jobs:
     name: Upload to R2
     needs:
       - build-firmware
-    uses: esphome/workflows/.github/workflows/upload.yml@jesserockz-2024-454
+    uses: esphome/workflows/.github/workflows/upload.yml@main
     with:
       directory: home-assistant-voice-pe
       version: ${{ needs.build-firmware.outputs.version }}
