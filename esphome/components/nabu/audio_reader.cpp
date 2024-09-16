@@ -4,6 +4,10 @@
 
 #include "esphome/core/ring_buffer.h"
 
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+#include "esp_crt_bundle.h"
+#endif
+
 namespace esphome {
 namespace nabu {
 
@@ -73,6 +77,12 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
   client_config.max_redirection_count = 10;
   client_config.buffer_size = 512;
   client_config.keep_alive_enable = true;
+  
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+  if (uri.find("https:") != std::string::npos) {
+    client_config.crt_bundle_attach = esp_crt_bundle_attach;
+  }
+#endif
 
   this->client_ = esp_http_client_init(&client_config);
 
