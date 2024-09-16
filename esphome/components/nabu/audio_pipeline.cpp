@@ -239,7 +239,7 @@ esp_err_t AudioPipeline::stop() {
                                                   pdTRUE,               // Wait for all the bits,
                                                   pdMS_TO_TICKS(200));  // Duration to block/wait
 
-  if (!(event_group_bits & FINISHED_BITS)) {
+  if ((event_group_bits & FINISHED_BITS) != FINISHED_BITS) {
     // Not all bits were set, so it timed out
     return ESP_ERR_TIMEOUT;
   }
