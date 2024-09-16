@@ -379,7 +379,6 @@ void NabuMediaPlayer::watch_media_commands_() {
 
     if (media_command.volume.has_value()) {
       this->set_volume_(media_command.volume.value());
-      this->set_mute_state_(false);
       this->publish_state();
     }
 
@@ -608,12 +607,12 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
                                                .num_channels = 2,
                                                .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT,
                                                .sample_bytes = 2});
-  traits.get_supported_formats().push_back(media_player::MediaPlayerSupportedFormat{
-      .format = "flac",
-      .sample_rate = 48000,
-      .num_channels = 1,
-      .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT,
-      .sample_bytes = 2});
+  traits.get_supported_formats().push_back(
+      media_player::MediaPlayerSupportedFormat{.format = "flac",
+                                               .sample_rate = 48000,
+                                               .num_channels = 1,
+                                               .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT,
+                                               .sample_bytes = 2});
   return traits;
 };
 
@@ -657,20 +656,30 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
 }
 
 void NabuMediaPlayer::set_volume_(float volume, bool publish) {
+  // Remap the volume to fit with in the configured limits
+  float bounded_volume = remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
+
 #ifdef USE_AUDIO_DAC
   if (this->audio_dac_ != nullptr) {
-    this->audio_dac_->set_volume(volume);
+    this->audio_dac_->set_volume(bounded_volume);
   } else
 #endif
   {  // Fall back to software volume control if there is no audio_dac or if it isn't configured
     // Use the decibel reduction table from audio_mixer.h for software volume control
-    ssize_t decibel_index = remap<ssize_t, float>(volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
+    ssize_t decibel_index = remap<ssize_t, float>(bounded_volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
     this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
   }
 
   if (publish) {
     this->volume = volume;
     this->save_volume_restore_state_();
+  }
+
+  // Turn on the mute state if the volume is effectively zero, off otherwise
+  if (volume < 0.001) {
+    this->set_mute_state_(true);
+  } else {
+    this->set_mute_state_(false);
   }
 
   this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
