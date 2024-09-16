@@ -72,6 +72,9 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   // Percentage to increase or decrease the volume for volume up or volume down commands
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
 
+  void set_volume_max(float volume_max) { this->volume_max_ = volume_max; }
+  void set_volume_min(float volume_min) { this->volume_min_ = volume_min; }
+
 #ifdef USE_AUDIO_DAC
   void set_audio_dac(audio_dac::AudioDac *audio_dac) { this->audio_dac_ = audio_dac; }
 #endif
@@ -125,7 +128,7 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   optional<std::string> announcement_url_{};                 // only modified by control function
   optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
   optional<media_player::MediaFile *> announcement_file_{};  // only modified by control fucntion
-  
+
   QueueHandle_t media_control_command_queue_;
 
   i2s_bits_per_sample_t bits_per_sample_;
@@ -138,6 +141,9 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 
   // The amount to change the volume on volume up/down commands
   float volume_increment_;
+
+  float volume_max_;
+  float volume_min_;
 
 #ifdef USE_AUDIO_DAC
   audio_dac::AudioDac *audio_dac_{nullptr};
