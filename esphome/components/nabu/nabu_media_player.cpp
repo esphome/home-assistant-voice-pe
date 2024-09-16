@@ -15,6 +15,7 @@ namespace esphome {
 namespace nabu {
 
 // TODO:
+//  - Align TLS certification defines with the http_request component
 //  - Clean up process around playing back local media files
 //    - Create a registry of media files in Python
 //    - Add a yaml action to play a specific media file
