@@ -19,7 +19,7 @@ jobs:
     uses: esphome/workflows/.github/workflows/build.yml@main
     with:
       files: |
-        voice-kit.factory.yaml
+        home-assistant-voice.factory.yaml
       esphome-version: dev
       release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
       release-url: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
@@ -50,18 +50,18 @@ jobs:
 
             [Download][download] and extract the firmware to install with https://web.esphome.io
 
-            Make sure to choose \`esphome-voice-kit-esp32s3/esphome-voice-kit-esp32s3.factory.bin\`.
+            Make sure to choose \`home-assistant-voice-esp32s3.factory.bin\`.
 
             [download]: ${url}`
             })
 
   upload:
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev')
+    if: github.event_name == 'release'
     name: Upload to R2
     needs:
       - build-firmware
     uses: esphome/workflows/.github/workflows/upload.yml@main
     with:
-      directory: voice-kit
+      directory: home-assistant-voice-pe
       version: ${{ needs.build-firmware.outputs.version }}
     secrets: inherit
