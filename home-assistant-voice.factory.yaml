@@ -11,11 +11,11 @@ packages:
     wifi:
       on_disconnect:
         - ble.enable:
-  voice-kit: !include voice-kit.yaml
+  home-assistant-voice: !include home-assistant-voice.yaml
 
 esphome:
   project:
-    name: esphome.voice-kit
+    name: Nabu Casa.Home Assistant Voice PE
     version: dev
 
 ota:
@@ -31,7 +31,7 @@ update:
     source: https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest.json
 
 dashboard_import:
-  package_import_url: github://esphome/voice-kit/voice-kit.yaml
+  package_import_url: github://esphome/voice-kit/home-assistant-voice.yaml
 
 wifi:
   on_connect:
