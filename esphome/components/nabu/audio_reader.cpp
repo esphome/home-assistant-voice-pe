@@ -77,7 +77,7 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
   client_config.max_redirection_count = 10;
   client_config.buffer_size = 512;
   client_config.keep_alive_enable = true;
-  
+
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
   if (uri.find("https:") != std::string::npos) {
     client_config.crt_bundle_attach = esp_crt_bundle_attach;
