@@ -7,8 +7,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-#include "esphome/components/voice_assistant/voice_assistant.h"
-
 #ifdef USE_OTA
 #include "esphome/components/ota/ota_backend.h"
 #endif
@@ -21,12 +19,6 @@
 #include <tensorflow/lite/micro/micro_mutable_op_resolver.h>
 
 #include <cmath>
-
-// TODO:
-//  - does VAD need to be a separate class?
-//  - setup protocol between micro_wake_word and voice_assistant components
-//    - voice assistant should handle all decisions, mWW should just send info
-//  - load trained languages from manifest to expose to voice assistant
 
 namespace esphome {
 namespace micro_wake_word {
@@ -115,7 +107,6 @@ void MicroWakeWord::setup() {
   this->inference_task_stack_buffer_ = (StackType_t *) malloc(INFERENCE_TASK_STACK_SIZE);
 
   ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
-
 
 #ifdef USE_OTA
   ota::get_global_ota_callback()->add_on_state_callback(
@@ -355,13 +346,6 @@ void MicroWakeWord::loop() {
                detection_event.wake_word->c_str(), (detection_event.average_probability / uint8_to_float_divisor),
                (detection_event.max_probability / uint8_to_float_divisor));
       this->wake_word_detected_trigger_->trigger(*detection_event.wake_word);
-
-#ifdef USE_VOICE_ASSISTANT
-      // TODO: potentially remove, as it currently only logs in the voice assistant component
-      if (voice_assistant::global_voice_assistant != nullptr) {
-        voice_assistant::global_voice_assistant->on_wake_word(detection_event);
-      }
-#endif
     }
   }
 }
