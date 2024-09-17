@@ -938,15 +938,20 @@ script:
     then:
       - if:
           condition:
-            not: wifi.connected
+            - not: wifi.connected
           then:
-            - light.turn_on:
-                brightness: 100%
-                red: 0
-                green: 0
-                blue: 1.0
-                id: voice_assistant_leds
-                effect: "Twinkle"
+            - if:
+                condition:
+                  lambda: |-
+                    return wifi::global_wifi_component->is_ready() && !wifi::global_wifi_component->has_sta();
+                then:
+                  - light.turn_on:
+                      brightness: 100%
+                      red: 0
+                      green: 0
+                      blue: 1.0
+                      id: voice_assistant_leds
+                      effect: "Twinkle"
           else:
             - light.turn_on:
                 brightness: 100%
