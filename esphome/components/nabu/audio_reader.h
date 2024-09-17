@@ -11,8 +11,7 @@ namespace esphome {
 namespace nabu {
 
 enum class AudioReaderState : uint8_t {
-  INITIALIZED = 0,
-  READING,
+  READING = 0,
   FINISHED,
   FAILED,
 };
@@ -37,11 +36,13 @@ class AudioReader {
 
   esphome::RingBuffer *output_ring_buffer_;
 
-  uint8_t *transfer_buffer_{nullptr};
-  const uint8_t *transfer_buffer_current_{nullptr};
-
   size_t transfer_buffer_length_;  // Amount of data currently stored in transfer buffer (in bytes)
   size_t transfer_buffer_size_;    // Capacity of transfer buffer (in bytes)
+
+  ssize_t no_data_read_count_;
+
+  uint8_t *transfer_buffer_{nullptr};
+  const uint8_t *transfer_buffer_current_{nullptr};
 
   esp_http_client_handle_t client_{nullptr};
 
