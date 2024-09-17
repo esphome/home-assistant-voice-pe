@@ -6,7 +6,6 @@
 
 #include <cinttypes>
 #include <cstdio>
-#include <sstream>
 
 namespace esphome {
 namespace voice_assistant {
@@ -931,15 +930,15 @@ void VoiceAssistant::on_set_configuration(const std::vector<std::string>& active
     }
 
     // Enable only active wake words
-    for (auto ww_id_str : active_wake_words) {
-      // Wake word id is index
-      uint32_t ww_id;
-      std::stringstream ss(ww_id_str);
-      ss >> ww_id;
-
-      auto model = this->micro_wake_word_->get_wake_words().at(ww_id);
-      model->enable();
-      ESP_LOGD(TAG, "Enabled wake word: %s", model->get_wake_word().c_str());
+    for (auto ww_id : active_wake_words) {
+      for (auto &model : this->micro_wake_word_->get_wake_words()) {
+        if (model->get_id() == ww_id) {
+          model->enable();
+          ESP_LOGD(TAG, "Enabled wake word: %s (id=%s)",
+                   model->get_wake_word().c_str(),
+                   model->get_id().c_str());
+        }
+      }
     }
   }
 };
@@ -951,25 +950,18 @@ const Configuration &VoiceAssistant::get_configuration() {
   if (this->micro_wake_word_) {
     this->config_.max_active_wake_words = 1;
 
-    // Wake word id is index
-    uint32_t ww_id = 0;
     for (auto &model : this->micro_wake_word_->get_wake_words()) {
-      std::stringstream ss;
-      ss << ww_id;
-      auto ww_id_str = ss.str();
-
       if (model->is_enabled()) {
-        this->config_.active_wake_words.push_back(ww_id_str);
+        this->config_.active_wake_words.push_back(model->get_id());
       }
 
       WakeWord wake_word;
-      wake_word.id = ww_id_str;
+      wake_word.id = model->get_id();
       wake_word.wake_word = model->get_wake_word();
       for (const auto &lang : model->get_trained_languages()) {
         wake_word.trained_languages.push_back(lang);
       }
       this->config_.available_wake_words.push_back(std::move(wake_word));
-      ++ww_id;
     }
   } else {
     // No microWakeWord

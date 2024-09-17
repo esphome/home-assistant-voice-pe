@@ -502,6 +502,7 @@ async def to_code(config):
         else:
             wake_word_model = cg.new_Pvariable(
                 model_parameters[CONF_ID],
+                str(model_parameters[CONF_ID]),
                 prog_arr,
                 quantized_probability_cutoff,
                 sliding_window_size,

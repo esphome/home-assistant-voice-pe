@@ -87,7 +87,8 @@ class StreamingModel {
 
 class WakeWordModel final : public StreamingModel {
  public:
-  WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
+  WakeWordModel(const std::string &id, const uint8_t *model_start,
+                uint8_t probability_cutoff, size_t sliding_window_average_size,
                 const std::string &wake_word, size_t tensor_arena_size);
 
   void log_model_config() override;
@@ -97,12 +98,14 @@ class WakeWordModel final : public StreamingModel {
   /// @return True if wake word is detected, false otherwise
   DetectionEvent determine_detected() override;
 
+  const std::string &get_id() const { return this->id_; }
   const std::string &get_wake_word() const { return this->wake_word_; }
 
   void add_trained_language(const std::string &language) { this->trained_languages_.push_back(language); }
   const std::vector<std::string> &get_trained_languages() const { return this->trained_languages_; }
 
  protected:
+  std::string id_;
   std::string wake_word_;
   std::vector<std::string> trained_languages_;
 };
