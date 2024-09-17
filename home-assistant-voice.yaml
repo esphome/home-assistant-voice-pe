@@ -93,6 +93,7 @@ esp32:
       CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
 
 wifi:
+  id: wifi_id
   ap:
   on_connect:
     - script.execute: control_leds
@@ -105,6 +106,7 @@ logger:
     sensor: WARN  # avoids logging debug sensor updates
 
 api:
+  id: api_id
   on_client_connected:
     - script.execute: control_leds
   on_client_disconnected:
@@ -134,6 +136,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'true'
+  # Global variable storing the state of ImprovBLE. Used to draw different LED animations
+  - id: improv_ble_in_progress
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global variable tracking the phase of the voice assistant (defined above). Initialized to not_ready
   - id: voice_assistant_phase
     type: int
@@ -259,52 +266,56 @@ binary_sensor:
         then:
           - if:
               condition:
-                switch.is_on: timer_ringing
+                lambda: return !id(init_in_progress);
               then:
-                - switch.turn_off: timer_ringing
-              else:
                 - if:
                     condition:
-                      lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      switch.is_on: timer_ringing
                     then:
-                      - lambda: |
-                          id(nabu_media_player)
-                            ->make_call()
-                            .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                            .set_announcement(true)
-                            .perform();
+                      - switch.turn_off: timer_ringing
                     else:
                       - if:
                           condition:
-                            voice_assistant.is_running:
+                            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                           then:
-                            - voice_assistant.stop:
+                            - lambda: |
+                                id(nabu_media_player)
+                                  ->make_call()
+                                  .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+                                  .set_announcement(true)
+                                  .perform();
                           else:
                             - if:
                                 condition:
-                                  media_player.is_playing:
+                                  voice_assistant.is_running:
                                 then:
-                                  - media_player.pause:
+                                  - voice_assistant.stop:
                                 else:
                                   - if:
                                       condition:
-                                        and:
-                                          - switch.is_off: master_mute_switch
-                                          - not:
-                                              voice_assistant.is_running
+                                        media_player.is_playing:
                                       then:
-                                        - script.execute:
-                                            id: play_sound
-                                            priority: true
-                                            sound_file: !lambda return id(center_button_press_sound);
-                                        - wait_until:
-                                            lambda: |-
-                                              return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                                        - wait_until:
-                                            not:
-                                              lambda: |-
-                                                return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                                        - voice_assistant.start:
+                                        - media_player.pause:
+                                      else:
+                                        - if:
+                                            condition:
+                                              and:
+                                                - switch.is_off: master_mute_switch
+                                                - not:
+                                                    voice_assistant.is_running
+                                            then:
+                                              - script.execute:
+                                                  id: play_sound
+                                                  priority: true
+                                                  sound_file: !lambda return id(center_button_press_sound);
+                                              - wait_until:
+                                                  lambda: |-
+                                                    return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                              - wait_until:
+                                                  not:
+                                                    lambda: |-
+                                                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                              - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -313,13 +324,17 @@ binary_sensor:
           - ON for at most 1s
           - OFF for at least 0.25s
         then:
-          - script.execute:
-              id: play_sound
-              priority: false
-              sound_file: !lambda return id(center_button_double_press_sound);
-          - event.trigger:
-              id: button_press_event
-              event_type: "double_press"
+          - if:
+              condition:
+                lambda: return !id(init_in_progress);
+              then:
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: !lambda return id(center_button_double_press_sound);
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "double_press"
       # Triple Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -330,13 +345,17 @@ binary_sensor:
           - ON for at most 1s
           - OFF for at least 0.25s
         then:
-          - script.execute:
-              id: play_sound
-              priority: false
-              sound_file: !lambda return id(center_button_triple_press_sound);
-          - event.trigger:
-              id: button_press_event
-              event_type: "triple_press"
+          - if:
+              condition:
+                lambda: return !id(init_in_progress);
+              then:
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: !lambda return id(center_button_triple_press_sound);
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "triple_press"
       # Long Press
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -344,16 +363,20 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(dial_touched);
+                lambda: return !id(init_in_progress);
               then:
-                - script.execute:
-                    id: play_sound
-                    priority: false
-                    sound_file: !lambda return id(center_button_long_press_sound);
-                - light.turn_off: voice_assistant_leds
-                - event.trigger:
-                    id: button_press_event
-                    event_type: "long_press"
+                - if:
+                    condition:
+                      lambda: return !id(dial_touched);
+                    then:
+                      - script.execute:
+                          id: play_sound
+                          priority: false
+                          sound_file: !lambda return id(center_button_long_press_sound);
+                      - light.turn_off: voice_assistant_leds
+                      - event.trigger:
+                          id: button_press_event
+                          event_type: "long_press"
       # Very important do not remove. Trust me :D
       - timing:
           # E .
@@ -400,24 +423,28 @@ binary_sensor:
           - ON for at most 0.2s
           - OFF for at least 0.5s
         then:
-          - light.turn_on:
-              brightness: 100%
-              id: voice_assistant_leds
-              effect: "Tick"
-          - script.execute:
-              id: play_sound
-              priority: true
-              sound_file: !lambda return id(easter_egg_tick_sound);
-          - delay: 4s
-          - light.turn_off: voice_assistant_leds
-          - script.execute:
-              id: play_sound
-              priority: true
-              sound_file: !lambda return id(easter_egg_tada_sound);
-          - light.turn_on:
-              brightness: 100%
-              id: voice_assistant_leds
-              effect: "Rainbow"
+          - if:
+              condition:
+                lambda: return !id(init_in_progress);
+              then:
+                - light.turn_on:
+                    brightness: 100%
+                    id: voice_assistant_leds
+                    effect: "Tick"
+                - script.execute:
+                    id: play_sound
+                    priority: true
+                    sound_file: !lambda return id(easter_egg_tick_sound);
+                - delay: 4s
+                - light.turn_off: voice_assistant_leds
+                - script.execute:
+                    id: play_sound
+                    priority: true
+                    sound_file: !lambda return id(easter_egg_tada_sound);
+                - light.turn_on:
+                    brightness: 100%
+                    id: voice_assistant_leds
+                    effect: "Rainbow"
       # Factory Reset Warning
       #  . Audible and Visible warning.
       - timing:
@@ -874,71 +901,62 @@ script:
   # This script will be called every time one of these conditions is changing.
   - id: control_leds
     then:
-      - if:
-          condition:
-            lambda: return !id(init_in_progress);
-          then:
-            - if:
-                condition:
-                  wifi.connected:
-                then:
-                  - if:
-                      condition:
-                        api.connected:
-                      then:
-                        # One the initial connection is done, this is the master order in which the animationd are displayed. Higer priority takes precendence
-                        # - Center button touched
-                        # - Jack Plugged / Unplugged
-                        # - Dial touched
-                        # - Timer ringing
-                        # - All the active state of the voice assistant
-                        # - Muted / Silent
-                        # - The idle state of the voice assistant
-                        - lambda: |
-                            if (id(center_button).state) {
-                              id(control_leds_center_button_touched).execute();
-                            } else if (id(jack_plugged_recently)) {
-                              id(control_leds_jack_plugged_recently).execute();
-                            } else if (id(jack_unplugged_recently)) {
-                              id(control_leds_jack_unplugged_recently).execute();
-                            } else if (id(dial_touched)) {
-                              id(control_leds_dial_touched).execute();
-                            } else if (id(timer_ringing).state) {
-                              id(control_leds_timer_ringing).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
-                              id(control_leds_voice_assistant_waiting_for_command_phase).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
-                              id(control_leds_voice_assistant_listening_for_command_phase).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_thinking_phase_id}) {
-                              id(control_leds_voice_assistant_thinking_phase).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
-                              id(control_leds_voice_assistant_replying_phase).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
-                              id(control_leds_voice_assistant_error_phase).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
-                              id(control_leds_voice_assistant_not_ready_phase).execute();
-                            } else if (id(master_mute_switch).state) {
-                              id(control_leds_muted_or_silent).execute();
-                            } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
-                              id(control_leds_muted_or_silent).execute();
-                            } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
-                              id(control_leds_voice_assistant_idle_phase).execute();
-                            }
-                      else:
-                        - script.execute: control_leds_no_ha_connection_state
-                else:
-                  - script.execute: control_leds_no_ha_connection_state
-          else:
-            - script.execute: control_leds_init_state
+      - lambda: |
+          if (id(improv_ble_in_progress)) {
+            id(control_leds_improv_ble_state).execute();
+          } else if (id(init_in_progress)) {
+            id(control_leds_init_state).execute();
+          } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
+            id(control_leds_no_ha_connection_state).execute();
+          } else if (id(center_button).state) {
+            id(control_leds_center_button_touched).execute();
+          } else if (id(jack_plugged_recently)) {
+            id(control_leds_jack_plugged_recently).execute();
+          } else if (id(jack_unplugged_recently)) {
+            id(control_leds_jack_unplugged_recently).execute();
+          } else if (id(dial_touched)) {
+            id(control_leds_dial_touched).execute();
+          } else if (id(timer_ringing).state) {
+            id(control_leds_timer_ringing).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
+            id(control_leds_voice_assistant_waiting_for_command_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
+            id(control_leds_voice_assistant_listening_for_command_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_thinking_phase_id}) {
+            id(control_leds_voice_assistant_thinking_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
+            id(control_leds_voice_assistant_replying_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
+            id(control_leds_voice_assistant_error_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
+            id(control_leds_voice_assistant_not_ready_phase).execute();
+          } else if (id(master_mute_switch).state) {
+            id(control_leds_muted_or_silent).execute();
+          } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
+            id(control_leds_muted_or_silent).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
+            id(control_leds_voice_assistant_idle_phase).execute();
+          }
+
+  # Script executed during Improv BLE
+  # Warm White Twinkle
+  - id: control_leds_improv_ble_state
+    then:
+      - light.turn_on:
+          brightness: 100%
+          red: 100%
+          green: 89%
+          blue: 71%
+          id: voice_assistant_leds
+          effect: "Twinkle"
 
   # Script executed during initialization
-  # Blue Twinkle if Wifi is not connected
-  # Green Twinkle if Wifi is connected
+  # Blue Twinkle if Wifi is connected, Else solid warm white
   - id: control_leds_init_state
     then:
       - if:
           condition:
-            not: wifi.connected
+            wifi.connected:
           then:
             - light.turn_on:
                 brightness: 100%
@@ -949,12 +967,12 @@ script:
                 effect: "Twinkle"
           else:
             - light.turn_on:
-                brightness: 100%
-                red: 0
-                green: 1.0
-                blue: 0
+                brightness: 50%
+                red: 100%
+                green: 89%
+                blue: 71%
                 id: voice_assistant_leds
-                effect: "Twinkle"
+                effect: "none"
 
   # Script executed when the device has no connection to Home Assistant
   # Red Twinkle (This will be visible during HA updates for example)
@@ -1271,8 +1289,6 @@ media_player:
         file: sounds/center_button_triple_press.flac
       - id: center_button_long_press_sound
         file: sounds/center_button_long_press.flac
-      - id: device_connected_sound
-        file: sounds/device_connected.mp3
       - id: factory_reset_initiated_sound
         file: sounds/factory_reset_initiated.mp3
       - id: factory_reset_cancelled_sound
@@ -1411,14 +1427,6 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
-    - if:
-        condition:
-          lambda: return id(init_in_progress);
-        then:
-          - script.execute:
-              id: play_sound
-              priority: false
-              sound_file: !lambda return id(device_connected_sound);
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
