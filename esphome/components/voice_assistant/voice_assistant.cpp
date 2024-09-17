@@ -923,7 +923,7 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 #endif
 }
 
-void VoiceAssistant::on_set_configuration(const api::VoiceAssistantSetConfiguration &msg) {
+void VoiceAssistant::on_set_configuration(const std::vector<std::string>& active_wake_words) {
   if (this->micro_wake_word_) {
     // Disable all wake words first
     for (auto &model : this->micro_wake_word_->get_wake_words()) {
@@ -931,7 +931,7 @@ void VoiceAssistant::on_set_configuration(const api::VoiceAssistantSetConfigurat
     }
 
     // Enable only active wake words
-    for (auto ww_id_str : msg.active_wake_words) {
+    for (auto ww_id_str : active_wake_words) {
       // Wake word id is index
       uint32_t ww_id;
       std::stringstream ss(ww_id_str);
@@ -944,12 +944,12 @@ void VoiceAssistant::on_set_configuration(const api::VoiceAssistantSetConfigurat
   }
 };
 
-const api::VoiceAssistantConfigurationResponse &VoiceAssistant::get_configuration() {
-  this->config_response_.available_wake_words.clear();
-  this->config_response_.active_wake_words.clear();
+const Configuration &VoiceAssistant::get_configuration() {
+  this->config_.available_wake_words.clear();
+  this->config_.active_wake_words.clear();
 
   if (this->micro_wake_word_) {
-    this->config_response_.max_active_wake_words = 1;
+    this->config_.max_active_wake_words = 1;
 
     // Wake word id is index
     uint32_t ww_id = 0;
@@ -959,25 +959,25 @@ const api::VoiceAssistantConfigurationResponse &VoiceAssistant::get_configuratio
       auto ww_id_str = ss.str();
 
       if (model->is_enabled()) {
-        this->config_response_.active_wake_words.push_back(ww_id_str);
+        this->config_.active_wake_words.push_back(ww_id_str);
       }
 
-      api::VoiceAssistantWakeWord response_wake_word;
-      response_wake_word.id = ww_id_str;
-      response_wake_word.wake_word = model->get_wake_word();
+      WakeWord wake_word;
+      wake_word.id = ww_id_str;
+      wake_word.wake_word = model->get_wake_word();
       for (auto &lang : model->get_trained_languages()) {
-        response_wake_word.trained_languages.push_back(lang);
+        wake_word.trained_languages.push_back(lang);
       }
-      this->config_response_.available_wake_words.push_back(std::move(response_wake_word));
+      this->config_.available_wake_words.push_back(std::move(wake_word));
       ++ww_id;
     }
   } else {
     // No microWakeWord
-    this->config_response_.max_active_wake_words = 0;
+    this->config_.max_active_wake_words = 0;
   }
 
 
-  return this->config_response_;
+  return this->config_;
 };
 
 VoiceAssistant *global_voice_assistant = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
