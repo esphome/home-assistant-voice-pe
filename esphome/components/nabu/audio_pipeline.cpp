@@ -237,7 +237,7 @@ esp_err_t AudioPipeline::stop() {
                                                   FINISHED_BITS,        // Bit message to read
                                                   pdFALSE,              // Clear the bits on exit
                                                   pdTRUE,               // Wait for all the bits,
-                                                  pdMS_TO_TICKS(200));  // Duration to block/wait
+                                                  pdMS_TO_TICKS(300));  // Duration to block/wait
 
   if (!(event_group_bits & READER_MESSAGE_FINISHED)) {
     // Reader failed to stop

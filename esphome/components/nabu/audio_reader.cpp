@@ -13,6 +13,9 @@ namespace nabu {
 
 static const size_t READ_WRITE_TIMEOUT_MS = 20;
 
+// The number of times the http read times out with no data before throwing an error
+static const size_t ERROR_COUNT_NO_DATA_READ_TIMEOUT = 10;
+
 AudioReader::AudioReader(esphome::RingBuffer *output_ring_buffer, size_t transfer_buffer_size) {
   this->output_ring_buffer_ = output_ring_buffer;
   this->transfer_buffer_size_ = transfer_buffer_size;
@@ -77,6 +80,8 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
   client_config.max_redirection_count = 10;
   client_config.buffer_size = 512;
   client_config.keep_alive_enable = true;
+  client_config.timeout_ms = 250;  // Doesn't raise an error if exceeded in esp-idf v4.4, it just prevents the
+                                   // http_client_read command from blocking for too long
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
   if (uri.find("https:") != std::string::npos) {
@@ -120,6 +125,7 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
 
   this->transfer_buffer_current_ = this->transfer_buffer_;
   this->transfer_buffer_length_ = 0;
+  this->no_data_read_count_ = 0;
 
   return ESP_OK;
 }
@@ -168,10 +174,21 @@ AudioReaderState AudioReader::http_read_() {
 
     if (received_len > 0) {
       this->transfer_buffer_length_ += received_len;
+      this->no_data_read_count_ = 0;
     } else if (received_len < 0) {
       // HTTP read error
       this->cleanup_connection_();
       return AudioReaderState::FAILED;
+    } else {
+      if (bytes_to_read > 0) {
+        // Read timed out
+        ++this->no_data_read_count_;
+        if (this->no_data_read_count_ >= ERROR_COUNT_NO_DATA_READ_TIMEOUT) {
+          // Timed out with no data read too many times, so the http read has failed
+          this->cleanup_connection_();
+          return AudioReaderState::FAILED;
+        }
+      }
     }
   }
 
