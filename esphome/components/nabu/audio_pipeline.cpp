@@ -239,6 +239,19 @@ esp_err_t AudioPipeline::stop() {
                                                   pdTRUE,               // Wait for all the bits,
                                                   pdMS_TO_TICKS(200));  // Duration to block/wait
 
+  if (!(event_group_bits & READER_MESSAGE_FINISHED)) {
+    // Reader failed to stop
+    xEventGroupSetBits(this->event_group_, EventGroupBits::READER_MESSAGE_ERROR);
+  }
+  if (!(event_group_bits & DECODER_MESSAGE_FINISHED)) {
+    // Ddecoder failed to stop
+    xEventGroupSetBits(this->event_group_, EventGroupBits::DECODER_MESSAGE_ERROR);
+  }
+  if (!(event_group_bits & RESAMPLER_MESSAGE_FINISHED)) {
+    // Resampler failed to stop
+    xEventGroupSetBits(this->event_group_, EventGroupBits::RESAMPLER_MESSAGE_ERROR);
+  }
+
   if ((event_group_bits & FINISHED_BITS) != FINISHED_BITS) {
     // Not all bits were set, so it timed out
     return ESP_ERR_TIMEOUT;
