@@ -1238,10 +1238,10 @@ microphone:
     i2s_audio_id: i2s_input
     channel_0:
       id: asr_mic
-      amplify_shift: 0
+      # amplify_shift: 0
     channel_1:
       id: comm_mic
-      amplify_shift: 0 # May be useful to enable, but may also result in worse wake word detection if speaking close to the device
+      # amplify_shift: 0 # May be useful to enable, but may also result in worse wake word detection if speaking close to the device
 
 media_player:
   - platform: nabu
