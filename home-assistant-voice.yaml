@@ -1418,6 +1418,27 @@ select:
               id(hey_jarvis).enable();
             }
 
+number:
+  - platform: template
+    name: "Channel 0 amplify"
+    min_value: 0
+    max_value: 16
+    step: 1
+    set_action:
+      then:
+        - lambda: |-
+            id(mic).get_channel_0()->set_amplify_shift(x);
+
+  - platform: template
+    name: "Channel 1 amplify"
+    min_value: 0
+    max_value: 16
+    step: 1
+    set_action:
+      then:
+        - lambda: |-
+            id(mic).get_channel_1()->set_amplify_shift(x);
+
 voice_assistant:
   id: va
   microphone: asr_mic

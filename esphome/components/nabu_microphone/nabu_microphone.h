@@ -46,7 +46,7 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
   void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
 
   NabuMicrophoneChannel *get_channel_0() { return this->channel_0_; }
-  NabuMicrophoneChannel *get_channel_1() { return this->channel_0_; }
+  NabuMicrophoneChannel *get_channel_1() { return this->channel_1_; }
 
 #if SOC_I2S_SUPPORTS_ADC
   void set_adc_channel(adc1_channel_t channel) {
