@@ -965,7 +965,7 @@ const Configuration &VoiceAssistant::get_configuration() {
       WakeWord wake_word;
       wake_word.id = ww_id_str;
       wake_word.wake_word = model->get_wake_word();
-      for (auto &lang : model->get_trained_languages()) {
+      for (const auto &lang : model->get_trained_languages()) {
         wake_word.trained_languages.push_back(lang);
       }
       this->config_.available_wake_words.push_back(std::move(wake_word));
