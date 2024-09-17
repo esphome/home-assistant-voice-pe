@@ -1321,7 +1321,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: kahrendt-20240911-mic-amp-levels
+      ref: dev
     components:
       - aic3204
       - audio_dac
