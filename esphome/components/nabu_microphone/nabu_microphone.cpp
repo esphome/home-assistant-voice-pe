@@ -109,20 +109,20 @@ void NabuMicrophone::setup() {
 }
 
 void NabuMicrophone::mute() {
+  if (this->channel_0_ != nullptr) {
+    this->channel_0_->set_mute_state(true);
+  }
   if (this->channel_1_ != nullptr) {
     this->channel_1_->set_mute_state(true);
-  }
-  if (this->channel_2_ != nullptr) {
-    this->channel_2_->set_mute_state(true);
   }
 }
 
 void NabuMicrophone::unmute() {
+  if (this->channel_0_ != nullptr) {
+    this->channel_0_->set_mute_state(false);
+  }
   if (this->channel_1_ != nullptr) {
     this->channel_1_->set_mute_state(false);
-  }
-  if (this->channel_2_ != nullptr) {
-    this->channel_2_->set_mute_state(false);
   }
 }
 
@@ -203,14 +203,14 @@ void NabuMicrophone::read_task_(void *params) {
       event.type = TaskEventType::STARTING;
       xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
 
-      if ((this_microphone->channel_1_ != nullptr) && this_microphone->channel_1_->is_failed()) {
+      if ((this_microphone->channel_0_ != nullptr) && this_microphone->channel_0_->is_failed()) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_INVALID_STATE;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         continue;
       }
 
-      if ((this_microphone->channel_2_ != nullptr) && this_microphone->channel_2_->is_failed()) {
+      if ((this_microphone->channel_1_ != nullptr) && this_microphone->channel_1_->is_failed()) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_INVALID_STATE;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -221,17 +221,17 @@ void NabuMicrophone::read_task_(void *params) {
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
       int32_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
 
+      std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_0_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
-      std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_2_samples;
+
+      if (this_microphone->channel_0_ != nullptr)
+        channel_0_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
 
       if (this_microphone->channel_1_ != nullptr)
         channel_1_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
 
-      if (this_microphone->channel_2_ != nullptr)
-        channel_2_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
-
-      if ((buffer == nullptr) || (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS) ||
-          (channel_2_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS)) {
+      if ((buffer == nullptr) || (channel_0_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS) ||
+          (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS)) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_NO_MEM;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -243,8 +243,8 @@ void NabuMicrophone::read_task_(void *params) {
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
         } else {
           // TODO: Is this the ideal spot to reset the ring buffers?
+          this_microphone->channel_0_->get_ring_buffer()->reset();
           this_microphone->channel_1_->get_ring_buffer()->reset();
-          this_microphone->channel_2_->get_ring_buffer()->reset();
 
           event.type = TaskEventType::STARTED;
           xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -272,31 +272,31 @@ void NabuMicrophone::read_task_(void *params) {
               const size_t frames_read =
                   samples_read / NUMBER_OF_CHANNELS;  // Left and right channel samples combine into 1 frame
 
-              const uint8_t channel_1_shift = 16 - 2 * this_microphone->channel_1_->get_amplify();
-              const uint8_t channel_2_shift = 16 - 2 * this_microphone->channel_2_->get_amplify();
+              const uint8_t channel_0_shift = 16 - this_microphone->channel_0_->get_amplify_shift();
+              const uint8_t channel_1_shift = 16 - this_microphone->channel_1_->get_amplify_shift();
 
               for (size_t i = 0; i < frames_read; i++) {
-                int32_t channel_1_sample = 0;
-                if ((this_microphone->channel_1_ != nullptr) && (!this_microphone->channel_1_->get_mute_state())) {
-                  channel_1_sample = buffer[NUMBER_OF_CHANNELS * i] >> channel_1_shift;
-                  channel_1_samples[i] = (int16_t)clamp<int32_t>(channel_1_sample, INT16_MIN, INT16_MAX);
+                int32_t channel_0_sample = 0;
+                if ((this_microphone->channel_0_ != nullptr) && (!this_microphone->channel_0_->get_mute_state())) {
+                  channel_0_sample = buffer[NUMBER_OF_CHANNELS * i] >> channel_0_shift;
+                  channel_0_samples[i] = (int16_t)clamp<int32_t>(channel_0_sample, INT16_MIN, INT16_MAX);
                 }
 
-                int32_t channel_2_sample = 0;
-                if ((this_microphone->channel_2_ != nullptr) && (!this_microphone->channel_2_->get_mute_state())) {
-                  channel_2_sample = buffer[NUMBER_OF_CHANNELS * i + 1] >> channel_2_shift;
-                  channel_2_samples[i] = (int16_t)clamp<int32_t>(channel_2_sample, INT16_MIN, INT16_MAX);
+                int32_t channel_1_sample = 0;
+                if ((this_microphone->channel_1_ != nullptr) && (!this_microphone->channel_1_->get_mute_state())) {
+                  channel_1_sample = buffer[NUMBER_OF_CHANNELS * i + 1] >> channel_1_shift;
+                  channel_1_samples[i] = (int16_t)clamp<int32_t>(channel_1_sample, INT16_MIN, INT16_MAX);
                 }
               }
 
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
-              if (this_microphone->channel_1_ != nullptr) {
-                this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
+              if (this_microphone->channel_0_ != nullptr) {
+                this_microphone->channel_0_->get_ring_buffer()->write((void *) channel_0_samples.data(),
                                                                       bytes_to_write);
               }
-              if (this_microphone->channel_2_ != nullptr) {
-                this_microphone->channel_2_->get_ring_buffer()->write((void *) channel_2_samples.data(),
+              if (this_microphone->channel_1_ != nullptr) {
+                this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
                                                                       bytes_to_write);
               }
             }
@@ -347,8 +347,8 @@ void NabuMicrophone::stop() {
 }
 
 void NabuMicrophone::loop() {
-  if ((this->channel_1_ != nullptr) && (this->channel_1_->get_requested_stop()) && (this->channel_2_ != nullptr) &&
-      (this->channel_2_->get_requested_stop())) {
+  if ((this->channel_0_ != nullptr) && (this->channel_0_->get_requested_stop()) && (this->channel_1_ != nullptr) &&
+      (this->channel_1_->get_requested_stop())) {
     // Both microphone channels have requested a stop
     this->stop();
   }

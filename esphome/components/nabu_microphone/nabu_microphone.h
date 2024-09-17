@@ -42,8 +42,11 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
   void mute();
   void unmute();
 
+  void set_channel_0(NabuMicrophoneChannel *microphone) { this->channel_0_ = microphone; }
   void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
-  void set_channel_2(NabuMicrophoneChannel *microphone) { this->channel_2_ = microphone; }
+
+  NabuMicrophoneChannel *get_channel_0() { return this->channel_0_; }
+  NabuMicrophoneChannel *get_channel_1() { return this->channel_0_; }
 
 #if SOC_I2S_SUPPORTS_ADC
   void set_adc_channel(adc1_channel_t channel) {
@@ -73,8 +76,8 @@ class NabuMicrophone : public i2s_audio::I2SAudioIn, public Component {
   TaskHandle_t read_task_handle_{nullptr};
   QueueHandle_t event_queue_;
 
+  NabuMicrophoneChannel *channel_0_{nullptr};
   NabuMicrophoneChannel *channel_1_{nullptr};
-  NabuMicrophoneChannel *channel_2_{nullptr};
 
   bool use_apll_;
   bool pdm_{false};
@@ -124,14 +127,14 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
 
   RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
 
-  void set_amplify(bool amplify) { this->amplify_ = amplify; }
-  bool get_amplify() { return this->amplify_; }
+  void set_amplify_shift(uint8_t amplify_shift) { this->amplify_shift_ = amplify_shift; }
+  uint8_t get_amplify_shift() { return this->amplify_shift_; }
 
  protected:
   NabuMicrophone *parent_;
   std::unique_ptr<RingBuffer> ring_buffer_;
 
-  bool amplify_;
+  uint8_t amplify_shift_;
   bool is_muted_;
   bool requested_stop_;
 };

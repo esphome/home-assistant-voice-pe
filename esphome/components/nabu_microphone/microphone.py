@@ -27,9 +27,9 @@ CONF_ADC_TYPE = "adc_type"
 CONF_PDM = "pdm"
 CONF_SAMPLE_RATE = "sample_rate"
 CONF_USE_APLL = "use_apll"
+CONF_CHANNEL_0 = "channel_0"
 CONF_CHANNEL_1 = "channel_1"
-CONF_CHANNEL_2 = "channel_2"
-CONF_AMPLIFY = "amplify"
+CONF_AMPLIFY_SHIFT = "amplify_shift"
 
 nabu_microphone_ns = cg.esphome_ns.namespace("nabu_microphone")
 
@@ -62,6 +62,15 @@ def validate_esp32_variant(config):
     raise NotImplementedError
 
 
+MICROPHONE_CHANNEL_SCHEMA = microphone.MICROPHONE_SCHEMA.extend(
+            {
+                cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
+                cv.Optional(CONF_AMPLIFY_SHIFT, default=0): cv.All(
+                    cv.uint8_t, cv.Range(min=0, max=8)
+                ),
+            }
+        )
+
 BASE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(NabuMicrophone),
@@ -74,18 +83,8 @@ BASE_SCHEMA = cv.Schema(
             I2S_MODE_OPTIONS, lower=True
         ),
         cv.Optional(CONF_USE_APLL, default=False): cv.boolean,
-        cv.Optional(CONF_CHANNEL_1): microphone.MICROPHONE_SCHEMA.extend(
-            {
-                cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
-                cv.Optional(CONF_AMPLIFY, default=True): cv.boolean,
-            }
-        ),
-        cv.Optional(CONF_CHANNEL_2): microphone.MICROPHONE_SCHEMA.extend(
-            {
-                cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
-                cv.Optional(CONF_AMPLIFY, default=True): cv.boolean,
-            }
-        ),
+        cv.Optional(CONF_CHANNEL_0): MICROPHONE_CHANNEL_SCHEMA,
+        cv.Optional(CONF_CHANNEL_1): MICROPHONE_CHANNEL_SCHEMA,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -116,21 +115,21 @@ async def to_code(config):
 
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
 
+    if channel_0_config := config.get(CONF_CHANNEL_0):
+        channel_0 = cg.new_Pvariable(channel_0_config[CONF_ID])
+        await cg.register_component(channel_0, channel_0_config)
+        await cg.register_parented(channel_0, config[CONF_ID])
+        await microphone.register_microphone(channel_0, channel_0_config)
+        cg.add(var.set_channel_0(channel_0))
+        cg.add(channel_0.set_amplify_shift(channel_0_config[CONF_AMPLIFY_SHIFT]))
+
     if channel_1_config := config.get(CONF_CHANNEL_1):
         channel_1 = cg.new_Pvariable(channel_1_config[CONF_ID])
         await cg.register_component(channel_1, channel_1_config)
         await cg.register_parented(channel_1, config[CONF_ID])
         await microphone.register_microphone(channel_1, channel_1_config)
         cg.add(var.set_channel_1(channel_1))
-        cg.add(channel_1.set_amplify(channel_1_config[CONF_AMPLIFY]))
-
-    if channel_2_config := config.get(CONF_CHANNEL_2):
-        channel_2 = cg.new_Pvariable(channel_2_config[CONF_ID])
-        await cg.register_component(channel_2, channel_2_config)
-        await cg.register_parented(channel_2, config[CONF_ID])
-        await microphone.register_microphone(channel_2, channel_2_config)
-        cg.add(var.set_channel_2(channel_2))
-        cg.add(channel_2.set_amplify(channel_2_config[CONF_AMPLIFY]))
+        cg.add(channel_1.set_amplify_shift(channel_1_config[CONF_AMPLIFY_SHIFT]))
 
     if config[CONF_ADC_TYPE] == "internal":
         variant = esp32.get_esp32_variant()
