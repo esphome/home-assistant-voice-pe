@@ -65,7 +65,7 @@ def validate_esp32_variant(config):
 MICROPHONE_CHANNEL_SCHEMA = microphone.MICROPHONE_SCHEMA.extend(
             {
                 cv.GenerateID(): cv.declare_id(NabuMicrophoneChannel),
-                cv.Optional(CONF_AMPLIFY_SHIFT, default=True): cv.All(
+                cv.Optional(CONF_AMPLIFY_SHIFT, default=0): cv.All(
                     cv.uint8_t, cv.Range(min=0, max=8)
                 ),
             }
