@@ -503,19 +503,19 @@ void NabuMediaPlayer::loop() {
     this->media_pipeline_state_ = this->media_pipeline_->get_state();
 
   if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
-    ESP_LOGE(TAG, "Media pipeline encountered an error reading the file.");
+    ESP_LOGE(TAG, "The media pipeline's file reader encountered an error.");
   } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
-    ESP_LOGE(TAG, "Media pipeline encountered an error decoding the file.");
+    ESP_LOGE(TAG, "The media pipeline's audio decoder encountered an error.");
   } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
-    ESP_LOGE(TAG, "Media pipeline encountered an error resampling the file.");
+    ESP_LOGE(TAG, "The media pipeline's audio resampler encountered an error.");
   }
 
   if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_READING) {
-    ESP_LOGE(TAG, "Announcement pipeline encountered an error reading the file.");
+    ESP_LOGE(TAG, "The announcement pipeline's file reader encountered an error.");
   } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
-    ESP_LOGE(TAG, "Announcement pipeline encountered an error decoding the file.");
+    ESP_LOGE(TAG, "The announcement pipeline's audio decoder encountered an error.");
   } else if (this->announcement_pipeline_state_ == AudioPipelineState::ERROR_RESAMPLING) {
-    ESP_LOGE(TAG, "Announcement pipeline encountered an error resampling the file.");
+    ESP_LOGE(TAG, "The announcement pipeline's audio resampler encountered an error.");
   }
 
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {

@@ -71,6 +71,7 @@ esp_err_t AudioDecoder::start(media_player::MediaFileType media_file_type) {
       this->wav_decoder_->reset();
       break;
     case media_player::MediaFileType::NONE:
+      return ESP_ERR_NOT_SUPPORTED;
       break;
   }
 
