@@ -68,6 +68,60 @@ void VoiceKit::loop() {
   }
 }
 
+uint8_t VoiceKit::read_vnr() {
+  const uint8_t vnr_req[] = {CONFIGURATION_SERVICER_RESID,
+                             CONFIGURATION_SERVICER_RESID_VNR_VALUE | CONFIGURATION_COMMAND_READ_BIT, 2};
+  uint8_t vnr_resp[2];
+
+  auto error_code = this->write(vnr_req, sizeof(vnr_req));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Request status failed");
+    return 0;
+  }
+  error_code = this->read(vnr_resp, sizeof(vnr_resp));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to read VNR");
+    return 0;
+  }
+  return vnr_resp[1];
+}
+
+PipelineStages VoiceKit::read_pipeline_stage(MicrophoneChannels channel) {
+  uint8_t channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_0_PIPELINE_STAGE | CONFIGURATION_COMMAND_READ_BIT;
+  if (channel == MICROPHONE_CHANNEL_1) {
+    channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_1_PIPELINE_STAGE | CONFIGURATION_COMMAND_READ_BIT;
+  }
+
+  const uint8_t stage_req[] = {CONFIGURATION_SERVICER_RESID, channel_register, 2};
+
+  uint8_t stage_resp[2];
+
+  auto error_code = this->write(stage_req, sizeof(stage_req));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to read stage");
+  }
+  error_code = this->read(stage_resp, sizeof(stage_resp));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to read stage");
+  }
+
+  return static_cast<PipelineStages>(stage_resp[1]);
+}
+
+void VoiceKit::write_pipeline_stage(MicrophoneChannels channel, PipelineStages stage) {
+  uint8_t channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_0_PIPELINE_STAGE;
+  if (channel == MICROPHONE_CHANNEL_1) {
+    channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_1_PIPELINE_STAGE;
+  }
+
+  const uint8_t stage_set[] = {CONFIGURATION_SERVICER_RESID, channel_register, 1, stage};
+
+  auto error_code = this->write(stage_set, sizeof(stage_set));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to set stage");
+  }
+}
+
 void VoiceKit::start_dfu_update() {
   if (this->firmware_bin_ == nullptr || !this->firmware_bin_length_) {
     ESP_LOGE(TAG, "Firmware invalid");
