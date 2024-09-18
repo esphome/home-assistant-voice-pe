@@ -1338,6 +1338,7 @@ audio_dac:
   - platform: aic3204
 
 micro_wake_word:
+  id: mww
   models:
     - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu/okay_nabu.json
       id: okay_nabu
@@ -1422,6 +1423,7 @@ voice_assistant:
   id: va
   microphone: asr_mic
   media_player: nabu_media_player
+  micro_wake_word: mww
   use_wake_word: false
   noise_suppression_level: 0
   auto_gain: 0 dbfs
