@@ -43,7 +43,7 @@ improv_serial:
 
 esp32_improv:
   authorizer: center_button
-  on_awaiting_authorization:
+  on_started:
     - lambda: id(improv_ble_in_progress) = true;
     - script.execute: control_leds
   on_provisioned:
