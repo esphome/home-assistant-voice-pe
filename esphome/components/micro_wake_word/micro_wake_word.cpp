@@ -407,13 +407,6 @@ void MicroWakeWord::loop() {
           });
         });
       }
-
-#ifdef USE_VOICE_ASSISTANT
-      // TODO: potentially remove, as it currently only logs in the voice assistant component
-      if (voice_assistant::global_voice_assistant != nullptr) {
-        voice_assistant::global_voice_assistant->on_wake_word(detection_event);
-      }
-#endif
     }
   }
 }
