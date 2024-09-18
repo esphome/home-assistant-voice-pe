@@ -160,8 +160,10 @@ void StreamingModel::reset_probabilities() {
   this->ignore_windows_ = -MIN_SLICES_BEFORE_DETECTION;
 }
 
-WakeWordModel::WakeWordModel(const uint8_t *model_start, uint8_t probability_cutoff, size_t sliding_window_average_size,
+WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start,
+                             uint8_t probability_cutoff, size_t sliding_window_average_size,
                              const std::string &wake_word, size_t tensor_arena_size) {
+  this->id_ = id;
   this->model_start_ = model_start;
   this->probability_cutoff_ = probability_cutoff;
   this->sliding_window_size_ = sliding_window_average_size;
