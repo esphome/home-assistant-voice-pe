@@ -31,6 +31,18 @@ voice_kit_ns = cg.esphome_ns.namespace("voice_kit")
 VoiceKit = voice_kit_ns.class_("VoiceKit", cg.Component, i2c.I2CDevice)
 VoiceKitFlashAction = voice_kit_ns.class_("VoiceKitFlashAction", automation.Action)
 
+PipelineStages = voice_kit_ns.enum("PipelineStages")
+PIPELINE_STAGES = {
+    "NONE": PipelineStages.PIPELINE_STAGE_NONE,
+    "AEC": PipelineStages.PIPELINE_STAGE_AEC,
+    "IC": PipelineStages.PIPELINE_STAGE_IC,
+    "NS": PipelineStages.PIPELINE_STAGE_NS,
+    "AGC": PipelineStages.PIPELINE_STAGE_AGC,
+}
+
+CONF_CHANNEL_0_STAGE = "channel_0_stage"
+CONF_CHANNEL_1_STAGE = "channel_1_stage"
+
 DFUEndTrigger = voice_kit_ns.class_("DFUEndTrigger", automation.Trigger.template())
 DFUErrorTrigger = voice_kit_ns.class_("DFUErrorTrigger", automation.Trigger.template())
 DFUProgressTrigger = voice_kit_ns.class_(
@@ -71,6 +83,12 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(VoiceKit),
             cv.Required(CONF_RESET_PIN): pins.gpio_output_pin_schema,
             cv.GenerateID(CONF_RAW_DATA_ID): cv.declare_id(cg.uint8),
+            cv.Optional(CONF_CHANNEL_0_STAGE, default="AGC"): cv.enum(
+                PIPELINE_STAGES, upper=True
+            ),
+            cv.Optional(CONF_CHANNEL_1_STAGE, default="NS"): cv.enum(
+                PIPELINE_STAGES, upper=True
+            ),
             cv.Optional(CONF_FIRMWARE): cv.All(
                 {
                     cv.Required(CONF_URL): cv.url,
@@ -140,6 +158,9 @@ async def to_code(config):
 
     pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
     cg.add(var.set_reset_pin(pin))
+
+    cg.add(var.set_channel_0_stage(config[CONF_CHANNEL_0_STAGE]))
+    cg.add(var.set_channel_1_stage(config[CONF_CHANNEL_1_STAGE]))
 
     if config_fw := config.get(CONF_FIRMWARE):
         firmware_version = config_fw[CONF_VERSION].split(".")

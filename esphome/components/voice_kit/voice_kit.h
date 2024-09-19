@@ -149,8 +149,12 @@ class VoiceKit : public Component, public i2c::I2CDevice {
 
   void start_dfu_update();
 
+  void set_channel_0_stage(PipelineStages channel_0_stage) { this->channel_0_stage_ = channel_0_stage; }
+  void set_channel_1_stage(PipelineStages channel_1_stage) { this->channel_1_stage_ = channel_1_stage; }
+
+  void write_pipeline_stages();
   uint8_t read_vnr();
-  void write_pipeline_stage(MicrophoneChannels channel, PipelineStages stage);
+
   PipelineStages read_pipeline_stage(MicrophoneChannels channel);
 
  protected:
@@ -168,6 +172,9 @@ class VoiceKit : public Component, public i2c::I2CDevice {
   bool dfu_reboot_();
   bool dfu_set_alternate_();
   bool dfu_check_if_ready_();
+
+  PipelineStages channel_0_stage_;
+  PipelineStages channel_1_stage_;
 
   GPIOPin *reset_pin_;
 
