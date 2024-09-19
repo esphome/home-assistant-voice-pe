@@ -80,8 +80,8 @@ esp_err_t AudioReader::start(const std::string &uri, media_player::MediaFileType
   client_config.max_redirection_count = 10;
   client_config.buffer_size = 512;
   client_config.keep_alive_enable = true;
-  client_config.timeout_ms = 250;  // Doesn't raise an error if exceeded in esp-idf v4.4, it just prevents the
-                                   // http_client_read command from blocking for too long
+  client_config.timeout_ms = 5000;  // Doesn't raise an error if exceeded in esp-idf v4.4, it just prevents the
+                                    // http_client_read command from blocking for too long
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
   if (uri.find("https:") != std::string::npos) {
