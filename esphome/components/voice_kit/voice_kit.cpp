@@ -30,6 +30,8 @@ void VoiceKit::setup() {
                this->firmware_bin_version_minor_, this->firmware_bin_version_patch_, this->firmware_version_major_,
                this->firmware_version_minor_, this->firmware_version_patch_);
       this->start_dfu_update();
+    } else {
+      this->write_pipeline_stages();
     }
   });
 }
@@ -108,17 +110,23 @@ PipelineStages VoiceKit::read_pipeline_stage(MicrophoneChannels channel) {
   return static_cast<PipelineStages>(stage_resp[1]);
 }
 
-void VoiceKit::write_pipeline_stage(MicrophoneChannels channel, PipelineStages stage) {
-  uint8_t channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_0_PIPELINE_STAGE;
-  if (channel == MICROPHONE_CHANNEL_1) {
-    channel_register = CONFIGURATION_SERVICER_RESID_CHANNEL_1_PIPELINE_STAGE;
-  }
-
-  const uint8_t stage_set[] = {CONFIGURATION_SERVICER_RESID, channel_register, 1, stage};
+void VoiceKit::write_pipeline_stages() {
+  // Write channel 0 stage
+  uint8_t stage_set[] = {CONFIGURATION_SERVICER_RESID, CONFIGURATION_SERVICER_RESID_CHANNEL_0_PIPELINE_STAGE, 1,
+                               this->channel_0_stage_};
 
   auto error_code = this->write(stage_set, sizeof(stage_set));
   if (error_code != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Failed to set stage");
+    ESP_LOGE(TAG, "Failed to write chanenl 0 stage");
+  }
+
+  // Write channel 1 stage
+  stage_set[1] = CONFIGURATION_SERVICER_RESID_CHANNEL_1_PIPELINE_STAGE;
+  stage_set[3] = this->channel_1_stage_;
+
+  error_code = this->write(stage_set, sizeof(stage_set));
+  if (error_code != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to write channel 1 stage");
   }
 }
 
@@ -232,6 +240,7 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
 #ifdef USE_VOICE_KIT_STATE_CALLBACK
         this->state_callback_.call(DFU_COMPLETE, 100.0f, UPDATE_OK);
 #endif
+        this->write_pipeline_stages();
         return UPDATE_OK;
 
       default:
