@@ -1395,34 +1395,6 @@ micro_wake_word:
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
 
-select:
-  - platform: template
-    name: "Active wake word"
-    icon: "mdi:bullhorn"
-    entity_category: config
-    options:
-      - "OK Nabu"
-      - "Hey Jarvis"
-      - "Hey Mycroft"
-    optimistic: true
-    restore_value: true
-    on_value:
-      then:
-        - lambda: |-
-            if (x == "OK Nabu") {
-              id(okay_nabu).enable();
-              id(hey_mycroft).disable();
-              id(hey_jarvis).disable();
-            } else if (x == "Hey Mycroft") {
-              id(okay_nabu).disable();
-              id(hey_mycroft).enable();
-              id(hey_jarvis).disable();
-            } else if (x == "Hey Jarvis") {
-              id(okay_nabu).disable();
-              id(hey_mycroft).disable();
-              id(hey_jarvis).enable();
-            }
-
 voice_assistant:
   id: va
   microphone: asr_mic
