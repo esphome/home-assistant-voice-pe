@@ -308,13 +308,7 @@ binary_sensor:
                                                   id: play_sound
                                                   priority: true
                                                   sound_file: !lambda return id(center_button_press_sound);
-                                              - wait_until:
-                                                  lambda: |-
-                                                    return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                                              - wait_until:
-                                                  not:
-                                                    lambda: |-
-                                                      return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                                              - delay: 300ms
                                               - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
@@ -514,26 +508,29 @@ binary_sensor:
     on_press:
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
-      - delay: 1s
-      - lambda: id(jack_plugged_recently) = false;
-      - script.execute: control_leds
+      - delay: 200ms
       - script.execute:
           id: play_sound
           priority: false
           sound_file: !lambda return id(jack_connected_sound);
+      - delay: 800ms
+      - lambda: id(jack_plugged_recently) = false;
+      - script.execute: control_leds
     # When the jack is unplugged:
     #  - LED animation
     #  - Sound played
     on_release:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
-      - delay: 1s
-      - lambda: id(jack_unplugged_recently) = false;
-      - script.execute: control_leds
+      - delay: 200ms
       - script.execute:
           id: play_sound
           priority: false
           sound_file: !lambda return id(jack_disconnected_sound);
+      - delay: 800ms
+      - lambda: id(jack_unplugged_recently) = false;
+      - script.execute: control_leds
+
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -1384,13 +1381,6 @@ micro_wake_word:
                           id: play_sound
                           priority: true
                           sound_file: !lambda return id(wake_word_triggered_sound);
-                      # - wait_until:
-                      #     lambda: |-
-                      #       return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-                      # - wait_until:
-                      #     not:
-                      #       lambda: |-
-                      #         return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
                       - delay: 300ms
                 - voice_assistant.start:
                     wake_word: !lambda return wake_word;
