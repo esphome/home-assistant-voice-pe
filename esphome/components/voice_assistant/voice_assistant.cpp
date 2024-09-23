@@ -281,12 +281,6 @@ void VoiceAssistant::loop() {
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_WAKE_WORD;
       if (this->silence_detection_)
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_VAD;
-      else {
-        this->speech_ms_left_ = this->speech_ms_;
-        this->silence_ms_left_ = this->silence_ms_;
-        this->timeout_ms_left_ = this->timeout_ms_;
-        this->last_loop_ms_ = {};
-      }
 
       api::VoiceAssistantAudioSettings audio_settings;
       audio_settings.noise_suppression_level = this->noise_suppression_level_;
@@ -337,41 +331,6 @@ void VoiceAssistant::loop() {
         }
         available = this->ring_buffer_->available();
       }
-
-#ifdef USE_MICRO_WAKE_WORD_VAD
-      if (!this->silence_detection_) {
-        bool new_vad_state = false;
-        if (this->micro_wake_word_ != nullptr) {
-          new_vad_state = this->micro_wake_word_->get_vad_state();
-        }
-
-        uint32_t new_loop_ms = millis();
-        if (this->last_loop_ms_.has_value()) {
-          uint32_t since_last_loop_ms = new_loop_ms - this->last_loop_ms_.value();
-
-          if (new_vad_state && this->last_vad_state_) {
-            // Speech
-            this->speech_ms_left_ -= since_last_loop_ms;
-            this->silence_ms_left_ = this->silence_ms_;
-          } else if (!new_vad_state && !this->last_vad_state_) {
-            // No speech
-            this->silence_ms_left_ -= since_last_loop_ms;
-          }
-
-          this->timeout_ms_left_ -= since_last_loop_ms;
-        }
-        this->last_loop_ms_ = new_loop_ms;
-        this->last_vad_state_ = new_vad_state;
-
-        if ((this->timeout_ms_left_ < 0) || ((this->speech_ms_left_ < 0) && (this->silence_ms_left_ < 0))) {
-          this->signal_stop_();
-          // TODO: Both of these are hacky... protocol needs to be updated to handle this properly?
-          this->set_state_(State::STOP_MICROPHONE, State::IDLE);
-          // this->set_state_(State::STOP_MICROPHONE, State::AWAITING_RESPONSE);
-        }
-#endif
-      }
-
       break;
     }
     case State::STOP_MICROPHONE: {
@@ -922,7 +881,7 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 #endif
 }
 
-void VoiceAssistant::on_set_configuration(const std::vector<std::string>& active_wake_words) {
+void VoiceAssistant::on_set_configuration(const std::vector<std::string> &active_wake_words) {
   if (this->micro_wake_word_) {
     // Disable all wake words first
     for (auto &model : this->micro_wake_word_->get_wake_words()) {
@@ -934,9 +893,7 @@ void VoiceAssistant::on_set_configuration(const std::vector<std::string>& active
       for (auto &model : this->micro_wake_word_->get_wake_words()) {
         if (model->get_id() == ww_id) {
           model->enable();
-          ESP_LOGD(TAG, "Enabled wake word: %s (id=%s)",
-                   model->get_wake_word().c_str(),
-                   model->get_id().c_str());
+          ESP_LOGD(TAG, "Enabled wake word: %s (id=%s)", model->get_wake_word().c_str(), model->get_id().c_str());
         }
       }
     }
@@ -967,7 +924,6 @@ const Configuration &VoiceAssistant::get_configuration() {
     // No microWakeWord
     this->config_.max_active_wake_words = 0;
   }
-
 
   return this->config_;
 };
