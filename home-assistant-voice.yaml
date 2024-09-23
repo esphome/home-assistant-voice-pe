@@ -531,7 +531,6 @@ binary_sensor:
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
 
-
 light:
   # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
