@@ -350,23 +350,6 @@ void MicroWakeWord::loop() {
   }
 }
 
-void MicroWakeWord::enable_wake_words(std::vector<std::string> &wake_words_to_enable) {
-  // Disable and unload all models
-  for (auto &model : this->wake_word_models_) {
-    model->disable();
-  }
-
-  delay(20);  // make sure the models have actually unloaded
-
-  for (auto &model : this->wake_word_models_) {
-    for (auto &wake_word : wake_words_to_enable) {
-      if (!model->get_wake_word().compare(wake_word)) {
-        model->enable();
-      }
-    }
-  }
-}
-
 void MicroWakeWord::start() {
   if (!this->is_ready()) {
     ESP_LOGW(TAG, "Wake word detection can't start as the component hasn't been setup yet");
