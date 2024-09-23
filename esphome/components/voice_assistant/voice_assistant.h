@@ -105,11 +105,6 @@ class VoiceAssistant : public Component {
   void set_microphone(microphone::Microphone *mic) { this->mic_ = mic; }
 #ifdef USE_MICRO_WAKE_WORD
   void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->micro_wake_word_ = mww; }
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  void set_speech_ms(uint32_t speech_ms) { this->speech_ms_ = speech_ms; }
-  void set_timeout_ms(uint32_t timeout_ms) { this->timeout_ms_ = timeout_ms; }
-  void set_silence_ms(uint32_t silence_ms) { this->silence_ms_ = silence_ms; }
-#endif
 #endif
 #ifdef USE_SPEAKER
   void set_speaker(speaker::Speaker *speaker) {
@@ -313,20 +308,6 @@ class VoiceAssistant : public Component {
 
 #ifdef USE_MICRO_WAKE_WORD
   micro_wake_word::MicroWakeWord *micro_wake_word_{nullptr};
-
-#ifdef USE_MICRO_WAKE_WORD_VAD
-  uint32_t speech_ms_{500};  // This is hard to configure (HA uses 300) with the current VAD, as it may initially be
-                             // detected from the wake word
-  uint32_t timeout_ms_{15000};
-  uint32_t silence_ms_{1000};
-
-  int32_t speech_ms_left_{0};
-  int32_t silence_ms_left_{0};
-  int32_t timeout_ms_left_{0};
-
-  optional<uint32_t> last_loop_ms_;
-  bool last_vad_state_;
-#endif
 #endif
 };  // namespace voice_assistant
 
