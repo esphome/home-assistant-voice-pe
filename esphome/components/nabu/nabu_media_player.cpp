@@ -637,7 +637,7 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
   {  // Fall back to software mute control if there is no audio_dac or if it isn't configured
     if (mute_state) {
       this->software_volume_scale_factor_ = 0;
-    } else {
+    } else if (this->software_volume_scale_factor_ == 0) {
       this->set_volume_(this->volume, false);  // restore previous volume
     }
   }
