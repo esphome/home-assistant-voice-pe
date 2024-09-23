@@ -281,12 +281,6 @@ void VoiceAssistant::loop() {
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_WAKE_WORD;
       if (this->silence_detection_)
         flags |= api::enums::VOICE_ASSISTANT_REQUEST_USE_VAD;
-      else {
-        this->speech_ms_left_ = this->speech_ms_;
-        this->silence_ms_left_ = this->silence_ms_;
-        this->timeout_ms_left_ = this->timeout_ms_;
-        this->last_loop_ms_ = {};
-      }
 
       api::VoiceAssistantAudioSettings audio_settings;
       audio_settings.noise_suppression_level = this->noise_suppression_level_;
