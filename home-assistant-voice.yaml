@@ -672,7 +672,7 @@ light:
           update_interval: 16ms
           lambda: |-
             static int8_t index = 0;
-            Color color(255, 0, 0);
+            Color color(255, 165, 0);
             for (int i = 0; i < 12; i++) {
               if (i == 3  && id(master_mute_switch).state ) {
                 it[i] = color;
@@ -691,13 +691,17 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
+            Color silenced_color(255, 165, 0);
             auto nb_leds_on = 12.0f * id(nabu_media_player).volume;
             for (int i = 0; i < 12; i++) {
               if (i < nb_leds_on) {
-                it[i] = color;
+                it[(6+i)%12] = color;
               } else {
-                it[i] = Color::BLACK;
+                it[(6+i)%12] = Color::BLACK;
               }
+            }
+            if (id(nabu_media_player).volume == 0.0f) {
+              it[6] = silenced_color * 128;
             }
       - addressable_lambda:
           name: "Center Button Touched"
