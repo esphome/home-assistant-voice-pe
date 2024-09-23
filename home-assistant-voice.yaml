@@ -509,31 +509,31 @@ binary_sensor:
     pin:
       number: GPIO17
     # When the jack is plugged in:
-    #  - LED animation
     #  - Sound played
+    #  - LED animation
     on_press:
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_connected_sound);
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
       - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
+    # When the jack is unplugged:
+    #  - Sound played
+    #  - LED animation
+    on_release:
       - script.execute:
           id: play_sound
           priority: false
-          sound_file: !lambda return id(jack_connected_sound);
-    # When the jack is unplugged:
-    #  - LED animation
-    #  - Sound played
-    on_release:
+          sound_file: !lambda return id(jack_disconnected_sound);
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
       - delay: 1s
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_disconnected_sound);
 
 light:
   # Hardware LED ring. Not used because remapping needed
