@@ -20,7 +20,7 @@ static const size_t RING_BUFFER_LENGTH = 64;  // Measured in milliseconds
 static const size_t QUEUE_LENGTH = 10;
 
 static const size_t NUMBER_OF_CHANNELS = 2;
-static const size_t DMA_BUFFER_SIZE = 160;
+static const size_t DMA_BUFFER_SIZE = 480;
 static const size_t DMA_BUFFERS_COUNT = 4;
 static const size_t FRAMES_IN_ALL_DMA_BUFFERS = DMA_BUFFER_SIZE * DMA_BUFFERS_COUNT;
 static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = FRAMES_IN_ALL_DMA_BUFFERS * NUMBER_OF_CHANNELS;
@@ -225,13 +225,13 @@ void NabuMicrophone::read_task_(void *params) {
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
 
       if (this_microphone->channel_0_ != nullptr)
-        channel_0_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
+        channel_0_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS / 3);
 
       if (this_microphone->channel_1_ != nullptr)
-        channel_1_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS);
+        channel_1_samples.reserve(FRAMES_IN_ALL_DMA_BUFFERS / 3);
 
-      if ((buffer == nullptr) || (channel_0_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS) ||
-          (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS)) {
+      if ((buffer == nullptr) || (channel_0_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS / 3) ||
+          (channel_1_samples.capacity() < FRAMES_IN_ALL_DMA_BUFFERS / 3)) {
         event.type = TaskEventType::WARNING;
         event.err = ESP_ERR_NO_MEM;
         xQueueSend(this_microphone->event_queue_, &event, portMAX_DELAY);
@@ -275,21 +275,21 @@ void NabuMicrophone::read_task_(void *params) {
               const uint8_t channel_0_shift = 16 - this_microphone->channel_0_->get_amplify_shift();
               const uint8_t channel_1_shift = 16 - this_microphone->channel_1_->get_amplify_shift();
 
-              for (size_t i = 0; i < frames_read; i++) {
+              for (size_t i = 0; i < frames_read / 3; i++) {
                 int32_t channel_0_sample = 0;
                 if ((this_microphone->channel_0_ != nullptr) && (!this_microphone->channel_0_->get_mute_state())) {
-                  channel_0_sample = buffer[NUMBER_OF_CHANNELS * i] >> channel_0_shift;
-                  channel_0_samples[i] = (int16_t)clamp<int32_t>(channel_0_sample, INT16_MIN, INT16_MAX);
+                  channel_0_sample = buffer[NUMBER_OF_CHANNELS * i * 3] >> channel_0_shift;
+                  channel_0_samples[i] = (int16_t) clamp<int32_t>(channel_0_sample, INT16_MIN, INT16_MAX);
                 }
 
                 int32_t channel_1_sample = 0;
                 if ((this_microphone->channel_1_ != nullptr) && (!this_microphone->channel_1_->get_mute_state())) {
-                  channel_1_sample = buffer[NUMBER_OF_CHANNELS * i + 1] >> channel_1_shift;
-                  channel_1_samples[i] = (int16_t)clamp<int32_t>(channel_1_sample, INT16_MIN, INT16_MAX);
+                  channel_1_sample = buffer[NUMBER_OF_CHANNELS * i * 3 + 1] >> channel_1_shift;
+                  channel_1_samples[i] = (int16_t) clamp<int32_t>(channel_1_sample, INT16_MIN, INT16_MAX);
                 }
               }
 
-              size_t bytes_to_write = frames_read * sizeof(int16_t);
+              size_t bytes_to_write = frames_read * sizeof(int16_t) / 3;
 
               if (this_microphone->channel_0_ != nullptr) {
                 this_microphone->channel_0_->get_ring_buffer()->write((void *) channel_0_samples.data(),
@@ -332,7 +332,7 @@ void NabuMicrophone::start() {
     return;
 
   if (this->read_task_handle_ == nullptr) {
-    xTaskCreate(NabuMicrophone::read_task_, "microphone_task", 3584, (void *) this, 23, &this->read_task_handle_);
+    xTaskCreate(NabuMicrophone::read_task_, "microphone_task", 8192, (void *) this, 23, &this->read_task_handle_);
   }
 
   // TODO: Should we overwrite? If stop and start are called in quick succession, what behavior do we want
