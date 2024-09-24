@@ -49,7 +49,7 @@ esphome:
 esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
-  flash_size: 16MB
+  flash_size: 8MB
   framework:
     type: esp-idf
     version: recommended
@@ -246,7 +246,7 @@ binary_sensor:
   - platform: gpio
     id: center_button
     pin:
-      number: GPIO0
+      number: GPIO17
       inverted: true
     on_press:
       - script.execute: control_leds
@@ -494,42 +494,42 @@ binary_sensor:
           id: master_mute_switch
           state: OFF
   # Audio Jack PLugged sensor
-  - platform: gpio
-    id: jack_plugged
-    # Debouncing it a bit because it can be activated back and forth as you plug the audio jack
-    filters:
-      - delayed_on: 200ms
-      - delayed_off: 200ms
-    pin:
-      number: GPIO17
-    # When the jack is plugged in:
-    #  - LED animation
-    #  - Sound played
-    on_press:
-      - lambda: id(jack_plugged_recently) = true;
-      - script.execute: control_leds
-      - delay: 200ms
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_connected_sound);
-      - delay: 800ms
-      - lambda: id(jack_plugged_recently) = false;
-      - script.execute: control_leds
-    # When the jack is unplugged:
-    #  - LED animation
-    #  - Sound played
-    on_release:
-      - lambda: id(jack_unplugged_recently) = true;
-      - script.execute: control_leds
-      - delay: 200ms
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_disconnected_sound);
-      - delay: 800ms
-      - lambda: id(jack_unplugged_recently) = false;
-      - script.execute: control_leds
+  # - platform: gpio
+  #   id: jack_plugged
+  #   # Debouncing it a bit because it can be activated back and forth as you plug the audio jack
+  #   filters:
+  #     - delayed_on: 200ms
+  #     - delayed_off: 200ms
+  #   pin:
+  #     number: GPIO17
+  #   # When the jack is plugged in:
+  #   #  - LED animation
+  #   #  - Sound played
+  #   on_press:
+  #     - lambda: id(jack_plugged_recently) = true;
+  #     - script.execute: control_leds
+  #     - delay: 200ms
+  #     - script.execute:
+  #         id: play_sound
+  #         priority: false
+  #         sound_file: !lambda return id(jack_connected_sound);
+  #     - delay: 800ms
+  #     - lambda: id(jack_plugged_recently) = false;
+  #     - script.execute: control_leds
+  #   # When the jack is unplugged:
+  #   #  - LED animation
+  #   #  - Sound played
+  #   on_release:
+  #     - lambda: id(jack_unplugged_recently) = true;
+  #     - script.execute: control_leds
+  #     - delay: 200ms
+  #     - script.execute:
+  #         id: play_sound
+  #         priority: false
+  #         sound_file: !lambda return id(jack_disconnected_sound);
+  #     - delay: 800ms
+  #     - lambda: id(jack_unplugged_recently) = false;
+  #     - script.execute: control_leds
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -1217,22 +1217,26 @@ i2s_audio:
     # i2s_output data pin is gpio10
     i2s_lrclk_pin:
       number: GPIO7
+      allow_other_uses: true
     i2s_bclk_pin:
       number: GPIO8
+      allow_other_uses: true
 
   - id: i2s_input
-    # data line is GPIO15
+    # data line is GPIO11
     i2s_lrclk_pin:
-      number: GPIO14
+      number: GPIO7
+      allow_other_uses: true
     i2s_bclk_pin:
-      number: GPIO13
+      number: GPIO8
+      allow_other_uses: true
 
 microphone:
   - platform: nabu_microphone
-    i2s_din_pin: GPIO15
+    i2s_din_pin: GPIO11
     adc_type: external
     pdm: false
-    sample_rate: 16000
+    sample_rate: 48000
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
@@ -1313,15 +1317,15 @@ media_player:
 voice_kit:
   reset_pin: GPIO4
   firmware:
-    url: https://github.com/esphome/voice-kit-xmos-firmware/releases/download/v1.3.1/ffva_v1.3.1_upgrade.bin
+    url: https://github.com/esphome/home-assistant-voice-pe/raw/refs/heads/evt-samples/48khz_triplicate_v1.3.1.bin
     version: "1.3.1"
-    md5: 964635c5bf125529dab14a2472a15401
+    md5: 10db4a77ec3c403bab320ec7af2bf671
 
 external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: evt-samples
     components:
       - aic3204
       - audio_dac
