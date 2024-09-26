@@ -160,9 +160,9 @@ void StreamingModel::reset_probabilities() {
   this->ignore_windows_ = -MIN_SLICES_BEFORE_DETECTION;
 }
 
-WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start,
-                             uint8_t probability_cutoff, size_t sliding_window_average_size,
-                             const std::string &wake_word, size_t tensor_arena_size) {
+WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start, uint8_t probability_cutoff,
+                             size_t sliding_window_average_size, const std::string &wake_word, size_t tensor_arena_size,
+                             bool default_enabled) {
   this->id_ = id;
   this->model_start_ = model_start;
   this->probability_cutoff_ = probability_cutoff;
@@ -172,7 +172,27 @@ WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start,
   this->tensor_arena_size_ = tensor_arena_size;
   this->register_streaming_ops_(this->streaming_op_resolver_);
   this->current_stride_step_ = 0;
+
+  this->pref_ = global_preferences->make_preference<bool>(fnv1_hash(id));
+  bool enabled;
+  if (this->pref_.load(&enabled)) {
+    // Use the enabled state loaded from flash
+    this->enabled_ = enabled;
+  } else {
+    // If no state saved, then use the default
+    this->enabled_ = default_enabled;
+  }
 };
+
+void WakeWordModel::enable() {
+  this->enabled_ = true;
+  this->pref_.save(&this->enabled_);
+}
+
+void WakeWordModel::disable() {
+  this->enabled_ = false;
+  this->pref_.save(&this->enabled_);
+}
 
 DetectionEvent WakeWordModel::determine_detected() {
   DetectionEvent detection_event;
