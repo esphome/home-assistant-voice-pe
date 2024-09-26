@@ -472,7 +472,7 @@ async def to_code(config):
         # Use the general model loading code for the VAD codegen
         config[CONF_MODELS].append(vad_model)
 
-    for model_parameters in config[CONF_MODELS]:
+    for i, model_parameters in enumerate(config[CONF_MODELS]):
         model_config = model_parameters.get(CONF_MODEL)
         data = []
         manifest, data = _model_config_to_manifest_data(model_config)
@@ -500,6 +500,8 @@ async def to_code(config):
                 )
             )
         else:
+            # Only enable the first wake word by default. After first boot, the enable state is saved/loaded to the flash
+            default_enabled = i == 0
             wake_word_model = cg.new_Pvariable(
                 model_parameters[CONF_ID],
                 str(model_parameters[CONF_ID]),
@@ -508,6 +510,7 @@ async def to_code(config):
                 sliding_window_size,
                 manifest[KEY_WAKE_WORD],
                 manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
+                default_enabled,
             )
 
             for lang in manifest[KEY_TRAINED_LANGUAGES]:

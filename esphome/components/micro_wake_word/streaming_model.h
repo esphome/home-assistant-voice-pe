@@ -4,6 +4,8 @@
 
 #include "preprocessor_settings.h"
 
+#include "esphome/core/preferences.h"
+
 #include <tensorflow/lite/core/c/common.h>
 #include <tensorflow/lite/micro/micro_interpreter.h>
 #include <tensorflow/lite/micro/micro_mutable_op_resolver.h>
@@ -44,12 +46,10 @@ class StreamingModel {
   void unload_model();
 
   /// @brief Enable the model. The next performing_streaming_inference call will load it.
-  void enable() {
-    this->enabled_ = true;
-  }
+  virtual void enable() { this->enabled_ = true; }
 
   /// @brief Disable the model. The next performing_streaming_inference call will unload it.
-  void disable() { this->enabled_ = false; }
+  virtual void disable() { this->enabled_ = false; }
 
   /// @brief Return true if the model is enabled.
   bool is_enabled() { return this->enabled_; }
@@ -87,9 +87,9 @@ class StreamingModel {
 
 class WakeWordModel final : public StreamingModel {
  public:
-  WakeWordModel(const std::string &id, const uint8_t *model_start,
-                uint8_t probability_cutoff, size_t sliding_window_average_size,
-                const std::string &wake_word, size_t tensor_arena_size);
+  WakeWordModel(const std::string &id, const uint8_t *model_start, uint8_t probability_cutoff,
+                size_t sliding_window_average_size, const std::string &wake_word, size_t tensor_arena_size,
+                bool default_enabled);
 
   void log_model_config() override;
 
@@ -104,10 +104,18 @@ class WakeWordModel final : public StreamingModel {
   void add_trained_language(const std::string &language) { this->trained_languages_.push_back(language); }
   const std::vector<std::string> &get_trained_languages() const { return this->trained_languages_; }
 
+  /// @brief Enable the model and save to flash. The next performing_streaming_inference call will load it.
+  virtual void enable() override;
+
+  /// @brief Disable the model and save to flash. The next performing_streaming_inference call will unload it.
+  virtual void disable() override;
+
  protected:
   std::string id_;
   std::string wake_word_;
   std::vector<std::string> trained_languages_;
+
+  ESPPreferenceObject pref_;
 };
 
 class VADModel final : public StreamingModel {
