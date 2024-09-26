@@ -500,10 +500,8 @@ async def to_code(config):
                 )
             )
         else:
-            default_enabled = False
-            if i == 0:
-                # Only enable the first wake word by default. After first boot, the enable state is saved/loaded to the flash
-                default_enabled = True
+            # Only enable the first wake word by default. After first boot, the enable state is saved/loaded to the flash
+            default_enabled = i == 0
             wake_word_model = cg.new_Pvariable(
                 model_parameters[CONF_ID],
                 str(model_parameters[CONF_ID]),
