@@ -3,6 +3,7 @@
 #ifdef USE_ESP_IDF
 
 #include "esphome/components/media_player/media_player.h"
+#include "esphome/components/speaker/speaker.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -73,14 +74,14 @@ static const std::vector<int16_t> decibel_reduction_table = {
 
 class AudioMixer {
  public:
-  /// @brief Returns the number of bytes available to read from the ring buffer
-  size_t available() { return this->output_ring_buffer_->available(); }
+  // /// @brief Returns the number of bytes available to read from the ring buffer
+  // size_t available() { return this->output_ring_buffer_->available(); }
 
-  /// @brief Reads from the output ring buffer
-  /// @param buffer stores the read data
-  /// @param length how many bytes requested to read from the ring buffer
-  /// @return number of bytes actually read; will be less than length if not available in ring buffer
-  size_t read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait = 0);
+  // /// @brief Reads from the output ring buffer
+  // /// @param buffer stores the read data
+  // /// @param length how many bytes requested to read from the ring buffer
+  // /// @return number of bytes actually read; will be less than length if not available in ring buffer
+  // size_t read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait = 0);
 
   /// @brief Sends a CommandEvent to the command queue
   /// @param command Pointer to CommandEvent object to be sent
@@ -99,10 +100,11 @@ class AudioMixer {
   }
 
   /// @brief Starts the mixer task
+  /// @param speaker Pointer to Speaker component
   /// @param task_name FreeRTOS task name
   /// @param priority FreeRTOS task priority. Defaults to 1
   /// @return ESP_OK if successful, and error otherwise
-  esp_err_t start(const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(speaker::Speaker *speaker, const std::string &task_name, UBaseType_t priority = 1);
 
   /// @brief Stops the mixer task and clears the queues
   void stop();
@@ -155,8 +157,9 @@ class AudioMixer {
   // Stores commands to send the mixer task
   QueueHandle_t command_queue_;
 
-  // Stores the mixed audio
-  std::unique_ptr<RingBuffer> output_ring_buffer_;
+  // // Stores the mixed audio
+  // std::unique_ptr<RingBuffer> output_ring_buffer_;
+  speaker::Speaker *speaker_{nullptr};
 
   std::unique_ptr<RingBuffer> media_ring_buffer_;
   std::unique_ptr<RingBuffer> announcement_ring_buffer_;

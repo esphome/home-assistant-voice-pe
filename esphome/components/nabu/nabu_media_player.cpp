@@ -78,10 +78,10 @@ static const size_t TASK_DELAY_MS = 10;
 
 static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
 
-enum SpeakerTaskNotificationBits : uint32_t {
-  COMMAND_START = (1 << 0),  // Starts the main task purpose
-  COMMAND_STOP = (1 << 1),   // stops the main task
-};
+// enum SpeakerTaskNotificationBits : uint32_t {
+//   COMMAND_START = (1 << 0),  // Starts the main task purpose
+//   COMMAND_STOP = (1 << 1),   // stops the main task
+// };
 
 static const char *const TAG = "nabu_media_player";
 
@@ -89,7 +89,7 @@ void NabuMediaPlayer::setup() {
   state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
   this->media_control_command_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(MediaCallCommand));
-  this->speaker_event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
+  // this->speaker_event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
 
   this->pref_ = global_preferences->make_preference<VolumeRestoreState>(this->get_object_id_hash());
 
@@ -106,9 +106,9 @@ void NabuMediaPlayer::setup() {
   ota::get_global_ota_callback()->add_on_state_callback(
       [this](ota::OTAState state, float progress, uint8_t error, ota::OTAComponent *comp) {
         if (state == ota::OTA_STARTED) {
-          if (this->speaker_task_handle_ != nullptr) {
-            vTaskSuspend(this->speaker_task_handle_);
-          }
+          // if (this->speaker_task_handle_ != nullptr) {
+          //   vTaskSuspend(this->speaker_task_handle_);
+          // }
           if (this->audio_mixer_ != nullptr) {
             this->audio_mixer_->suspend_task();
           }
@@ -119,9 +119,9 @@ void NabuMediaPlayer::setup() {
             this->announcement_pipeline_->suspend_tasks();
           }
         } else if (state == ota::OTA_ERROR) {
-          if (this->speaker_task_handle_ != nullptr) {
-            vTaskResume(this->speaker_task_handle_);
-          }
+          // if (this->speaker_task_handle_ != nullptr) {
+          //   vTaskResume(this->speaker_task_handle_);
+          // }
           if (this->audio_mixer_ != nullptr) {
             this->audio_mixer_->resume_task();
           }
@@ -138,180 +138,186 @@ void NabuMediaPlayer::setup() {
   ESP_LOGI(TAG, "Set up nabu media player");
 }
 
-esp_err_t NabuMediaPlayer::start_i2s_driver_() {
-  if (!this->parent_->try_lock()) {
-    return ESP_ERR_INVALID_STATE;
-  }
+// esp_err_t NabuMediaPlayer::start_i2s_driver_() {
+//   if (!this->parent_->try_lock()) {
+//     return ESP_ERR_INVALID_STATE;
+//   }
 
-  i2s_driver_config_t config = {
-      .mode = (i2s_mode_t) (this->i2s_mode_ | I2S_MODE_TX),
-      .sample_rate = this->sample_rate_,
-      .bits_per_sample = this->bits_per_sample_,
-      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-      .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = DMA_BUFFERS_COUNT,
-      .dma_buf_len = DMA_BUFFER_SIZE,
-      .use_apll = false,
-      .tx_desc_auto_clear = true,
-      .fixed_mclk = I2S_PIN_NO_CHANGE,
-      .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-      .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT,
-#if SOC_I2S_SUPPORTS_TDM
-      .chan_mask = (i2s_channel_t) (I2S_TDM_ACTIVE_CH0 | I2S_TDM_ACTIVE_CH1),
-      .total_chan = 2,
-      .left_align = false,
-      .big_edin = false,
-      .bit_order_msb = false,
-      .skip_msk = false,
-#endif
-  };
+//   i2s_driver_config_t config = {
+//       .mode = (i2s_mode_t) (this->i2s_mode_ | I2S_MODE_TX),
+//       .sample_rate = this->sample_rate_,
+//       .bits_per_sample = this->bits_per_sample_,
+//       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+//       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+//       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+//       .dma_buf_count = DMA_BUFFERS_COUNT,
+//       .dma_buf_len = DMA_BUFFER_SIZE,
+//       .use_apll = false,
+//       .tx_desc_auto_clear = true,
+//       .fixed_mclk = I2S_PIN_NO_CHANGE,
+//       .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+//       .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT,
+// #if SOC_I2S_SUPPORTS_TDM
+//       .chan_mask = (i2s_channel_t) (I2S_TDM_ACTIVE_CH0 | I2S_TDM_ACTIVE_CH1),
+//       .total_chan = 2,
+//       .left_align = false,
+//       .big_edin = false,
+//       .bit_order_msb = false,
+//       .skip_msk = false,
+// #endif
+//   };
 
-  esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
-  if (err != ESP_OK) {
-    return err;
-  }
+//   esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
+//   if (err != ESP_OK) {
+//     return err;
+//   }
 
-  i2s_pin_config_t pin_config = this->parent_->get_pin_config();
-  pin_config.data_out_num = this->dout_pin_;
+//   i2s_pin_config_t pin_config = this->parent_->get_pin_config();
+//   pin_config.data_out_num = this->dout_pin_;
 
-  err = i2s_set_pin(this->parent_->get_port(), &pin_config);
+//   err = i2s_set_pin(this->parent_->get_port(), &pin_config);
 
-  if (err != ESP_OK) {
-    return err;
-  }
+//   if (err != ESP_OK) {
+//     return err;
+//   }
 
-  return ESP_OK;
-}
+//   return ESP_OK;
+// }
 
-void NabuMediaPlayer::speaker_task(void *params) {
-  NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
+// void NabuMediaPlayer::speaker_task(void *params) {
+//   NabuMediaPlayer *this_speaker = (NabuMediaPlayer *) params;
 
-  TaskEvent event;
-  esp_err_t err;
+//   TaskEvent event;
+//   esp_err_t err;
 
-  while (true) {
-    uint32_t notification_bits = 0;
-    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
-                    ULONG_MAX,           // clear all bits after waiting
-                    &notification_bits,  // notifcation value after wait is finished
-                    portMAX_DELAY);      // how long to wait
+//   while (true) {
+//     uint32_t notification_bits = 0;
+//     xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
+//                     ULONG_MAX,           // clear all bits after waiting
+//                     &notification_bits,  // notifcation value after wait is finished
+//                     portMAX_DELAY);      // how long to wait
 
-    if (notification_bits & SpeakerTaskNotificationBits::COMMAND_START) {
-      event.type = EventType::STARTING;
-      xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//     if (notification_bits & SpeakerTaskNotificationBits::COMMAND_START) {
+//       event.type = EventType::STARTING;
+//       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-      ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
-      int16_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
+//       ExternalRAMAllocator<int16_t> allocator(ExternalRAMAllocator<int16_t>::ALLOW_FAILURE);
+//       int16_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
 
-      if (buffer == nullptr) {
-        event.type = EventType::WARNING;
-        event.err = ESP_ERR_NO_MEM;
-        xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-      } else {
-        err = this_speaker->start_i2s_driver_();
+//       if (buffer == nullptr) {
+//         event.type = EventType::WARNING;
+//         event.err = ESP_ERR_NO_MEM;
+//         xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//       } else {
+//         err = this_speaker->start_i2s_driver_();
 
-        if (err != ESP_OK) {
-          event.type = EventType::WARNING;
-          event.err = err;
-          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-        } else {
-          event.type = EventType::STARTED;
-          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//         if (err != ESP_OK) {
+//           event.type = EventType::WARNING;
+//           event.err = err;
+//           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//         } else {
+//           event.type = EventType::STARTED;
+//           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-          while (true) {
-            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
+//           while (true) {
+//             notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
 
-            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
-              break;
-            }
+//             if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+//               break;
+//             }
 
-            size_t bytes_read = 0;
-            size_t bytes_to_read = sizeof(int16_t) * SAMPLES_IN_ALL_DMA_BUFFERS;
-            bytes_read =
-                this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
+//             size_t bytes_read = 0;
+//             size_t bytes_to_read = sizeof(int16_t) * SAMPLES_IN_ALL_DMA_BUFFERS;
+//             bytes_read =
+//                 this_speaker->audio_mixer_->read((uint8_t *) buffer, bytes_to_read, pdMS_TO_TICKS(TASK_DELAY_MS));
 
-            if (bytes_read > 0) {
-              size_t bytes_written;
+//             if (bytes_read > 0) {
+//               size_t bytes_written;
 
-#ifdef USE_AUDIO_DAC
-              if (this_speaker->audio_dac_ == nullptr)
-#endif
-              {  // Fallback to software volume control if an audio dac isn't available
-                int16_t volume_scale_factor =
-                    this_speaker->software_volume_scale_factor_;  // Atomic read, so thread safe
-                if (volume_scale_factor < INT16_MAX) {
-#if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
-                  dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
-#else
-                  dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
-#endif
-                }
-              }
+// #ifdef USE_AUDIO_DAC
+//               if (this_speaker->audio_dac_ == nullptr)
+// #endif
+//               {  // Fallback to software volume control if an audio dac isn't available
+//                 int16_t volume_scale_factor =
+//                     this_speaker->software_volume_scale_factor_;  // Atomic read, so thread safe
+//                 if (volume_scale_factor < INT16_MAX) {
+// #if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
+//                   dsps_mulc_s16_ae32(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
+// #else
+//                   dsps_mulc_s16_ansi(buffer, buffer, bytes_read / sizeof(int16_t), volume_scale_factor, 1, 1);
+// #endif
+//                 }
+//               }
 
-              if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
-                i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
-              } else {
-                i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
-                                 this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
-              }
+//               if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+//                 i2s_write(this_speaker->parent_->get_port(), buffer, bytes_read, &bytes_written, portMAX_DELAY);
+//               } else {
+//                 i2s_write_expand(this_speaker->parent_->get_port(), buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
+//                                  this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
+//               }
 
-              if (bytes_written != bytes_read) {
-                event.type = EventType::WARNING;
-                event.err = ESP_ERR_INVALID_SIZE;
-                xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-              } else {
-                event.type = EventType::RUNNING;
-                xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
-              }
+//               if (bytes_written != bytes_read) {
+//                 event.type = EventType::WARNING;
+//                 event.err = ESP_ERR_INVALID_SIZE;
+//                 xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//               } else {
+//                 event.type = EventType::RUNNING;
+//                 xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
+//               }
 
-            } else {
-              i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+//             } else {
+//               i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
-              event.type = EventType::IDLE;
-              xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
-            }
-          }
+//               event.type = EventType::IDLE;
+//               xQueueSend(this_speaker->speaker_event_queue_, &event, 0);
+//             }
+//           }
 
-          i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+//           i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
-          event.type = EventType::STOPPING;
-          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//           event.type = EventType::STOPPING;
+//           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-          allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
-          i2s_stop(this_speaker->parent_->get_port());
-          i2s_driver_uninstall(this_speaker->parent_->get_port());
+//           allocator.deallocate(buffer, SAMPLES_IN_ALL_DMA_BUFFERS);
+//           i2s_stop(this_speaker->parent_->get_port());
+//           i2s_driver_uninstall(this_speaker->parent_->get_port());
 
-          this_speaker->parent_->unlock();
+//           this_speaker->parent_->unlock();
 
-          event.type = EventType::STOPPED;
-          xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
-        }
-      }
-    }
-  }
-}
+//           event.type = EventType::STOPPED;
+//           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
+//         }
+//       }
+//     }
+//   }
+// }
 
 esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   esp_err_t err = ESP_OK;
 
+  // if (this->speaker_ != nullptr) {
+  //   this->speaker_->start();
+  // }
+
   if (this->audio_mixer_ == nullptr) {
     this->audio_mixer_ = make_unique<AudioMixer>();
-    err = this->audio_mixer_->start("mixer", MIXER_TASK_PRIORITY);
+    err = this->audio_mixer_->start(this->speaker_, "mixer", MIXER_TASK_PRIORITY);
     if (err != ESP_OK) {
       return err;
     }
   }
 
-  if (this->speaker_task_handle_ == nullptr) {
-    xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
-                &this->speaker_task_handle_);
-    if (this->speaker_task_handle_ == nullptr) {
-      return ESP_FAIL;
-    }
-  }
 
-  xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
+
+  // if (this->speaker_task_handle_ == nullptr) {
+  //   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
+  //               &this->speaker_task_handle_);
+  //   if (this->speaker_task_handle_ == nullptr) {
+  //     return ESP_FAIL;
+  //   }
+  // }
+
+  // xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
 
   if (type == AudioPipelineType::MEDIA) {
     if (this->media_pipeline_ == nullptr) {
@@ -447,35 +453,35 @@ void NabuMediaPlayer::watch_media_commands_() {
   }
 }
 
-void NabuMediaPlayer::watch_speaker_() {
-  TaskEvent event;
-  while (xQueueReceive(this->speaker_event_queue_, &event, 0)) {
-    switch (event.type) {
-      case EventType::STARTING:
-        ESP_LOGD(TAG, "Starting Media Player Speaker");
-        break;
-      case EventType::STARTED:
-        ESP_LOGD(TAG, "Started Media Player Speaker");
-        break;
-      case EventType::IDLE:
-        break;
-      case EventType::RUNNING:
-        break;
-      case EventType::STOPPING:
-        ESP_LOGD(TAG, "Stopping Media Player Speaker");
-        break;
-      case EventType::STOPPED:
-        xQueueReset(this->speaker_event_queue_);
+// void NabuMediaPlayer::watch_speaker_() {
+//   TaskEvent event;
+//   while (xQueueReceive(this->speaker_event_queue_, &event, 0)) {
+//     switch (event.type) {
+//       case EventType::STARTING:
+//         ESP_LOGD(TAG, "Starting Media Player Speaker");
+//         break;
+//       case EventType::STARTED:
+//         ESP_LOGD(TAG, "Started Media Player Speaker");
+//         break;
+//       case EventType::IDLE:
+//         break;
+//       case EventType::RUNNING:
+//         break;
+//       case EventType::STOPPING:
+//         ESP_LOGD(TAG, "Stopping Media Player Speaker");
+//         break;
+//       case EventType::STOPPED:
+//         xQueueReset(this->speaker_event_queue_);
 
-        ESP_LOGD(TAG, "Stopped Media Player Speaker");
-        break;
-      case EventType::WARNING:
-        ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(event.err));
-        this->status_set_warning();
-        break;
-    }
-  }
-}
+//         ESP_LOGD(TAG, "Stopped Media Player Speaker");
+//         break;
+//       case EventType::WARNING:
+//         ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(event.err));
+//         this->status_set_warning();
+//         break;
+//     }
+//   }
+// }
 
 void NabuMediaPlayer::watch_mixer_() {
   TaskEvent event;
@@ -491,7 +497,7 @@ void NabuMediaPlayer::watch_mixer_() {
 void NabuMediaPlayer::loop() {
   this->watch_media_commands_();
   this->watch_mixer_();
-  this->watch_speaker_();
+  // this->watch_speaker_();
 
   // Determine state of the media player
   media_player::MediaPlayerState old_state = this->state;

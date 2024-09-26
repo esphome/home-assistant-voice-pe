@@ -10,6 +10,7 @@
 #endif
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/components/media_player/media_player.h"
+#include "esphome/components/speaker/speaker.h"
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -79,6 +80,8 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   void set_audio_dac(audio_dac::AudioDac *audio_dac) { this->audio_dac_ = audio_dac; }
 #endif
 
+  void set_speaker(speaker::Speaker *speaker) { this->speaker_ = speaker; }
+
   Trigger<> *get_mute_trigger() const { return this->mute_trigger_; }
   Trigger<> *get_unmute_trigger() const { return this->unmute_trigger_; }
   Trigger<float> *get_volume_trigger() const { return this->volume_trigger_; }
@@ -108,6 +111,8 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   std::unique_ptr<AudioPipeline> announcement_pipeline_;
   std::unique_ptr<AudioMixer> audio_mixer_;
 
+  speaker::Speaker *speaker_{nullptr};
+
   // Monitors the mixer task
   void watch_mixer_();
 
@@ -118,11 +123,11 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
   AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};
 
-  void watch_speaker_();
+  // void watch_speaker_();
 
-  static void speaker_task(void *params);
-  TaskHandle_t speaker_task_handle_{nullptr};
-  QueueHandle_t speaker_event_queue_;
+  // static void speaker_task(void *params);
+  // TaskHandle_t speaker_task_handle_{nullptr};
+  // QueueHandle_t speaker_event_queue_;
 
   optional<std::string> media_url_{};                        // only modified by control function
   optional<std::string> announcement_url_{};                 // only modified by control function

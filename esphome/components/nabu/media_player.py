@@ -9,7 +9,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 
 from esphome import automation, external_files, pins
-from esphome.components import audio_dac, esp32, media_player
+from esphome.components import audio_dac, esp32, media_player, speaker
 from esphome.components.media_player import MediaFile, MEDIA_FILE_TYPE_ENUM
 from esphome.const import (
     CONF_DURATION,
@@ -19,6 +19,7 @@ from esphome.const import (
     CONF_RAW_DATA_ID,
     CONF_TYPE,
     CONF_URL,
+    CONF_SPEAKER,
 )
 from esphome.core import HexInt, CORE
 
@@ -189,6 +190,7 @@ MEDIA_FILE_TYPE_SCHEMA = cv.Schema(
 CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(NabuMediaPlayer),
+        cv.Required(CONF_SPEAKER): cv.use_id(speaker.Speaker),
         cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
         cv.Optional(CONF_AUDIO_DAC): cv.use_id(audio_dac.AudioDac),
         cv.Required(CONF_I2S_DOUT_PIN): pins.internal_gpio_output_pin_number,
@@ -268,6 +270,9 @@ async def to_code(config):
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
     cg.add(var.set_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.set_volume_min(config[CONF_VOLUME_MIN]))
+
+    spkr = await cg.get_variable(config[CONF_SPEAKER])
+    cg.add(var.set_speaker(spkr))
 
     if on_mute := config.get(CONF_ON_MUTE):
         await automation.build_automation(
