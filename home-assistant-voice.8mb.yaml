@@ -1,0 +1,18 @@
+packages:
+  home-assistant-voice: !include home-assistant-voice.factory.yaml
+
+esphome:
+  name: ha-voice-8mb
+  project:
+    name: Nabu Casa.Home Assistant Voice PE
+    version: dev
+
+esp32:
+  flash_size: 8MB
+
+update:
+  - id: !extend update_http_request
+    source: https://firmware.esphome.io/home-assistant-voice-pe/ha-voice-8mb/manifest.json
+
+dashboard_import:
+  package_import_url: github://esphome/voice-kit/home-assistant-voice.8mb.yaml
