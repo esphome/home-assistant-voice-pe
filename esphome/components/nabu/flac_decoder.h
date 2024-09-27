@@ -13,7 +13,6 @@
 #include "esphome/core/ring_buffer.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace flac {
 
@@ -40,6 +39,8 @@ enum FLACDecoderResult {
   FLAC_DECODER_ERROR_BAD_FIXED_PREDICTION_ORDER = 10,
   FLAC_DECODER_ERROR_RESERVED_RESIDUAL_CODING_METHOD = 11,
   FLAC_DECODER_ERROR_BLOCK_SIZE_NOT_DIVISIBLE_RICE = 12,
+  FLAC_DECODER_ERROR_MEMORY_ALLOCATION_ERROR = 13,
+  FLAC_DECODER_ERROR_BLOCK_SIZE_OUT_OF_RANGE = 14
 };
 
 // Coefficients for fixed linear prediction
@@ -83,8 +84,17 @@ class FLACDecoder {
   /* Number of audio samples (after read_header()) */
   uint32_t get_num_samples() { return this->num_samples_; }
 
+  /* Number of audio samples (after read_header()) */
+  uint32_t get_min_block_size() { return this->min_block_size_; }
+  /* Number of audio samples (after read_header()) */
+  uint32_t get_max_block_size() { return this->max_block_size_; }
+  
+  
   /* Maximum number of output samples per frame (after read_header()) */
   uint32_t get_output_buffer_size() { return this->max_block_size_ * this->num_channels_; }
+
+  /* Maximum number of output samples per frame (after read_header()) */
+  uint32_t get_output_buffer_size_bytes() { return this->max_block_size_ * this->num_channels_ * this->sample_depth_ / 8; }
 
   std::size_t get_bytes_index() { return this->buffer_index_; }
 
@@ -92,6 +102,10 @@ class FLACDecoder {
   std::size_t get_bytes_left() { return this->bytes_left_; }
 
  protected:
+  FLACDecoderResult frame_sync_();
+  
+  FLACDecoderResult decode_frame_header_();
+  
   /* Decodes one or more subframes by type. */
   FLACDecoderResult decode_subframes(uint32_t block_size, uint32_t sample_depth, uint32_t channel_assignment);
 
@@ -107,10 +121,14 @@ class FLACDecoder {
                                         uint32_t sample_depth);
 
   /* Decodes prediction residuals. */
-  FLACDecoderResult decode_residuals(uint32_t block_size);
+  FLACDecoderResult decode_residuals(int32_t* buffer, size_t warm_up_samples, uint32_t block_size);
 
   /* Completes predicted samples. */
-  void restore_linear_prediction(const std::vector<int16_t> &coefs, int32_t shift);
+  void restore_linear_prediction(int32_t* sub_frame_buffer, size_t num_of_samples, const std::vector<int16_t> &coefs, int32_t shift);
+
+  bool wait_for_bytes_(uint32_t num_of_bytes, TickType_t ticks_to_wait );
+  
+  uint32_t read_aligned_byte();
 
   /* Reads an unsigned integer of arbitrary bit size. */
   uint32_t read_uint(std::size_t num_bits);
@@ -149,6 +167,9 @@ class FLACDecoder {
   /* Maximum number of samples in a block (single channel). */
   uint32_t max_block_size_ = 0;
 
+  uint32_t curr_frame_block_size_ = 0;
+  uint32_t curr_frame_channel_assign_ = 0;
+  
   /* Sample rate in hertz. */
   uint32_t sample_rate_ = 0;
 
@@ -164,13 +185,13 @@ class FLACDecoder {
   /* Buffer of decoded samples at full precision (all channels). */
   int32_t *block_samples_ = nullptr;
 
-  /* Buffer of decoded samples at full precision (single channel). */
-  std::vector<int32_t, esphome::ExternalRAMAllocator<int32_t>> block_result_;
-
   bool partial_header_read_{false};
   bool partial_header_last_{false};
   uint32_t partial_header_type_{0};
   uint32_t partial_header_length_{0};
+
+  bool frame_sync_found_{false};
+  uint8_t frame_sync_bytes_[2];
 };
 
 }  // namespace flac

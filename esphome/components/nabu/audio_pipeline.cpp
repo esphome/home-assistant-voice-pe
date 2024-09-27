@@ -244,7 +244,7 @@ esp_err_t AudioPipeline::stop() {
     xEventGroupSetBits(this->event_group_, EventGroupBits::READER_MESSAGE_ERROR);
   }
   if (!(event_group_bits & DECODER_MESSAGE_FINISHED)) {
-    // Ddecoder failed to stop
+    // Decoder failed to stop
     xEventGroupSetBits(this->event_group_, EventGroupBits::DECODER_MESSAGE_ERROR);
   }
   if (!(event_group_bits & RESAMPLER_MESSAGE_FINISHED)) {

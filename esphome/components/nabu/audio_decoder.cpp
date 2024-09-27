@@ -6,8 +6,12 @@
 
 #include "esphome/core/ring_buffer.h"
 
+#include "esphome/core/log.h"
+
 namespace esphome {
 namespace nabu {
+
+static const char *const TAG = "nabu_media_player.decoder";
 
 static const size_t READ_WRITE_TIMEOUT_MS = 20;
 
@@ -129,18 +133,30 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       size_t bytes_read = 0;
 
       size_t bytes_to_read = this->internal_buffer_size_ - this->input_buffer_length_;
-
+      
       if (bytes_to_read > 0) {
         uint8_t *new_audio_data = this->input_buffer_ + this->input_buffer_length_;
-        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS) );
 
         this->input_buffer_length_ += bytes_read;
       }
 
       if ((this->input_buffer_length_ == 0) || ((this->potentially_failed_count_ > 0) && (bytes_read == 0))) {
-        // No input data available or no new data has been read, so we can't do any more processing
-        state = FileDecoderState::IDLE;
+        ESP_LOGV(TAG, "skip decoding: buffer: %d, failed: %d, to-read: %d read: %d avail: %d", this->input_buffer_length_,
+         this->potentially_failed_count_, bytes_to_read, bytes_read, this->input_ring_buffer_->available() );
+        if( (this->input_buffer_length_ && stop_gracefully) || bytes_to_read == 0 ){
+          // data in buffer won't change, don't try again
+          state = FileDecoderState::FAILED;
+        }
+        else {
+          state = FileDecoderState::IDLE;
+        }
       } else {
+        if(this->potentially_failed_count_ > 0){
+          ESP_LOGV(TAG, "re-start decoding: buffer: %d, failed: %d, to-read: %d read: %d avail: %d", this->input_buffer_length_,
+         this->potentially_failed_count_, bytes_to_read, bytes_read, this->input_ring_buffer_->available() ); 
+        }
+        
         switch (this->media_file_type_) {
           case media_player::MediaFileType::FLAC:
             state = this->decode_flac_();
@@ -163,7 +179,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       this->end_of_file_ = true;
     } else if (state == FileDecoderState::FAILED) {
       return AudioDecoderState::FAILED;
-    } else {
+    } else if(state == FileDecoderState::MORE_TO_PROCESS){
       this->potentially_failed_count_ = 0;
     }
   }
@@ -197,6 +213,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
 
     if (result != flac::FLAC_DECODER_SUCCESS) {
       // Couldn't read FLAC header
+      ESP_LOGD(TAG, "Couldn't read FLAC header");
       return FileDecoderState::FAILED;
     }
 
@@ -204,18 +221,26 @@ FileDecoderState AudioDecoder::decode_flac_() {
     this->input_buffer_current_ += bytes_consumed;
     this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
 
+    if( this->flac_decoder_->get_num_channels() > 2 ){
+      ESP_LOGE(TAG, "Decoder implementation only supports up to two channels.");
+      return FileDecoderState::FAILED;
+    }
+    
+    size_t flac_decoder_max_sample_bytes_in_frame = flac_decoder_->get_output_buffer_size_bytes(); 
+    ESP_LOGV(TAG, "Block sizes min: %d, max: %d", flac_decoder_->get_min_block_size(), flac_decoder_->get_max_block_size());
+    ESP_LOGV(TAG, "Maximal FLAC frame size (bytes): %d",flac_decoder_max_sample_bytes_in_frame );
+    if (this->internal_buffer_size_ < flac_decoder_max_sample_bytes_in_frame ) {
+      // Output buffer is not big enough
+      ESP_LOGE(TAG, "Output buffer is not big enough");
+      return FileDecoderState::FAILED;
+    }
+    
     media_player::StreamInfo stream_info;
     stream_info.channels = this->flac_decoder_->get_num_channels();
     stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
     stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
 
     this->stream_info_ = stream_info;
-
-    size_t flac_decoder_output_buffer_min_size = flac_decoder_->get_output_buffer_size();
-    if (this->internal_buffer_size_ < flac_decoder_output_buffer_min_size * sizeof(int16_t)) {
-      // Output buffer is not big enough
-      return FileDecoderState::FAILED;
-    }
 
     return FileDecoderState::MORE_TO_PROCESS;
   }
@@ -225,11 +250,19 @@ FileDecoderState AudioDecoder::decode_flac_() {
       this->flac_decoder_->decode_frame(this->input_buffer_length_, (int16_t *) this->output_buffer_, &output_samples);
 
   if (result == flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
-    // Not an issue, just needs more data that we'll get next time.
     return FileDecoderState::POTENTIALLY_FAILED;
   } else if (result > flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
-    // Serious error, can't recover
-    return FileDecoderState::FAILED;
+    // Corrupted frame, don't retry with current buffer content, wait for new sync
+    ESP_LOGW(TAG, "Corrupted frame, error_code: %d. Re-syncing.", result );
+    ESP_LOGV(TAG, "Bytes available in buffer: %d", this->input_buffer_length_ );
+    ESP_LOGV(TAG, "Bytes read: %d", this->flac_decoder_->get_bytes_index() );
+    ESP_LOGV(TAG, "Bytes left: %d", this->flac_decoder_->get_bytes_left() );
+    
+    size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
+    this->input_buffer_current_ += bytes_consumed;
+    this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
+
+    return FileDecoderState::POTENTIALLY_FAILED;
   }
 
   // We have successfully decoded some input data and have new output data
