@@ -63,8 +63,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   bool has_buffered_data() const override;
 
-  void set_num_channels(uint8_t num_channels) { this->num_channels_ = num_channels; }
-  void set_sample_rate(uint8_t num_channels) { this->sample_rate_ = sample_rate; }
+  // void set_num_channels(uint8_t num_channels) { this->num_channels_ = num_channels; }
+  // void set_sample_rate(uint8_t num_channels) { this->sample_rate_ = sample_rate; }
 
  protected:
   esp_err_t start_i2s_driver_();
@@ -84,8 +84,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   uint8_t dout_pin_{0};
   bool task_created_{false};
 
-  uint8_t num_channels_{1};
-  uint32_t sample_rate_{16000};
+  // uint8_t num_channels_{1};
+  // uint32_t sample_rate_{16000};
 
 #if SOC_I2S_SUPPORTS_DAC
   i2s_dac_mode_t internal_dac_mode_{I2S_DAC_CHANNEL_DISABLE};

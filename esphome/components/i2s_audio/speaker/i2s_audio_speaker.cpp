@@ -109,7 +109,7 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
     return err;
   }
 
-  // i2s_set_clk(this->parent_->get_port(), this->sample_rate_, this->bits_per_sample_, I2S_CHANNEL_MONO);
+  i2s_set_clk(this->parent_->get_port(), this->sample_rate_, this->bits_per_sample_, I2S_CHANNEL_MONO);
 
   i2s_pin_config_t pin_config = this->parent_->get_pin_config();
   pin_config.data_out_num = this->dout_pin_;
