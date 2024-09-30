@@ -126,8 +126,6 @@ class FLACDecoder {
   /* Completes predicted samples. */
   void restore_linear_prediction(int32_t* sub_frame_buffer, size_t num_of_samples, const std::vector<int16_t> &coefs, int32_t shift);
 
-  bool wait_for_bytes_(uint32_t num_of_bytes, TickType_t ticks_to_wait );
-  
   uint32_t read_aligned_byte();
 
   /* Reads an unsigned integer of arbitrary bit size. */
@@ -190,7 +188,6 @@ class FLACDecoder {
   uint32_t partial_header_type_{0};
   uint32_t partial_header_length_{0};
 
-  bool frame_sync_found_{false};
   uint8_t frame_sync_bytes_[2];
 };
 

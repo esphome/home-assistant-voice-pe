@@ -136,7 +136,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       
       if (bytes_to_read > 0) {
         uint8_t *new_audio_data = this->input_buffer_ + this->input_buffer_length_;
-        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS) );
+        bytes_read = this->input_ring_buffer_->read((void *) new_audio_data, bytes_to_read, pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
 
         this->input_buffer_length_ += bytes_read;
       }
