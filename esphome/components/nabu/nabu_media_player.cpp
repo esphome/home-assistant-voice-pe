@@ -307,8 +307,6 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     }
   }
 
-
-
   // if (this->speaker_task_handle_ == nullptr) {
   //   xTaskCreate(NabuMediaPlayer::speaker_task, "speaker_task", 3072, (void *) this, SPEAKER_TASK_PRIORITY,
   //               &this->speaker_task_handle_);
@@ -641,9 +639,15 @@ void NabuMediaPlayer::set_mute_state_(bool mute_state) {
   } else
 #endif
   {  // Fall back to software mute control if there is no audio_dac or if it isn't configured
+    // if (mute_state) {
+    //   this->software_volume_scale_factor_ = 0;
+    // } else if (this->software_volume_scale_factor_ == 0) {
+    //   this->set_volume_(this->volume, false);  // restore previous volume
+    // }
+
     if (mute_state) {
-      this->software_volume_scale_factor_ = 0;
-    } else if (this->software_volume_scale_factor_ == 0) {
+      this->speaker_->set_volume(0.0f);
+    } else if (this->speaker_->get_volume() == 0.0f) {
       this->set_volume_(this->volume, false);  // restore previous volume
     }
   }
@@ -673,12 +677,14 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
 #endif
   {  // Fall back to software volume control if there is no audio_dac or if it isn't configured
     // Use the decibel reduction table from audio_mixer.h for software volume control
-    ssize_t decibel_index = remap<ssize_t, float>(bounded_volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
-    this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
+    // ssize_t decibel_index = remap<ssize_t, float>(bounded_volume, 1.0f, 0.0f, 0, decibel_reduction_table.size() - 1);
+    // this->software_volume_scale_factor_ = decibel_reduction_table[decibel_index];
+
+    this->speaker_->set_volume(bounded_volume);
   }
 
   if (publish) {
-    this->volume = volume;
+    this->volume = bounded_volume;
     this->save_volume_restore_state_();
   }
 
