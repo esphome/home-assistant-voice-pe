@@ -2,6 +2,7 @@
 
 #include "nabu_media_player.h"
 
+#include "esphome/core/audio.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -295,9 +296,15 @@ void NabuMediaPlayer::setup() {
 esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   esp_err_t err = ESP_OK;
 
-  // if (this->speaker_ != nullptr) {
-  //   this->speaker_->start();
-  // }
+  if (this->speaker_ != nullptr) {
+    StreamInfo stream_info;
+    stream_info.channels = 2;
+    stream_info.bits_per_sample = 16;
+    stream_info.sample_rate = 48000;
+
+    this->speaker_->set_stream_info(stream_info);
+    this->speaker_->start();
+  }
 
   if (this->audio_mixer_ == nullptr) {
     this->audio_mixer_ = make_unique<AudioMixer>();
@@ -608,13 +615,13 @@ media_player::MediaPlayerTraits NabuMediaPlayer::get_traits() {
   traits.set_supports_pause(true);
   traits.get_supported_formats().push_back(
       media_player::MediaPlayerSupportedFormat{.format = "flac",
-                                               .sample_rate = 48000,
+                                               .sample_rate = this->sample_rate_,
                                                .num_channels = 2,
                                                .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_DEFAULT,
                                                .sample_bytes = 2});
   traits.get_supported_formats().push_back(
       media_player::MediaPlayerSupportedFormat{.format = "flac",
-                                               .sample_rate = 48000,
+                                               .sample_rate = this->sample_rate_,
                                                .num_channels = 1,
                                                .purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT,
                                                .sample_bytes = 2});

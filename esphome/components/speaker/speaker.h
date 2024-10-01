@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "esphome/core/audio.h"
+
 namespace esphome {
 namespace speaker {
 
@@ -40,8 +42,11 @@ class Speaker {
   virtual void set_volume(float volume) {};
   virtual float get_volume() { return 1.0f; }
 
+  void set_stream_info(const StreamInfo &stream_info) { this->stream_info_ = stream_info; }
+
  protected:
   State state_{STATE_STOPPED};
+  StreamInfo stream_info_;
 };
 
 }  // namespace speaker

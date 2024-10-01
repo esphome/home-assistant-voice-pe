@@ -221,6 +221,8 @@ void I2SAudioMicrophone::loop() {
     case microphone::STATE_STOPPING:
       this->stop_();
       break;
+    default:
+      break;
   }
 }
 

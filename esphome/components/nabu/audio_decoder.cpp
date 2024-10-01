@@ -204,7 +204,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
     this->input_buffer_current_ += bytes_consumed;
     this->input_buffer_length_ = this->flac_decoder_->get_bytes_left();
 
-    media_player::StreamInfo stream_info;
+    StreamInfo stream_info;
     stream_info.channels = this->flac_decoder_->get_num_channels();
     stream_info.sample_rate = this->flac_decoder_->get_sample_rate();
     stream_info.bits_per_sample = this->flac_decoder_->get_sample_depth();
@@ -280,7 +280,7 @@ FileDecoderState AudioDecoder::decode_mp3_() {
       this->output_buffer_length_ = mp3_frame_info.outputSamps * bytes_per_sample;
       this->output_buffer_current_ = this->output_buffer_;
 
-      media_player::StreamInfo stream_info;
+      StreamInfo stream_info;
       stream_info.channels = mp3_frame_info.nChans;
       stream_info.sample_rate = mp3_frame_info.samprate;
       stream_info.bits_per_sample = mp3_frame_info.bitsPerSample;
@@ -316,7 +316,7 @@ FileDecoderState AudioDecoder::decode_wav_() {
           // Header parsing is complete
 
           // Assume PCM
-          media_player::StreamInfo stream_info;
+          StreamInfo stream_info;
           stream_info.channels = this->wav_decoder_->num_channels();
           stream_info.sample_rate = this->wav_decoder_->sample_rate();
           stream_info.bits_per_sample = this->wav_decoder_->bits_per_sample();

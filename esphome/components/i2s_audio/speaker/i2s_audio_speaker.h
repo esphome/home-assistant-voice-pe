@@ -30,16 +30,6 @@ struct TaskEvent {
   esp_err_t err;
 };
 
-struct StreamInfo {
-  bool operator==(const StreamInfo &rhs) const {
-    return (channels == rhs.channels) && (bits_per_sample == rhs.bits_per_sample) && (sample_rate == rhs.sample_rate);
-  }
-  bool operator!=(const StreamInfo &rhs) const { return !operator==(rhs); }
-  uint8_t channels = 1;
-  uint8_t bits_per_sample = 16;
-  uint32_t sample_rate = 16000;
-};
-
 class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Component {
  public:
   float get_setup_priority() const override { return esphome::setup_priority::LATE; }

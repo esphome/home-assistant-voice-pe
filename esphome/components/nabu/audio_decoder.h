@@ -7,6 +7,8 @@
 #include "mp3_decoder.h"
 
 #include "esphome/components/media_player/media_player.h"
+
+#include "esphome/core/audio.h"
 #include "esphome/core/ring_buffer.h"
 
 namespace esphome {
@@ -38,7 +40,7 @@ class AudioDecoder {
 
   AudioDecoderState decode(bool stop_gracefully);
 
-  const optional<media_player::StreamInfo> &get_stream_info() const { return this->stream_info_; }
+  const optional<StreamInfo> &get_stream_info() const { return this->stream_info_; }
 
  protected:
   esp_err_t allocate_buffers_();
@@ -67,7 +69,7 @@ class AudioDecoder {
   size_t wav_bytes_left_;
 
   media_player::MediaFileType media_file_type_{media_player::MediaFileType::NONE};
-  optional<media_player::StreamInfo> stream_info_{};
+  optional<StreamInfo> stream_info_{};
 
   size_t potentially_failed_count_{0};
   bool end_of_file_{false};

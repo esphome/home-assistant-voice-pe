@@ -4,6 +4,7 @@
 
 #include <driver/i2s.h>
 
+#include "esphome/core/audio.h"
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -25,11 +26,11 @@ static const size_t TASK_DELAY_MS = 10;
 static const char *const TAG = "i2s_audio.speaker";
 
 // Lists the Q15 fixed point scaling factor for volume reduction.
-// Has 100 values representing a reduction by [silence, 49, 48.5, ... 0.5, 0] dB.
+// Has 100 values representing silence and a reduction [49, 48.5, ... 0.5, 0] dB.
 // dB to PCM scaling factor formula: floating_point_scale_factor = 2^(-db/6.014)
 // float to Q15 fixed point formula: q15_scale_factor = floating_point_scale_factor * 2^(15)
 static const std::vector<int16_t> q15_volume_scaling_factors = {
-    0,   116,   122,   130,   137,   146,   154,   163,   173,   183,   194,   206,   218,   231,   244,
+    0,     116,   122,   130,   137,   146,   154,   163,   173,   183,   194,   206,   218,   231,   244,
     259,   274,   291,   308,   326,   345,   366,   388,   411,   435,   461,   488,   517,   548,   580,
     615,   651,   690,   731,   774,   820,   868,   920,   974,   1032,  1094,  1158,  1227,  1300,  1377,
     1459,  1545,  1637,  1734,  1837,  1946,  2061,  2184,  2313,  2450,  2596,  2750,  2913,  3085,  3269,
@@ -63,6 +64,12 @@ void I2SAudioSpeaker::setup() {
     this->mark_failed();
     return;
   }
+
+  StreamInfo stream_info;
+  stream_info.channels = 1;
+  stream_info.bits_per_sample = (uint8_t) this->bits_per_sample_;
+  stream_info.sample_rate = 16000;
+  this->set_stream_info(stream_info);
 }
 
 template<typename a, typename b> const uint8_t *convert_data_format(const a *from, b *to, size_t &bytes, bool repeat) {
@@ -138,7 +145,11 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
     return err;
   }
 
-  // i2s_set_clk(this->parent_->get_port(), this->sample_rate_, this->bits_per_sample_, I2S_CHANNEL_MONO);
+  if (this->stream_info_.channels == 1) {
+    i2s_set_clk(this->parent_->get_port(), this->stream_info_.sample_rate, this->bits_per_sample_, I2S_CHANNEL_MONO);
+  } else if (this->stream_info_.channels == 2) {
+    i2s_set_clk(this->parent_->get_port(), this->stream_info_.sample_rate, this->bits_per_sample_, I2S_CHANNEL_STEREO);
+  }
 
   i2s_pin_config_t pin_config = this->parent_->get_pin_config();
   pin_config.data_out_num = this->dout_pin_;
@@ -217,15 +228,18 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
               if (this_speaker->q15_volume_factor_ < INT16_MAX) {
                 // Scale samples by the volume factor in place
-                q15_multiplication(data_buffer, data_buffer, bytes_read / sizeof(int16_t), this_speaker->q15_volume_factor_);
+                q15_multiplication(data_buffer, data_buffer, bytes_read / sizeof(int16_t),
+                                   this_speaker->q15_volume_factor_);
               }
 
-              if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+              // if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
+              if (this_speaker->stream_info_.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
                 i2s_write(this_speaker->parent_->get_port(), data_buffer, bytes_read, &bytes_written, portMAX_DELAY);
-              } else {
-                i2s_write_expand(this_speaker->parent_->get_port(), data_buffer, bytes_read, I2S_BITS_PER_SAMPLE_16BIT,
-                                 this_speaker->bits_per_sample_, &bytes_written, portMAX_DELAY);
-              }
+              } else if (this_speaker->stream_info_.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
+                i2s_write_expand(this_speaker->parent_->get_port(), data_buffer, bytes_read,
+                                 this_speaker->stream_info_.bits_per_sample, this_speaker->bits_per_sample_,
+                                 &bytes_written, portMAX_DELAY);
+              }  // TODO: Unhandled case where the incoming stream has more bits per sample than the outgoing stream
 
               if (bytes_written != bytes_read) {
                 event.type = TaskEventType::WARNING;
