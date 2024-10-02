@@ -123,12 +123,6 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
   AudioPipelineState announcement_pipeline_state_{AudioPipelineState::STOPPED};
 
-  // void watch_speaker_();
-
-  // static void speaker_task(void *params);
-  // TaskHandle_t speaker_task_handle_{nullptr};
-  // QueueHandle_t speaker_event_queue_;
-
   optional<std::string> media_url_{};                        // only modified by control function
   optional<std::string> announcement_url_{};                 // only modified by control function
   optional<media_player::MediaFile *> media_file_{};         // only modified by control fucntion
@@ -153,8 +147,6 @@ class NabuMediaPlayer : public Component, public media_player::MediaPlayer, publ
 #ifdef USE_AUDIO_DAC
   audio_dac::AudioDac *audio_dac_{nullptr};
 #endif
-
-  int16_t software_volume_scale_factor_;  // Q15 fixed point scale factor
 
   // Used to save volume/mute state for restoration on reboot
   ESPPreferenceObject pref_;
