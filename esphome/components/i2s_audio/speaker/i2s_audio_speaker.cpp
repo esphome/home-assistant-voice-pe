@@ -145,10 +145,19 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
     return err;
   }
 
+  uint32_t output_sample_rate = this->sample_rate_;
+  i2s_bits_per_sample_t output_bits_per_sample = this->bits_per_sample_;
+  
+  if (this->i2s_mode_ & I2S_MODE_MASTER) {
+    // We control the I2S bus, so we modify the sample rate and bits per sample to match the incoming audio
+    output_sample_rate = this->stream_info_.sample_rate;
+    output_bits_per_sample = (i2s_bits_per_sample_t) this->stream_info_.bits_per_sample_;
+  }
+
   if (this->stream_info_.channels == 1) {
-    i2s_set_clk(this->parent_->get_port(), this->stream_info_.sample_rate, this->bits_per_sample_, I2S_CHANNEL_MONO);
+    i2s_set_clk(this->parent_->get_port(), output_sample_rate, output_bits_per_sample, I2S_CHANNEL_MONO);
   } else if (this->stream_info_.channels == 2) {
-    i2s_set_clk(this->parent_->get_port(), this->stream_info_.sample_rate, this->bits_per_sample_, I2S_CHANNEL_STEREO);
+    i2s_set_clk(this->parent_->get_port(), output_sample_rate, output_bits_per_sample, I2S_CHANNEL_STEREO);
   }
 
   i2s_pin_config_t pin_config = this->parent_->get_pin_config();
