@@ -23,9 +23,6 @@ class Speaker {
   };
   virtual size_t play(const uint8_t *data, size_t length) = 0;
   size_t play(const std::vector<uint8_t> &data) { return this->play(data.data(), data.size()); }
-  // virtual size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) = 0;
-  // virtual size_t play(const uint8_t *data, size_t length) { return this->play(data, length, 0);};
-  // size_t play(const std::vector<uint8_t> &data) { return this->play(data.data(), data.size(), pdMS_TO_TICKS(0)); }
 
   virtual void start() = 0;
   virtual void stop() = 0;

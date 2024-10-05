@@ -66,9 +66,19 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   std::unique_ptr<RingBuffer> audio_ring_buffer_;
 
   void stop_(bool wait_on_empty);
-  void watch_();
 
   static void speaker_task_(void *params);
+
+  /// @brief Multiplies the input array of Q15 numbers by a Q15 constant factor
+  ///
+  /// Based on `dsps_mulc_s16_ansi` from the esp-dsp library:
+  /// https://github.com/espressif/esp-dsp/blob/master/modules/math/mulc/fixed/dsps_mulc_s16_ansi.c
+  /// (accessed on 2024-09-30).
+  /// @param input Array of Q15 numbers
+  /// @param output Array of Q15 numbers
+  /// @param len Length of array
+  /// @param C Q15 constant factor
+  static void q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t C);
 
   uint32_t timeout_{0};
   uint8_t dout_pin_{0};

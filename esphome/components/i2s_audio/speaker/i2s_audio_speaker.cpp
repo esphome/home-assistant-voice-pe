@@ -12,8 +12,6 @@
 namespace esphome {
 namespace i2s_audio {
 
-// static const size_t BUFFER_COUNT = 20;
-
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
 static const size_t DMA_BUFFER_SIZE = 512;
 static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHANNELS;
@@ -45,10 +43,7 @@ enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_RELOAD_CLOCK = (1 << 3),
 };
 
-// Multiplication by a Q15 fixed point constant. Based on `dsps_mulc_s16_ansi` from the esp-dsp library:
-// https://github.com/espressif/esp-dsp/blob/master/modules/math/mulc/fixed/dsps_mulc_s16_ansi.c
-// (accessed on 2024-09-30).
-void q15_multiplication(const int16_t *input, int16_t *output, int len, int16_t C) {
+void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t C) {
   for (int i = 0; i < len; i++) {
     int32_t acc = (int32_t) input[i] * (int32_t) C;
     output[i] = (int16_t) (acc >> 15);
@@ -130,14 +125,14 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
       .fixed_mclk = I2S_PIN_NO_CHANGE,
       .mclk_multiple = I2S_MCLK_MULTIPLE_256,
       .bits_per_chan = this->bits_per_channel_,
-      // #if SOC_I2S_SUPPORTS_TDM
-      //       .chan_mask = (i2s_channel_t) (I2S_TDM_ACTIVE_CH0 | I2S_TDM_ACTIVE_CH1),
-      //       .total_chan = 2,
-      //       .left_align = false,
-      //       .big_edin = false,
-      //       .bit_order_msb = false,
-      //       .skip_msk = false,
-      // #endif
+      #if SOC_I2S_SUPPORTS_TDM
+            .chan_mask = (i2s_channel_t) (I2S_TDM_ACTIVE_CH0 | I2S_TDM_ACTIVE_CH1),
+            .total_chan = 2,
+            .left_align = false,
+            .big_edin = false,
+            .bit_order_msb = false,
+            .skip_msk = false,
+      #endif
   };
 
   esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
@@ -241,7 +236,6 @@ void I2SAudioSpeaker::speaker_task(void *params) {
                                    this_speaker->q15_volume_factor_);
               }
 
-              // if (this_speaker->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
               if (this_speaker->stream_info_.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
                 i2s_write(this_speaker->parent_->get_port(), data_buffer, bytes_read, &bytes_written, portMAX_DELAY);
               } else if (this_speaker->stream_info_.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
@@ -437,7 +431,7 @@ void I2SAudioSpeaker::stop_(bool wait_on_empty) {
   }
 }
 
-void I2SAudioSpeaker::watch_() {
+void I2SAudioSpeaker::loop() {
   TaskEvent event;
   while (xQueueReceive(this->speaker_event_queue_, &event, 0)) {
     switch (event.type) {
@@ -467,33 +461,15 @@ void I2SAudioSpeaker::watch_() {
         this->status_set_warning();
         break;
     }
-  }
-}
-
-void I2SAudioSpeaker::loop() {
-  this->watch_();
-  // switch (this->state_) {
-  //   case speaker::STATE_STARTING:
-  //     this->start_();
-  //     [[fallthrough]];
-  //   case speaker::STATE_RUNNING:
-  //   case speaker::STATE_STOPPING:
-  //     this->watch_();
-  //     break;
-  //   case speaker::STATE_STOPPED:
-  //     break;
-  // }
 }
 
 size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
-  // size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
     return 0;
   }
   if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
     this->start();
-    // TODO: Should we add a delay so that the ring buffer has time to allocate?
   }
 
   if (this->audio_ring_buffer_.get() != nullptr) {
