@@ -43,9 +43,9 @@ enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_RELOAD_CLOCK = (1 << 3),
 };
 
-void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t C) {
+void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t c) {
   for (int i = 0; i < len; i++) {
-    int32_t acc = (int32_t) input[i] * (int32_t) C;
+    int32_t acc = (int32_t) input[i] * (int32_t) c;
     output[i] = (int16_t) (acc >> 15);
   }
 }

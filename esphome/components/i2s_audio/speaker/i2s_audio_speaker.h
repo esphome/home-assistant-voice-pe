@@ -77,8 +77,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @param input Array of Q15 numbers
   /// @param output Array of Q15 numbers
   /// @param len Length of array
-  /// @param C Q15 constant factor
-  static void q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t C);
+  /// @param c Q15 constant factor
+  static void q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t c);
 
   uint32_t timeout_{0};
   uint8_t dout_pin_{0};
