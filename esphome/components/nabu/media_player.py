@@ -3,7 +3,7 @@
 import hashlib
 import logging
 from pathlib import Path
-from magic import Magic
+import puremagic
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -223,13 +223,12 @@ def _read_audio_file_and_type(file_config):
     with open(path, "rb") as f:
         data = f.read()
 
-    magic = Magic(mime=True)
-    file_type = magic.from_buffer(data)
+    file_type = puremagic.from_string(data)
 
     media_file_type = MEDIA_FILE_TYPE_ENUM["NONE"]
     if "wav" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["WAV"]
-    elif "mpeg" in file_type:
+    elif "mp3" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["MP3"]
     elif "flac" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["FLAC"]
