@@ -146,7 +146,7 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
   if (this->i2s_mode_ & I2S_MODE_MASTER) {
     // We control the I2S bus, so we modify the sample rate and bits per sample to match the incoming audio
     output_sample_rate = this->stream_info_.sample_rate;
-    output_bits_per_sample = (i2s_bits_per_sample_t) this->stream_info_.bits_per_sample_;
+    output_bits_per_sample = (i2s_bits_per_sample_t) this->stream_info_.bits_per_sample;
   }
 
   if (this->stream_info_.channels == 1) {
@@ -186,11 +186,11 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
       ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
       uint8_t *data_buffer =
-          allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS * this_speaker->stream_info_->get_bytes_per_sample());
+          allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS * this_speaker->stream_info_.get_bytes_per_sample());
 
       if (this_speaker->audio_ring_buffer_ == nullptr)
         this_speaker->audio_ring_buffer_ =
-            RingBuffer::create(OUTPUT_BUFFER_SAMPLES * this_speaker->stream_info_->get_bytes_per_sample());
+            RingBuffer::create(OUTPUT_BUFFER_SAMPLES * this_speaker->stream_info_.get_bytes_per_sample());
 
       if ((data_buffer == nullptr) || (this_speaker->audio_ring_buffer_ == nullptr)) {
         err = ESP_ERR_NO_MEM;
@@ -224,7 +224,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
             }
 
             size_t bytes_read = 0;
-            size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * this_speaker->stream_info_->get_bytes_per_sample();
+            size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * this_speaker->stream_info_.get_bytes_per_sample();
             bytes_read = this_speaker->audio_ring_buffer_->read((void *) data_buffer, bytes_to_read,
                                                                 pdMS_TO_TICKS(TASK_DELAY_MS));
 
@@ -232,10 +232,10 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               last_data_received_time = millis();
               size_t bytes_written = 0;
 
-              if ((this_speaker->stream_info_->bits_per_sample <= 16) &&
+              if ((this_speaker->stream_info_.bits_per_sample <= 16) &&
                   (this_speaker->q15_volume_factor_ < INT16_MAX)) {
                 // Scale samples by the volume factor in place
-                q15_multiplication(data_buffer, data_buffer, bytes_read / sizeof(int16_t),
+                q15_multiplication((int16_t *) data_buffer, (int16_t *) data_buffer, bytes_read / sizeof(int16_t),
                                    this_speaker->q15_volume_factor_);
               }
 
@@ -254,8 +254,8 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               }
 
             } else {
-              // No data received
-              if (stop_gracefully) {
+              // No data received TODO Verify timeout is okay
+              if (stop_gracefully || ((millis() - last_data_received_time) > this_speaker->timeout_)) {
                 break;
               }
 
@@ -465,29 +465,30 @@ void I2SAudioSpeaker::loop() {
         break;
     }
   }
+}
 
-  size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
-    if (this->is_failed()) {
-      ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
-      return 0;
-    }
-    if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
-      this->start();
-    }
-
-    if (this->audio_ring_buffer_.get() != nullptr) {
-      return this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
-    }
-
+size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
     return 0;
   }
-
-  bool I2SAudioSpeaker::has_buffered_data() const {
-    if (this->audio_ring_buffer_.get() != nullptr) {
-      return this->audio_ring_buffer_->available() > 0;
-    }
-    return false;
+  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
+    this->start();
   }
+
+  if (this->audio_ring_buffer_.get() != nullptr) {
+    return this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
+  }
+
+  return 0;
+}
+
+bool I2SAudioSpeaker::has_buffered_data() const {
+  if (this->audio_ring_buffer_.get() != nullptr) {
+    return this->audio_ring_buffer_->available() > 0;
+  }
+  return false;
+}
 
 }  // namespace i2s_audio
 }  // namespace esphome
