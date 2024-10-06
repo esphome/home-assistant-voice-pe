@@ -137,7 +137,6 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     stream_info.sample_rate = 48000;
 
     this->speaker_->set_stream_info(stream_info);
-    this->speaker_->start();
   }
 
   if (this->audio_mixer_ == nullptr) {
