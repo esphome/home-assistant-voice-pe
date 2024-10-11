@@ -5,6 +5,8 @@
 #include "../i2s_audio.h"
 
 #include <driver/i2s.h>
+
+#include <freertos/event_groups.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -66,6 +68,10 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   TaskHandle_t speaker_task_handle_{nullptr};
   QueueHandle_t speaker_event_queue_;
+
+  // Used to communicate between the speaker task and the main loop
+  EventGroupHandle_t event_group_{nullptr};
+
 
   std::unique_ptr<RingBuffer> audio_ring_buffer_;
 

@@ -54,6 +54,9 @@ void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, 
 void I2SAudioSpeaker::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Speaker...");
 
+  if (this->event_group_ == nullptr)
+    this->event_group_ = xEventGroupCreate();
+
   this->speaker_event_queue_ = xQueueCreate(QUEUE_LENGTH, sizeof(TaskEvent));
   if (this->speaker_event_queue_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create event queue");
@@ -94,7 +97,8 @@ void I2SAudioSpeaker::start() {
   }
 
   if (this->speaker_task_handle_ != nullptr) {
-    xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_START, eSetValueWithoutOverwrite);
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_START |
+                                               SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
     this->task_created_ = true;
   } else {
     // ERROR SITUATION!
@@ -171,18 +175,19 @@ esp_err_t I2SAudioSpeaker::set_i2s_stream_info_(AudioStreamInfo &audio_stream_in
 
 void I2SAudioSpeaker::speaker_task(void *params) {
   {
-    uint32_t notification_bits = 0;
-    xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
-                    ULONG_MAX,           // clear all bits after waiting
-                    &notification_bits,  // notification value after wait is finished
-                    portMAX_DELAY);      // how long to wait
-
     I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
+    uint32_t event_group_bits =
+        xEventGroupWaitBits(this_speaker->event_group_,
+                            SpeakerTaskNotificationBits::COMMAND_START | SpeakerTaskNotificationBits::COMMAND_STOP |
+                                SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
+                            pdTRUE,                                                    // Clear the bits on exit
+                            pdFALSE,                                                   // Don't wait for all the bits,
+                            portMAX_DELAY);  // Block indefinitely until a command bit is set
 
     TaskEvent event;
     esp_err_t err = ESP_OK;
 
-    if (notification_bits & SpeakerTaskNotificationBits::COMMAND_START) {
+    if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_START) {
       event.type = TaskEventType::STARTING;
       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
@@ -218,26 +223,19 @@ void I2SAudioSpeaker::speaker_task(void *params) {
           event.type = TaskEventType::STARTED;
           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-          bool stop_immediately = false;
+          // bool stop_immediately = false;
           bool stop_gracefully = false;
           uint32_t last_data_received_time = millis();
 
           while (true) {
-            xTaskNotifyWait(0,                   // clear no bits at start of wait
-                            0,                   // clear no bits after waiting
-                            &notification_bits,  // notification value after wait is finished
-                            0);                  // how long to wait
+            event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
 
-            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
-              stop_immediately = true;
+            if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+              break;
             }
-            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
+            if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
               stop_gracefully = true;
             }
-
-            // if (stop_immediately) {
-            //   xTaskNotifyWait()
-            // }
 
             size_t bytes_read = 0;
             size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample;
@@ -271,7 +269,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
             } else {
               // No data received
               if (stop_gracefully || ((millis() - last_data_received_time) > this_speaker->timeout_)) {
-                stop_immediately = true;
+                break;
               }
 
               i2s_zero_dma_buffer(this_speaker->parent_->get_port());
@@ -291,6 +289,12 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       }
 
       if (this_speaker->audio_ring_buffer_ != nullptr) {
+        xEventGroupWaitBits(this_speaker->event_group_,
+                            MESSAGE_NOT_WRITING_TO_RING_BUFFER,  // Bit message to read
+                            pdFALSE,                             // Don't clear the bits on exit
+                            pdTRUE,                              // Don't wait for all the bits,
+                            portMAX_DELAY);                      // Block indefinitely until a command bit is set
+
         this_speaker->audio_ring_buffer_.reset();  // Deallocates the ring buffer stored in the unique_ptr
         this_speaker->audio_ring_buffer_ = nullptr;
       }
@@ -442,10 +446,9 @@ void I2SAudioSpeaker::stop_(bool wait_on_empty) {
     return;
 
   if (wait_on_empty) {
-    xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY,
-                eSetValueWithOverwrite);
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY);
   } else {
-    xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::COMMAND_STOP, eSetValueWithOverwrite);
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_STOP);
   }
 }
 
@@ -492,13 +495,11 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   }
 
   if (this->audio_ring_buffer_.get() != nullptr) {
-    ulTaskNotifyValueClear(this->speaker_task_handle_,
-                            SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
+    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
 
     size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
-    
-    xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER,
-                eSetValueWithOverwrite);
+
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
 
     return bytes_written;
   }
