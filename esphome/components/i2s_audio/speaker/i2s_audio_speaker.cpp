@@ -40,7 +40,8 @@ enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_START = (1 << 0),            // Starts the main task purpose
   COMMAND_STOP = (1 << 1),             // stops the main task
   COMMAND_STOP_GRACEFULLY = (1 << 2),  // Stops the task once all data has been written
-  COMMAND_RELOAD_CLOCK = (1 << 3),
+  MESSAGE_NOT_WRITING_TO_RING_BUFFER =
+      (1 << 8),  // Indicates the ring buffer is not currently being written to, so prevent the task from stopping
 };
 
 void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t c) {
@@ -173,7 +174,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
     uint32_t notification_bits = 0;
     xTaskNotifyWait(ULONG_MAX,           // clear all bits at start of wait
                     ULONG_MAX,           // clear all bits after waiting
-                    &notification_bits,  // notifcation value after wait is finished
+                    &notification_bits,  // notification value after wait is finished
                     portMAX_DELAY);      // how long to wait
 
     I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
@@ -217,16 +218,25 @@ void I2SAudioSpeaker::speaker_task(void *params) {
           event.type = TaskEventType::STARTED;
           xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
+          bool stop_immediately = false;
           bool stop_gracefully = false;
           uint32_t last_data_received_time = millis();
 
           while (true) {
-            notification_bits = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(0));
+            xTaskNotifyWait(0,                   // clear no bits at start of wait
+                            0,                   // clear no bits after waiting
+                            &notification_bits,  // notification value after wait is finished
+                            0);                  // how long to wait
 
             if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
-              break;
-            } else if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
+              stop_immediately = true;
+            }
+            if (notification_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
               stop_gracefully = true;
+            }
+
+            if (stop_immediately) {
+              xTaskNotifyWait()
             }
 
             size_t bytes_read = 0;
@@ -261,7 +271,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
             } else {
               // No data received
               if (stop_gracefully || ((millis() - last_data_received_time) > this_speaker->timeout_)) {
-                break;
+                stop_immediately = true;
               }
 
               i2s_zero_dma_buffer(this_speaker->parent_->get_port());
@@ -482,7 +492,15 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   }
 
   if (this->audio_ring_buffer_.get() != nullptr) {
-    return this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
+    ulTaskNotifiyValueClear(this->speaker_task_handle_,
+                            SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
+
+    size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
+    
+    xTaskNotify(this->speaker_task_handle_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER,
+                eSetValueWithOverwrite);
+
+    return bytes_written;
   }
 
   return 0;
