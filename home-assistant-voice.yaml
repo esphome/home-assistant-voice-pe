@@ -152,6 +152,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable tracking if the LED color was recently changed.
+  - id: color_changed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global variable tracking if the jack has been plugged touched.
   - id: jack_plugged_recently
     type: bool
@@ -267,7 +272,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - if:
                     condition:
@@ -321,7 +326,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - script.execute:
                     id: play_sound
@@ -342,7 +347,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - script.execute:
                     id: play_sound
@@ -358,20 +363,16 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
-                - if:
-                    condition:
-                      lambda: return !id(dial_touched);
-                    then:
-                      - script.execute:
-                          id: play_sound
-                          priority: false
-                          sound_file: !lambda return id(center_button_long_press_sound);
-                      - light.turn_off: voice_assistant_leds
-                      - event.trigger:
-                          id: button_press_event
-                          event_type: "long_press"
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: !lambda return id(center_button_long_press_sound);
+                - light.turn_off: voice_assistant_leds
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "long_press"
       # Very important do not remove. Trust me :D
       - timing:
           # E .
@@ -1127,50 +1128,63 @@ script:
           else:
             - media_player.volume_down:
       - script.execute: control_leds
-      - delay: 2s
+      - delay: 1s
       - lambda: id(dial_touched) = false;
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
       - script.execute: control_leds
 
   # Script executed when the hue is increased/decreased from the dial
   - id: control_hue
     mode: restart
     parameters:
-      increase_hue: bool  # True: Increase volume / False: Decrease volume.
+      increase_hue: bool  # True: Increase hue / False: Decrease hue.
     then:
       - delay: 16ms
-      - lambda: |
-          auto light_color = id(led_ring).current_values;
-          int hue = 0;
-          float saturation = 0;
-          float value = 0;
-          rgb_to_hsv( light_color.get_red(),
-                      light_color.get_green(),
-                      light_color.get_blue(),
-                      hue,
-                      saturation,
-                      value);
-          if (increase_hue) {
-            hue = (hue + 10) % 360;
-          } else {
-            hue = (hue + 350) % 360;
-          }
-          if (saturation < 0.05) {
-            saturation = 1;
-          }
-          float red = 0;
-          float green = 0;
-          float blue = 0;
-          hsv_to_rgb( hue,
-                      saturation,
-                      value,
-                      red,
-                      green,
-                      blue);
-          id(led_ring).make_call().set_rgb(red, green, blue).perform();
+      - if:
+          condition:
+            lambda: return(abs(int(id(dial).state)) > 3 || id(color_changed));
+          then:
+            - lambda: id(color_changed) = true;
+            - lambda: |
+                auto light_color = id(led_ring).current_values;
+                int hue = 0;
+                float saturation = 0;
+                float value = 0;
+                rgb_to_hsv( light_color.get_red(),
+                            light_color.get_green(),
+                            light_color.get_blue(),
+                            hue,
+                            saturation,
+                            value);
+                if (increase_hue) {
+                  hue = (hue + 10) % 360;
+                } else {
+                  hue = (hue + 350) % 360;
+                }
+                if (saturation < 0.05) {
+                  saturation = 1;
+                }
+                float red = 0;
+                float green = 0;
+                float blue = 0;
+                hsv_to_rgb( hue,
+                            saturation,
+                            value,
+                            red,
+                            green,
+                            blue);
+                id(led_ring).make_call().set_rgb(red, green, blue).perform();
       - wait_until:
           binary_sensor.is_off: center_button
       - lambda: id(dial_touched) = false;
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
       - script.execute: control_leds
+      - delay: 500ms
+      - lambda: id(color_changed) = false;
 
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
