@@ -39,11 +39,11 @@ class Speaker {
   virtual void set_volume(float volume) {};
   virtual float get_volume() { return 1.0f; }
 
-  void set_stream_info(const StreamInfo &stream_info) { this->stream_info_ = stream_info; }
+  void set_audio_stream_info(const AudioStreamInfo &audio_stream_info) { this->audio_stream_info_ = audio_stream_info; }
 
  protected:
   State state_{STATE_STOPPED};
-  StreamInfo stream_info_;
+  AudioStreamInfo audio_stream_info_;
 };
 
 }  // namespace speaker

@@ -69,14 +69,14 @@ esp_err_t AudioResampler::allocate_buffers_() {
   return ESP_OK;
 }
 
-esp_err_t AudioResampler::start(StreamInfo &stream_info, uint32_t target_sample_rate,
+esp_err_t AudioResampler::start(AudioStreamInfo &audio_stream_info, uint32_t target_sample_rate,
                                 ResampleInfo &resample_info) {
   esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
     return err;
   }
 
-  this->stream_info_ = stream_info;
+  this->audio_stream_info_ = audio_stream_info;
 
   this->input_buffer_current_ = this->input_buffer_;
   this->input_buffer_length_ = 0;
@@ -88,22 +88,22 @@ esp_err_t AudioResampler::start(StreamInfo &stream_info, uint32_t target_sample_
   this->float_output_buffer_current_ = this->float_output_buffer_;
   this->float_output_buffer_length_ = 0;
 
-  resample_info.mono_to_stereo = (stream_info.channels != 2);
+  resample_info.mono_to_stereo = (audio_stream_info.channels != 2);
 
-  if ((stream_info.channels > OUTPUT_CHANNELS) || (stream_info_.bits_per_sample != OUTPUT_BITS_PER_SAMPLE)) {
+  if ((audio_stream_info.channels > OUTPUT_CHANNELS) || (audio_stream_info_.bits_per_sample != OUTPUT_BITS_PER_SAMPLE)) {
     return ESP_ERR_NOT_SUPPORTED;
   }
 
-  if (stream_info.channels > 0) {
-    this->channel_factor_ = 2 / stream_info.channels;
+  if (audio_stream_info.channels > 0) {
+    this->channel_factor_ = 2 / audio_stream_info.channels;
   }
 
-  if (stream_info.sample_rate != target_sample_rate) {
+  if (audio_stream_info.sample_rate != target_sample_rate) {
     int flags = 0;
 
     resample_info.resample = true;
 
-    this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(stream_info.sample_rate);
+    this->sample_ratio_ = static_cast<float>(target_sample_rate) / static_cast<float>(audio_stream_info.sample_rate);
 
     if (this->sample_ratio_ < 1.0) {
       this->lowpass_ratio_ -= (10.24 / 16);
@@ -130,20 +130,20 @@ esp_err_t AudioResampler::start(StreamInfo &stream_info, uint32_t target_sample_
     }
 
     if (this->pre_filter_ || this->post_filter_) {
-      for (int i = 0; i < stream_info.channels; ++i) {
+      for (int i = 0; i < audio_stream_info.channels; ++i) {
         biquad_init(&this->lowpass_[i][0], &this->lowpass_coeff_, 1.0);
         biquad_init(&this->lowpass_[i][1], &this->lowpass_coeff_, 1.0);
       }
     }
 
     if (this->sample_ratio_ < 1.0) {
-      this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS,
+      this->resampler_ = resampleInit(audio_stream_info.channels, NUM_TAPS, NUM_FILTERS,
                                       this->sample_ratio_ * this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
     } else if (this->lowpass_ratio_ < 1.0) {
       this->resampler_ =
-          resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
+          resampleInit(audio_stream_info.channels, NUM_TAPS, NUM_FILTERS, this->lowpass_ratio_, flags | INCLUDE_LOWPASS);
     } else {
-      this->resampler_ = resampleInit(stream_info.channels, NUM_TAPS, NUM_FILTERS, 1.0, flags);
+      this->resampler_ = resampleInit(audio_stream_info.channels, NUM_TAPS, NUM_FILTERS, 1.0, flags);
     }
 
     resampleAdvancePosition(this->resampler_, NUM_TAPS / 2.0);
@@ -199,7 +199,7 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
   size_t max_input_samples = this->internal_buffer_samples_;
 
   // Mono to stereo -> cut in half
-  max_input_samples /= (2 / this->stream_info_.channels);
+  max_input_samples /= (2 / this->audio_stream_info_.channels);
 
   if (this->sample_ratio_ > 1.0) {
     // Upsampling -> reduce by a factor of the ceiling of sample_ratio_
@@ -244,14 +244,14 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
         this->float_input_buffer_[i] = static_cast<float>(this->input_buffer_[i]) / 32768.0f;
       }
 
-      size_t frames_read = samples_read / this->stream_info_.channels;
+      size_t frames_read = samples_read / this->audio_stream_info_.channels;
 
       if (this->pre_filter_) {
-        for (int i = 0; i < this->stream_info_.channels; ++i) {
+        for (int i = 0; i < this->audio_stream_info_.channels; ++i) {
           biquad_apply_buffer(&this->lowpass_[i][0], this->float_input_buffer_ + i, frames_read,
-                              this->stream_info_.channels);
+                              this->audio_stream_info_.channels);
           biquad_apply_buffer(&this->lowpass_[i][1], this->float_input_buffer_ + i, frames_read,
-                              this->stream_info_.channels);
+                              this->audio_stream_info_.channels);
         }
       }
 
@@ -262,19 +262,19 @@ AudioResamplerState AudioResampler::resample(bool stop_gracefully) {
                                        this->internal_buffer_samples_ / this->channel_factor_, this->sample_ratio_);
 
       size_t frames_used = res.input_used;
-      size_t samples_used = frames_used * this->stream_info_.channels;
+      size_t samples_used = frames_used * this->audio_stream_info_.channels;
 
       size_t frames_generated = res.output_generated;
       if (this->post_filter_) {
-        for (int i = 0; i < this->stream_info_.channels; ++i) {
+        for (int i = 0; i < this->audio_stream_info_.channels; ++i) {
           biquad_apply_buffer(&this->lowpass_[i][0], this->float_output_buffer_ + i, frames_generated,
-                              this->stream_info_.channels);
+                              this->audio_stream_info_.channels);
           biquad_apply_buffer(&this->lowpass_[i][1], this->float_output_buffer_ + i, frames_generated,
-                              this->stream_info_.channels);
+                              this->audio_stream_info_.channels);
         }
       }
 
-      size_t samples_generated = frames_generated * this->stream_info_.channels;
+      size_t samples_generated = frames_generated * this->audio_stream_info_.channels;
 
       for (int i = 0; i < samples_generated; ++i) {
         this->output_buffer_[i] = static_cast<int16_t>(this->float_output_buffer_[i] * 32767);

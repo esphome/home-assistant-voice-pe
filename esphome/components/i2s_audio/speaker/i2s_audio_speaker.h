@@ -9,6 +9,8 @@
 #include <freertos/queue.h>
 
 #include "esphome/components/speaker/speaker.h"
+
+#include "esphome/core/audio.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
@@ -44,7 +46,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 #endif
   void set_i2s_comm_fmt(i2s_comm_format_t mode) { this->i2s_comm_fmt_ = mode; }
 
-  esp_err_t set_i2s_stream_info_(StreamInfo &stream_info);
+  esp_err_t set_i2s_stream_info_(AudioStreamInfo &audio_stream_info);
 
   void start() override;
   void stop() override;

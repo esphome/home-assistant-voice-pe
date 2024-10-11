@@ -40,7 +40,7 @@ class AudioDecoder {
 
   AudioDecoderState decode(bool stop_gracefully);
 
-  const optional<StreamInfo> &get_stream_info() const { return this->stream_info_; }
+  const optional<AudioStreamInfo> &get_audio_stream_info() const { return this->audio_stream_info_; }
 
  protected:
   esp_err_t allocate_buffers_();
@@ -69,7 +69,7 @@ class AudioDecoder {
   size_t wav_bytes_left_;
 
   media_player::MediaFileType media_file_type_{media_player::MediaFileType::NONE};
-  optional<StreamInfo> stream_info_{};
+  optional<AudioStreamInfo> audio_stream_info_{};
 
   size_t potentially_failed_count_{0};
   bool end_of_file_{false};

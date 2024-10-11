@@ -61,11 +61,11 @@ void I2SAudioSpeaker::setup() {
     return;
   }
 
-  StreamInfo stream_info;
-  stream_info.channels = 1;
-  stream_info.bits_per_sample = (uint8_t) this->bits_per_sample_;
-  stream_info.sample_rate = 16000;
-  this->set_stream_info(stream_info);
+  AudioStreamInfo audio_stream_info;
+  audio_stream_info.channels = 1;
+  audio_stream_info.bits_per_sample = (uint8_t) this->bits_per_sample_;
+  audio_stream_info.sample_rate = 16000;
+  this->set_audio_stream_info(audio_stream_info);
 }
 
 template<typename a, typename b> const uint8_t *convert_data_format(const a *from, b *to, size_t &bytes, bool repeat) {
@@ -153,16 +153,16 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
   return ESP_OK;
 }
 
-esp_err_t I2SAudioSpeaker::set_i2s_stream_info_(StreamInfo &stream_info) {
+esp_err_t I2SAudioSpeaker::set_i2s_stream_info_(AudioStreamInfo &audio_stream_info) {
   if (this->i2s_mode_ & I2S_MODE_MASTER) {
     // We control the I2S bus, so we modify the sample rate and bits per sample to match the incoming audio
-    this->sample_rate_ = stream_info.sample_rate;
-    this->bits_per_sample_ = (i2s_bits_per_sample_t) stream_info.bits_per_sample;
+    this->sample_rate_ = audio_stream_info.sample_rate;
+    this->bits_per_sample_ = (i2s_bits_per_sample_t) audio_stream_info.bits_per_sample;
   }
 
-  if (stream_info.channels == 1) {
+  if (audio_stream_info.channels == 1) {
     return i2s_set_clk(this->parent_->get_port(), this->sample_rate_, this->bits_per_sample_, I2S_CHANNEL_MONO);
-  } else if (stream_info.channels == 2) {
+  } else if (audio_stream_info.channels == 2) {
     return i2s_set_clk(this->parent_->get_port(), this->sample_rate_, this->bits_per_sample_, I2S_CHANNEL_STEREO);
   }
 
@@ -186,8 +186,8 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       event.type = TaskEventType::STARTING;
       xQueueSend(this_speaker->speaker_event_queue_, &event, portMAX_DELAY);
 
-      StreamInfo stream_info = this_speaker->stream_info_;
-      ssize_t bytes_per_sample = stream_info.get_bytes_per_sample();
+      AudioStreamInfo audio_stream_info = this_speaker->audio_stream_info_;
+      ssize_t bytes_per_sample = audio_stream_info.get_bytes_per_sample();
 
       ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
       uint8_t *data_buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample);
@@ -207,7 +207,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         err = this_speaker->start_i2s_driver_();
 
         if (err == ESP_OK) {
-          err = this_speaker->set_i2s_stream_info_(stream_info);
+          err = this_speaker->set_i2s_stream_info_(audio_stream_info);
         }
 
         if (err != ESP_OK) {
@@ -235,9 +235,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               stop_gracefully = true;
             }
 
-            if (stop_immediately) {
-              xTaskNotifyWait()
-            }
+            // if (stop_immediately) {
+            //   xTaskNotifyWait()
+            // }
 
             size_t bytes_read = 0;
             size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample;
@@ -248,17 +248,17 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               last_data_received_time = millis();
               size_t bytes_written = 0;
 
-              if ((stream_info.bits_per_sample <= 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
+              if ((audio_stream_info.bits_per_sample <= 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
                 // Scale samples by the volume factor in place
                 q15_multiplication((int16_t *) data_buffer, (int16_t *) data_buffer, bytes_read / sizeof(int16_t),
                                    this_speaker->q15_volume_factor_);
               }
 
-              if (stream_info.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
+              if (audio_stream_info.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
                 i2s_write(this_speaker->parent_->get_port(), data_buffer, bytes_read, &bytes_written, portMAX_DELAY);
-              } else if (stream_info.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
+              } else if (audio_stream_info.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
                 i2s_write_expand(this_speaker->parent_->get_port(), data_buffer, bytes_read,
-                                 stream_info.bits_per_sample, this_speaker->bits_per_sample_, &bytes_written,
+                                 audio_stream_info.bits_per_sample, this_speaker->bits_per_sample_, &bytes_written,
                                  portMAX_DELAY);
               }  // TODO: Unhandled case where the incoming stream has more bits per sample than the outgoing stream
 
@@ -492,7 +492,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   }
 
   if (this->audio_ring_buffer_.get() != nullptr) {
-    ulTaskNotifiyValueClear(this->speaker_task_handle_,
+    ulTaskNotifyValueClear(this->speaker_task_handle_,
                             SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
 
     size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
