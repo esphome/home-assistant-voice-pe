@@ -703,9 +703,9 @@ light:
             }
       - addressable_lambda:
           name: "Center Button Touched"
-          update_interval: 16ms
+          update_interval: 1ms
           lambda: |-
-            auto light_color = id(led_ring).current_values;
+            auto light_color = id(center_button).state ? id(voice_assistant_leds).current_values : id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -1141,14 +1141,13 @@ script:
     parameters:
       increase_hue: bool  # True: Increase hue / False: Decrease hue.
     then:
-      - delay: 16ms
       - if:
           condition:
             lambda: return(abs(int(id(dial).state)) > 3 || id(color_changed));
           then:
-            - lambda: id(color_changed) = true;
             - lambda: |
-                auto light_color = id(led_ring).current_values;
+                id(color_changed) = true;
+                auto light_color = id(voice_assistant_leds).current_values;
                 int hue = 0;
                 float saturation = 0;
                 float value = 0;
@@ -1175,10 +1174,18 @@ script:
                             red,
                             green,
                             blue);
-                id(led_ring).make_call().set_rgb(red, green, blue).perform();
+                id(voice_assistant_leds).make_call().set_rgb(red, green, blue).perform();
       - wait_until:
           binary_sensor.is_off: center_button
-      - lambda: id(dial_touched) = false;
+      - lambda: |
+          id(dial_touched) = false;
+          // now we "save" the new LED color/state to led_ring, maintaining its brightness and state
+          auto led_ring_call = id(led_ring).make_call();
+          auto va_leds_cv = id(voice_assistant_leds).current_values;
+          led_ring_call.from_light_color_values(va_leds_cv);
+          led_ring_call.set_brightness(id(led_ring).current_values.get_brightness());
+          led_ring_call.set_state(id(led_ring).current_values.is_on());
+          led_ring_call.perform();
       - sensor.rotary_encoder.set_value:
           id: dial
           value: 0
