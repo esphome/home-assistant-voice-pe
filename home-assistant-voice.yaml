@@ -1150,6 +1150,7 @@ script:
     parameters:
       increase_hue: bool  # True: Increase hue / False: Decrease hue.
     then:
+      - delay: 16ms
       - if:
           condition:
             lambda: return(abs(int(id(dial).state)) > 3 || id(color_changed));
