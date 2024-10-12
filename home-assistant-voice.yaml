@@ -703,9 +703,18 @@ light:
             }
       - addressable_lambda:
           name: "Center Button Touched"
-          update_interval: 1ms
+          update_interval: 16ms
           lambda: |-
-            auto light_color = id(center_button).state ? id(voice_assistant_leds).current_values : id(led_ring).current_values;
+            if (initial_run) {
+              // set voice_assistant_leds light to colors based on led_ring
+              auto led_ring_cv = id(led_ring).current_values;
+              auto va_leds_call = id(voice_assistant_leds).make_call();
+              va_leds_call.from_light_color_values(led_ring_cv);
+              va_leds_call.set_brightness(1.0);
+              va_leds_call.set_state(true);
+              va_leds_call.perform();
+            }
+            auto light_color = id(voice_assistant_leds).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
