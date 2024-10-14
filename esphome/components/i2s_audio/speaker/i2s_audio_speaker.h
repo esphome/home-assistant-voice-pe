@@ -51,7 +51,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
  protected:
   bool set_event_group_error_(esp_err_t err);
   esp_err_t start_i2s_driver_();
-  void delete_task_();
+  void delete_task_(size_t buffer_size);
 
   static void speaker_task(void *params);
   TaskHandle_t speaker_task_handle_{nullptr};
