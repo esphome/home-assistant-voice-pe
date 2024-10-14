@@ -53,6 +53,16 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   float get_volume() override { return this->volume_; }
 
  protected:
+  /// @brief Function for the FreeRTOS task handling audio output.
+  /// After receiving the COMMAND_START signal, allocates space for the buffers, starts the I2S driver, and reads
+  /// audio from the ring buffer and writes audio to the I2S port. Stops immmiately after receiving the COMMAND_STOP
+  /// signal and stops only after the ring buffer is empty after receiving the COMMAND_STOP_GRACEFULLY signal. Stops if
+  /// the ring buffer hasn't read data for more than timeout_ milliseconds. When stopping, it deallocates the buffers,
+  /// stops the I2S driver, unlocks the I2S port, and deletes the task. It communicates the state and any errors via
+  /// event_group_.
+  /// @param params I2SAudioSpeaker component
+  static void speaker_task(void *params);
+
   /// @brief Sets the corresponding ERR_ESP event group bits.
   /// @param err esp_err_t error code.
   /// @return True if an ERR_ESP bit is set and false if err == ESP_OK
@@ -76,26 +86,17 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// Modifies I2S driver's sample rate, bits per sample, and number of channel settings. If the I2S is in secondary
   /// mode, it only modifies the number of channels.
   /// @param audio_stream_info  Describes the incoming audio stream
-  /// @return ESP_ERR_INVALID_ARG if there is a parameter error or if there is more than 2 channels in the stream.
+  /// @return ESP_ERR_INVALID_ARG if there is a parameter error, if there is more than 2 channels in the stream, or if
+  ///           the audio settings are incompatible with the configuration.
   ///         ESP_ERR_NO_MEM if the driver fails to reconfigure due to a memory allocation error.
   ///         ESP_OK if successful.
-  esp_err_t set_i2s_stream_info_(AudioStreamInfo &audio_stream_info);
+  esp_err_t reconfigure_i2s_stream_info_(AudioStreamInfo &audio_stream_info);
 
   /// @brief Deletes the speaker's task.
   /// Deallocates the data_buffer_ and audio_ring_buffer_, if necessary, and deletes the task. Should only be called by
   /// the speaker_task itself.
   /// @param buffer_size The allocated size of the data_buffer_.
   void delete_task_(size_t buffer_size);
-
-  /// @brief Function for the FreeRTOS that handles outputting audio.
-  /// After receiving the COMMAND_START signal, allocates space for the buffers, starts the I2S driver, and reads
-  /// audio from the ring buffer and writes audio to the I2S port. Stops immmiately after receiving the COMMAND_STOP
-  /// signal and stops only after the ring buffer is empty after receiving the COMMAND_STOP_GRACEFULLY signal. Stops if
-  /// the ring buffer hasn't read data for more than timeout_ milliseconds. When stopping, it deallocates the buffers,
-  /// stops the I2S driver, unlocks the I2S port, and deletes the task. It communicates the state and any errors via
-  /// event_group_.
-  /// @param params I2SAudioSpeaker component
-  static void speaker_task(void *params);
 
   TaskHandle_t speaker_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
