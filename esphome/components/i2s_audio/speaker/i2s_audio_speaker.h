@@ -49,6 +49,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   bool has_buffered_data() const override;
 
+  /// @brief Sets the volume of the speaker.
+  /// Overrides the default setter to convert the floating point volume to a Q15 fixed-point factor.
+  /// @param volume 
   void set_volume(float volume) override;
   float get_volume() override { return this->volume_; }
 
@@ -106,10 +109,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   uint32_t timeout_;
   uint8_t dout_pin_;
-  
+
   bool task_created_{false};
 
-  float volume_{1.0f};
   int16_t q15_volume_factor_{INT16_MAX};
 
 #if SOC_I2S_SUPPORTS_DAC

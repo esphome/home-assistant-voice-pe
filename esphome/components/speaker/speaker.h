@@ -36,14 +36,15 @@ class Speaker {
   bool is_running() const { return this->state_ == STATE_RUNNING; }
   bool is_stopped() const { return this->state_ == STATE_STOPPED; }
 
-  virtual void set_volume(float volume) {};
-  virtual float get_volume() { return 1.0f; }
+  virtual void set_volume(float volume) { this->volume_ = volume; };
+  virtual float get_volume() { return this->volume_; }
 
   void set_audio_stream_info(const AudioStreamInfo &audio_stream_info) { this->audio_stream_info_ = audio_stream_info; }
 
  protected:
   State state_{STATE_STOPPED};
   AudioStreamInfo audio_stream_info_;
+  float volume_{1.0f};
 };
 
 }  // namespace speaker
