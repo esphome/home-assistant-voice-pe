@@ -20,6 +20,57 @@ static const size_t TASK_DELAY_MS = 10;
 
 static const char *const TAG = "i2s_audio.speaker";
 
+enum SpeakerEventGroupBits : uint32_t {
+  COMMAND_START = (1 << 0),                           // Starts the main task purpose
+  COMMAND_STOP = (1 << 1),                            // stops the main task
+  COMMAND_STOP_GRACEFULLY = (1 << 2),                 // Stops the task once all data has been written
+  MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE = (1 << 5),  // Locks the ring buffer when not set
+  STATE_STARTING = (1 << 10),
+  STATE_RUNNING = (1 << 11),
+  STATE_STOPPING = (1 << 12),
+  STATE_STOPPED = (1 << 13),
+  ERR_TASK_FAILED_TO_START = (1 << 15),
+  ERR_ESP_INVALID_STATE = (1 << 16),
+  ERR_ESP_INVALID_ARG = (1 << 17),
+  ERR_ESP_INVALID_SIZE = (1 << 18),
+  ERR_ESP_NO_MEM = (1 << 19),
+  ERR_ESP_FAIL = (1 << 20),
+  ALL_ERR_ESP_BITS = ERR_ESP_INVALID_STATE | ERR_ESP_INVALID_ARG | ERR_ESP_INVALID_SIZE | ERR_ESP_NO_MEM | ERR_ESP_FAIL,
+  ALL_BITS = 0x00FFFFFF,  // All valid FreeRTOS event group bits
+};
+
+// Translates a SpeakerEventGroupBits ERR_ESP bit to the coressponding esp_err_t
+static esp_err_t err_bit_to_esp_err(uint32_t bit) {
+  switch (bit) {
+    case SpeakerEventGroupBits::ERR_ESP_INVALID_STATE:
+      return ESP_ERR_INVALID_STATE;
+    case SpeakerEventGroupBits::ERR_ESP_INVALID_ARG:
+      return ESP_ERR_INVALID_ARG;
+    case SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE:
+      return ESP_ERR_INVALID_SIZE;
+    case SpeakerEventGroupBits::ERR_ESP_NO_MEM:
+      return ESP_ERR_NO_MEM;
+    default:
+      return ESP_FAIL;
+  }
+}
+
+/// @brief Multiplies the input array of Q15 numbers by a Q15 constant factor
+///
+/// Based on `dsps_mulc_s16_ansi` from the esp-dsp library:
+/// https://github.com/espressif/esp-dsp/blob/master/modules/math/mulc/fixed/dsps_mulc_s16_ansi.c
+/// (accessed on 2024-09-30).
+/// @param input Array of Q15 numbers
+/// @param output Array of Q15 numbers
+/// @param len Length of array
+/// @param c Q15 constant factor
+static void q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t c) {
+  for (int i = 0; i < len; i++) {
+    int32_t acc = (int32_t) input[i] * (int32_t) c;
+    output[i] = (int16_t) (acc >> 15);
+  }
+}
+
 // Lists the Q15 fixed point scaling factor for volume reduction.
 // Has 100 values representing silence and a reduction [49, 48.5, ... 0.5, 0] dB.
 // dB to PCM scaling factor formula: floating_point_scale_factor = 2^(-db/6.014)
@@ -32,69 +83,6 @@ static const std::vector<int16_t> q15_volume_scaling_factors = {
     3462,  3668,  3885,  4116,  4360,  4619,  4893,  5183,  5490,  5816,  6161,  6527,  6914,  7324,  7758,
     8218,  8706,  9222,  9770,  10349, 10963, 11613, 12302, 13032, 13805, 14624, 15491, 16410, 17384, 18415,
     19508, 20665, 21891, 23189, 24565, 26022, 27566, 29201, 30933, 32767};
-
-enum SpeakerTaskNotificationBits : uint32_t {
-  COMMAND_START = (1 << 0),            // Starts the main task purpose
-  COMMAND_STOP = (1 << 1),             // stops the main task
-  COMMAND_STOP_GRACEFULLY = (1 << 2),  // Stops the task once all data has been written
-  MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE = (1 << 5),
-  STATE_STARTING = (1 << 10),
-  STATE_RUNNING = (1 << 11),
-  STATE_STOPPING = (1 << 12),
-  STATE_STOPPED = (1 << 13),
-  ERR_ESP_INVALID_STATE = (1 << 16),
-  ERR_ESP_INVALID_ARG = (1 << 17),
-  ERR_ESP_INVALID_SIZE = (1 << 18),
-  ERR_ESP_NO_MEM = (1 << 19),
-  ERR_ESP_FAIL = (1 << 20),
-  ERR_TASK_FAILED_TO_START = (1 << 21),
-  ALL_ERR_ESP_BITS = ERR_ESP_INVALID_STATE | ERR_ESP_INVALID_ARG | ERR_ESP_INVALID_SIZE | ERR_ESP_NO_MEM | ERR_ESP_FAIL,
-  ALL_BITS = 0x00FFFFFF,  // All valid FreRTOS event group bits
-};
-
-bool I2SAudioSpeaker::set_event_group_error_(esp_err_t err) {
-  switch (err) {
-    case ESP_OK:
-      return true;
-    case ESP_ERR_INVALID_STATE:
-      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_ESP_INVALID_STATE);
-      return false;
-    case ESP_ERR_INVALID_ARG:
-      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_ESP_INVALID_ARG);
-      return false;
-    case ESP_ERR_INVALID_SIZE:
-      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_ESP_INVALID_SIZE);
-      return false;
-    case ESP_ERR_NO_MEM:
-      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_ESP_NO_MEM);
-      return false;
-    default:
-      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_ESP_FAIL);
-      return false;
-  }
-}
-
-esp_err_t err_bit_to_esp_err(uint32_t bit) {
-  switch (bit) {
-    case SpeakerTaskNotificationBits::ERR_ESP_INVALID_STATE:
-      return ESP_ERR_INVALID_STATE;
-    case SpeakerTaskNotificationBits::ERR_ESP_INVALID_ARG:
-      return ESP_ERR_INVALID_ARG;
-    case SpeakerTaskNotificationBits::ERR_ESP_INVALID_SIZE:
-      return ESP_ERR_INVALID_SIZE;
-    case SpeakerTaskNotificationBits::ERR_ESP_NO_MEM:
-      return ESP_ERR_NO_MEM;
-    default:
-      return ESP_FAIL;
-  }
-}
-
-void I2SAudioSpeaker::q15_multiplication(const int16_t *input, int16_t *output, size_t len, int16_t c) {
-  for (int i = 0; i < len; i++) {
-    int32_t acc = (int32_t) input[i] * (int32_t) c;
-    output[i] = (int16_t) (acc >> 15);
-  }
-}
 
 void I2SAudioSpeaker::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Speaker...");
@@ -117,6 +105,46 @@ void I2SAudioSpeaker::setup() {
   this->set_audio_stream_info(audio_stream_info);
 }
 
+void I2SAudioSpeaker::loop() {
+  uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
+
+  if (event_group_bits & SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START) {
+    this->status_set_error("Failed to start speaker task");
+  }
+
+  if (event_group_bits & SpeakerEventGroupBits::ALL_ERR_ESP_BITS) {
+    uint32_t error_bits = event_group_bits & SpeakerEventGroupBits::ALL_ERR_ESP_BITS;
+    ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(err_bit_to_esp_err(error_bits)));
+    this->status_set_warning();
+  }
+
+  if (event_group_bits & SpeakerEventGroupBits::STATE_STARTING) {
+    ESP_LOGD(TAG, "Starting Speaker");
+    this->state_ = speaker::STATE_STARTING;
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STARTING);
+  }
+  if (event_group_bits & SpeakerEventGroupBits::STATE_RUNNING) {
+    ESP_LOGD(TAG, "Started Speaker");
+    this->state_ = speaker::STATE_RUNNING;
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_RUNNING);
+    this->status_clear_warning();
+    this->status_clear_error();
+  }
+  if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPING) {
+    ESP_LOGD(TAG, "Stopping Speaker");
+    this->state_ = speaker::STATE_STOPPING;
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
+  }
+  if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPED) {
+    if (!this->task_created_) {
+      ESP_LOGD(TAG, "Stopped Speaker");
+      this->state_ = speaker::STATE_STOPPED;
+      xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ALL_BITS);
+      this->speaker_task_handle_ = nullptr;
+    }
+  }
+}
+
 void I2SAudioSpeaker::start() {
   if (this->is_failed())
     return;
@@ -128,17 +156,91 @@ void I2SAudioSpeaker::start() {
   }
 
   if (this->speaker_task_handle_ != nullptr) {
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_START);
+    xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
     this->task_created_ = true;
   } else {
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_TASK_FAILED_TO_START);
+    xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
   }
 }
+
+void I2SAudioSpeaker::stop() { this->stop_(false); }
+
+void I2SAudioSpeaker::finish() { this->stop_(true); }
 
 void I2SAudioSpeaker::set_volume(float volume) {
   this->volume_ = volume;
   ssize_t decibel_index = remap<ssize_t, float>(volume, 0.0f, 1.0f, 0, q15_volume_scaling_factors.size() - 1);
   this->q15_volume_factor_ = q15_volume_scaling_factors[decibel_index];
+}
+
+size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
+  if (this->is_failed()) {
+    ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
+    return 0;
+  }
+  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
+    this->start();
+  }
+
+  // Wait for the ring buffer to be available
+  uint32_t event_bits =
+      xEventGroupWaitBits(this->event_group_, SpeakerEventGroupBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE, pdFALSE,
+                          pdFALSE, pdMS_TO_TICKS(10));
+
+  if (event_bits & SpeakerEventGroupBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE) {
+    // Ring buffer is available to write
+
+    // Lock the ring buffer, write to it, then unlock it
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
+    size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
+    xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
+
+    return bytes_written;
+  }
+
+  return 0;
+}
+
+bool I2SAudioSpeaker::has_buffered_data() const {
+  if (this->audio_ring_buffer_.get() != nullptr) {
+    return this->audio_ring_buffer_->available() > 0;
+  }
+  return false;
+}
+
+void I2SAudioSpeaker::stop_(bool wait_on_empty) {
+  if (this->is_failed())
+    return;
+  if (this->state_ == speaker::STATE_STOPPED)
+    return;
+
+  if (wait_on_empty) {
+    xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
+  } else {
+    xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP);
+  }
+}
+
+bool I2SAudioSpeaker::send_esp_err_to_event_group_(esp_err_t err) {
+  switch (err) {
+    case ESP_OK:
+      return false;
+    case ESP_ERR_INVALID_STATE:
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_STATE);
+      return true;
+    case ESP_ERR_INVALID_ARG:
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_ARG);
+      return true;
+    case ESP_ERR_INVALID_SIZE:
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
+      return true;
+    case ESP_ERR_NO_MEM:
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_ESP_NO_MEM);
+      return true;
+    default:
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_ESP_FAIL);
+      return true;
+  }
 }
 
 esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
@@ -225,7 +327,7 @@ void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
     this->data_buffer_ = nullptr;
   }
 
-  xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STOPPED);
+  xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPED);
 
   this->task_created_ = false;
   vTaskDelete(NULL);
@@ -235,19 +337,18 @@ void I2SAudioSpeaker::speaker_task(void *params) {
   I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
   uint32_t event_group_bits =
       xEventGroupWaitBits(this_speaker->event_group_,
-                          SpeakerTaskNotificationBits::COMMAND_START | SpeakerTaskNotificationBits::COMMAND_STOP |
-                              SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
-                          pdTRUE,                                                    // Clear the bits on exit
-                          pdFALSE,                                                   // Don't wait for all the bits,
-                          portMAX_DELAY);  // Block indefinitely until a bit is set
+                          SpeakerEventGroupBits::COMMAND_START | SpeakerEventGroupBits::COMMAND_STOP |
+                              SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
+                          pdTRUE,                                              // Clear the bits on exit
+                          pdFALSE,                                             // Don't wait for all the bits,
+                          portMAX_DELAY);                                      // Block indefinitely until a bit is set
 
-  if (event_group_bits &
-      (SpeakerTaskNotificationBits::COMMAND_STOP | SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY)) {
+  if (event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY)) {
     // Received a stop signal before the task was requested to start
     this_speaker->delete_task_(0);
   }
 
-  xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STARTING);
+  xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_STARTING);
 
   AudioStreamInfo audio_stream_info = this_speaker->audio_stream_info_;
   const ssize_t bytes_per_sample = audio_stream_info.get_bytes_per_sample();
@@ -265,21 +366,22 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
   if ((this_speaker->data_buffer_ == nullptr) || (this_speaker->audio_ring_buffer_ == nullptr)) {
     // Failed to allocate a buffer
-    xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::ERR_ESP_NO_MEM);
+    xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_NO_MEM);
     this_speaker->delete_task_(dma_buffers_size);
   }
 
-  if (!this_speaker->set_event_group_error_(this_speaker->start_i2s_driver_())) {
+  if (this_speaker->send_esp_err_to_event_group_(this_speaker->start_i2s_driver_())) {
     // Failed to start I2S driver
     this_speaker->delete_task_(dma_buffers_size);
+  } else {
+    // Ring buffer is allocated, so indicate its can be written to
+    xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
   }
 
-  if (this_speaker->set_event_group_error_(this_speaker->set_i2s_stream_info_(audio_stream_info))) {
+  if (!this_speaker->send_esp_err_to_event_group_(this_speaker->set_i2s_stream_info_(audio_stream_info))) {
     // Successfully set the I2S stream info, ready to write audio data to the I2S port
 
-    xEventGroupSetBits(this_speaker->event_group_,
-                       SpeakerTaskNotificationBits::STATE_RUNNING |
-                           SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
+    xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_RUNNING);
 
     bool stop_gracefully = false;
     uint32_t last_data_received_time = millis();
@@ -287,11 +389,11 @@ void I2SAudioSpeaker::speaker_task(void *params) {
     while ((millis() - last_data_received_time) <= this_speaker->timeout_) {
       event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
 
-      if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+      if (event_group_bits & SpeakerEventGroupBits::COMMAND_STOP) {
         i2s_zero_dma_buffer(this_speaker->parent_->get_port());
         break;
       }
-      if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
+      if (event_group_bits & SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY) {
         stop_gracefully = true;
       }
 
@@ -319,7 +421,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         }  // TODO: Unhandled case where the incoming stream has more bits per sample than the outgoing stream
 
         if (bytes_written != bytes_read) {
-          xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::ERR_ESP_INVALID_SIZE);
+          xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
         }
 
       } else {
@@ -332,106 +434,13 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       }
     }
   }
-  xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STOPPING);
+  xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
 
   i2s_stop(this_speaker->parent_->get_port());
   i2s_driver_uninstall(this_speaker->parent_->get_port());
 
   this_speaker->parent_->unlock();
   this_speaker->delete_task_(dma_buffers_size);
-}
-
-void I2SAudioSpeaker::stop() { this->stop_(false); }
-
-void I2SAudioSpeaker::finish() { this->stop_(true); }
-
-void I2SAudioSpeaker::stop_(bool wait_on_empty) {
-  if (this->is_failed())
-    return;
-  if (this->state_ == speaker::STATE_STOPPED)
-    return;
-
-  if (wait_on_empty) {
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY);
-  } else {
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_STOP);
-  }
-}
-
-void I2SAudioSpeaker::loop() {
-  uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
-
-  if (event_group_bits & SpeakerTaskNotificationBits::ERR_TASK_FAILED_TO_START) {
-    this->status_set_error("Failed to start speaker task");
-  }
-
-  if (event_group_bits & SpeakerTaskNotificationBits::ALL_ERR_ESP_BITS) {
-    uint32_t error_bits = event_group_bits & SpeakerTaskNotificationBits::ALL_ERR_ESP_BITS;
-    ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(err_bit_to_esp_err(error_bits)));
-    this->status_set_warning();
-  }
-
-  if (event_group_bits & SpeakerTaskNotificationBits::STATE_STARTING) {
-    ESP_LOGD(TAG, "Starting Speaker");
-    this->state_ = speaker::STATE_STARTING;
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STARTING);
-  }
-  if (event_group_bits & SpeakerTaskNotificationBits::STATE_RUNNING) {
-    ESP_LOGD(TAG, "Started Speaker");
-    this->state_ = speaker::STATE_RUNNING;
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_RUNNING);
-    this->status_clear_warning();
-    this->status_clear_error();
-  }
-  if (event_group_bits & SpeakerTaskNotificationBits::STATE_STOPPING) {
-    ESP_LOGD(TAG, "Stopping Speaker");
-    this->state_ = speaker::STATE_STOPPING;
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STOPPING);
-  }
-  if (event_group_bits & SpeakerTaskNotificationBits::STATE_STOPPED) {
-    if (!this->task_created_) {
-      ESP_LOGD(TAG, "Stopped Speaker");
-      this->state_ = speaker::STATE_STOPPED;
-      xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::ALL_BITS);
-      this->speaker_task_handle_ = nullptr;
-    }
-  }
-}
-
-size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
-  if (this->is_failed()) {
-    ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
-    return 0;
-  }
-  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
-    this->start();
-  }
-
-  // Wait for the ring buffer to be available
-  uint32_t event_bits =
-      xEventGroupWaitBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE,
-                          pdFALSE, pdFALSE, pdMS_TO_TICKS(10));
-
-  if (event_bits & SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE) {
-    // Ring buffer is available to write
-
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
-
-    size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
-
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
-
-    return bytes_written;
-  }
-
-  return 0;
-}
-
-bool I2SAudioSpeaker::has_buffered_data() const {
-  if (this->audio_ring_buffer_.get() != nullptr) {
-    return this->audio_ring_buffer_->available() > 0;
-  }
-  return false;
 }
 
 }  // namespace i2s_audio
