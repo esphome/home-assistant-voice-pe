@@ -49,7 +49,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   bool has_buffered_data() const override;
 
-  /// @brief Sets the volume of the speaker.
+  /// @brief Sets the volume of the speaker. It is implemented as a software volume control.
   /// Overrides the default setter to convert the floating point volume to a Q15 fixed-point factor.
   /// @param volume 
   void set_volume(float volume) override;
