@@ -358,6 +358,10 @@ void I2SAudioSpeaker::stop_(bool wait_on_empty) {
 void I2SAudioSpeaker::loop() {
   uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
 
+  if (event_group_bits & SpeakerTaskNotificationBits::ERR_TASK_FAILED_TO_START) {
+    this->status_set_error("Failed to start speaker task");
+  }
+
   if (event_group_bits & SpeakerTaskNotificationBits::ALL_ERR_ESP_BITS) {
     uint32_t error_bits = event_group_bits & SpeakerTaskNotificationBits::ALL_ERR_ESP_BITS;
     ESP_LOGW(TAG, "Error writing to I2S: %s", esp_err_to_name(err_bit_to_esp_err(error_bits)));
@@ -373,6 +377,8 @@ void I2SAudioSpeaker::loop() {
     ESP_LOGD(TAG, "Started Speaker");
     this->state_ = speaker::STATE_RUNNING;
     xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_RUNNING);
+    this->status_clear_warning();
+    this->status_clear_error();
   }
   if (event_group_bits & SpeakerTaskNotificationBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping Speaker");
@@ -405,6 +411,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
 
   if (event_bits & SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE) {
     // Ring buffer is available to write
+    
     xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
 
     size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
