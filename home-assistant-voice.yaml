@@ -849,6 +849,7 @@ light:
     restore_mode: RESTORE_DEFAULT_OFF
     initial_state:
       color_mode: rgb
+      brightness: 66%
       red: 9.4%
       green: 73.3%
       blue: 94.9%
@@ -1018,7 +1019,7 @@ script:
   - id: control_leds_voice_assistant_waiting_for_command_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Waiting for Command"
 
@@ -1027,7 +1028,7 @@ script:
   - id: control_leds_voice_assistant_listening_for_command_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Listening For Command"
 
@@ -1036,7 +1037,7 @@ script:
   - id: control_leds_voice_assistant_thinking_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Thinking"
 
@@ -1045,7 +1046,7 @@ script:
   - id: control_leds_voice_assistant_replying_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Replying"
 
