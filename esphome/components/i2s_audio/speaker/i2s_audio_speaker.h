@@ -104,8 +104,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   uint8_t *data_buffer_;
   std::unique_ptr<RingBuffer> audio_ring_buffer_;
 
-  uint32_t timeout_{0};
-  uint8_t dout_pin_{0};
+  uint32_t timeout_;
+  uint8_t dout_pin_;
+  
   bool task_created_{false};
 
   float volume_{1.0f};
