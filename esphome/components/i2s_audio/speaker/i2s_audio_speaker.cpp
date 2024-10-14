@@ -39,35 +39,43 @@ enum SpeakerTaskNotificationBits : uint32_t {
   COMMAND_START = (1 << 0),            // Starts the main task purpose
   COMMAND_STOP = (1 << 1),             // stops the main task
   COMMAND_STOP_GRACEFULLY = (1 << 2),  // Stops the task once all data has been written
-  MESSAGE_NOT_WRITING_TO_RING_BUFFER =
-      (1 << 8),  // Indicates the ring buffer is not currently being written to, so prevent the task from stopping
-  STATE_STARTING = (1 << 13),
-  STATE_STARTED = (1 << 14),
-  STATE_STOPPING = (1 << 15),
-  STATE_STOPPED = (1 << 16),
-  ERR_INVALID_STATE = (1 << 19),
-  ERR_INVALID_ARG = (1 << 20),
-  ERR_INVALID_SIZE = (1 << 21),
-  ERR_NO_MEM = (1 << 22),
-  ERR_FAIL = (1 << 23),
+  MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE = (1 << 5),
+  STATE_STARTING = (1 << 10),
+  STATE_RUNNING = (1 << 11),
+  STATE_STOPPING = (1 << 12),
+  STATE_STOPPED = (1 << 13),
+  ERR_INVALID_STATE = (1 << 16),
+  ERR_INVALID_ARG = (1 << 17),
+  ERR_INVALID_SIZE = (1 << 18),
+  ERR_NO_MEM = (1 << 19),
+  ERR_FAIL = (1 << 20),
+  ERR_TASK_FAILED_TO_START = (1 << 21),
   ERROR_BITS = ERR_INVALID_STATE | ERR_INVALID_ARG | ERR_INVALID_SIZE | ERR_NO_MEM | ERR_FAIL,
+  ALL_BITS = 0x00FFFFFF,  // All valid event group bits
 };
 
 // Possible errors are: ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM, ESP_FAIL (IO
 // error)
 
-uint32_t esp_err_to_err_bit(esp_err_t err) {
+bool I2SAudioSpeaker::set_event_group_error_(esp_err_t err) {
   switch (err) {
+    case ESP_OK:
+      return true;
     case ESP_ERR_INVALID_STATE:
-      return SpeakerTaskNotificationBits::ERR_INVALID_STATE;
+      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_INVALID_STATE);
+      return false;
     case ESP_ERR_INVALID_ARG:
-      return SpeakerTaskNotificationBits::ERR_INVALID_ARG;
+      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_INVALID_ARG);
+      return false;
     case ESP_ERR_INVALID_SIZE:
-      return SpeakerTaskNotificationBits::ERR_INVALID_SIZE;
+      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_INVALID_SIZE);
+      return false;
     case ESP_ERR_NO_MEM:
-      return SpeakerTaskNotificationBits::ERR_NO_MEM;
+      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_NO_MEM);
+      return false;
     default:
-      return SpeakerTaskNotificationBits::ERR_FAIL;
+      xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_FAIL);
+      return false;
   }
 }
 
@@ -124,11 +132,10 @@ void I2SAudioSpeaker::start() {
   }
 
   if (this->speaker_task_handle_ != nullptr) {
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_START |
-                                               SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::COMMAND_START);
     this->task_created_ = true;
   } else {
-    // ERROR SITUATION!
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::ERR_TASK_FAILED_TO_START);
   }
 }
 
@@ -169,6 +176,8 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
 
   esp_err_t err = i2s_driver_install(this->parent_->get_port(), &config, 0, nullptr);
   if (err != ESP_OK) {
+    // Failed to install the driver, so unlock the I2S port
+    this->parent_->unlock();
     return err;
   }
 
@@ -176,12 +185,13 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_() {
   pin_config.data_out_num = this->dout_pin_;
 
   err = i2s_set_pin(this->parent_->get_port(), &pin_config);
-
   if (err != ESP_OK) {
-    return err;
+    // Failed to set the data out pin, so uninstall the driver and unlock the I2S port
+    i2s_driver_uninstall(this->parent_->get_port());
+    this->parent_->unlock();
   }
 
-  return ESP_OK;
+  return err;
 }
 
 esp_err_t I2SAudioSpeaker::set_i2s_stream_info_(AudioStreamInfo &audio_stream_info) {
@@ -200,131 +210,134 @@ esp_err_t I2SAudioSpeaker::set_i2s_stream_info_(AudioStreamInfo &audio_stream_in
   return ESP_ERR_INVALID_ARG;
 }
 
+void I2SAudioSpeaker::delete_task_() {
+  if (this->audio_ring_buffer_ != nullptr) {
+    xEventGroupWaitBits(this->event_group_,
+                        MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE,  // Bit message to read
+                        pdFALSE,                                 // Don't clear the bits on exit
+                        pdTRUE,                                  // Don't wait for all the bits,
+                        portMAX_DELAY);                          // Block indefinitely until a command bit is set
+
+    this->audio_ring_buffer_.reset();  // Deallocates the ring buffer stored in the unique_ptr
+    this->audio_ring_buffer_ = nullptr;
+  }
+
+  if (this->data_buffer_ != nullptr) {
+    ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+    allocator.deallocate(this->data_buffer_, 0);  // SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample);
+  }
+
+  xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STOPPED);
+
+  this->task_created_ = false;
+  vTaskDelete(NULL);
+}
+
 void I2SAudioSpeaker::speaker_task(void *params) {
-  {
-    I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
-    uint32_t event_group_bits =
-        xEventGroupWaitBits(this_speaker->event_group_,
-                            SpeakerTaskNotificationBits::COMMAND_START | SpeakerTaskNotificationBits::COMMAND_STOP |
-                                SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
-                            pdTRUE,                                                    // Clear the bits on exit
-                            pdFALSE,                                                   // Don't wait for all the bits,
-                            portMAX_DELAY);  // Block indefinitely until a bit is set
+  I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
+  uint32_t event_group_bits =
+      xEventGroupWaitBits(this_speaker->event_group_,
+                          SpeakerTaskNotificationBits::COMMAND_START | SpeakerTaskNotificationBits::COMMAND_STOP |
+                              SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
+                          pdTRUE,                                                    // Clear the bits on exit
+                          pdFALSE,                                                   // Don't wait for all the bits,
+                          portMAX_DELAY);  // Block indefinitely until a bit is set
 
-    esp_err_t err = ESP_OK;
+  if (event_group_bits &
+      (SpeakerTaskNotificationBits::COMMAND_STOP | SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY)) {
+    // Received a stop signal before the task was requested to start
+    this_speaker->delete_task_();
+  }
 
-    if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_START) {
-      xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STARTING);
+  xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STARTING);
 
-      AudioStreamInfo audio_stream_info = this_speaker->audio_stream_info_;
-      ssize_t bytes_per_sample = audio_stream_info.get_bytes_per_sample();
+  AudioStreamInfo audio_stream_info = this_speaker->audio_stream_info_;
+  ssize_t bytes_per_sample = audio_stream_info.get_bytes_per_sample();
 
-      ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-      uint8_t *data_buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample);
+  ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+  this_speaker->data_buffer_ = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample);
 
-      if (this_speaker->audio_ring_buffer_ == nullptr)
-        this_speaker->audio_ring_buffer_ = RingBuffer::create(OUTPUT_BUFFER_SAMPLES * bytes_per_sample);
+  if (this_speaker->audio_ring_buffer_ == nullptr) {
+    // Allocate ring buffer
+    this_speaker->audio_ring_buffer_ = RingBuffer::create(OUTPUT_BUFFER_SAMPLES * bytes_per_sample);
+  }
 
-      if ((data_buffer == nullptr) || (this_speaker->audio_ring_buffer_ == nullptr)) {
-        err = ESP_ERR_NO_MEM;
-        xEventGroupSetBits(this_speaker->event_group_, esp_err_to_err_bit(err));
+  if ((this_speaker->data_buffer_ == nullptr) || (this_speaker->audio_ring_buffer_ == nullptr)) {
+    // Failed to allocate a buffer
+    xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::ERR_NO_MEM);
+    this_speaker->delete_task_();
+  }
+
+  if (!this_speaker->set_event_group_error_(this_speaker->start_i2s_driver_())) {
+    // Failed to start I2S driver
+    this_speaker->delete_task_();
+  }
+
+  if (this_speaker->set_event_group_error_(this_speaker->set_i2s_stream_info_(audio_stream_info))) {
+    // Successfully set the I2S stream info, ready to write audio data to the I2S port
+
+    xEventGroupSetBits(this_speaker->event_group_,
+                       SpeakerTaskNotificationBits::STATE_RUNNING |
+                           SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
+
+    bool stop_gracefully = false;
+    uint32_t last_data_received_time = millis();
+
+    while ((millis() - last_data_received_time) <= this_speaker->timeout_) {
+      event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
+
+      if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
+        i2s_zero_dma_buffer(this_speaker->parent_->get_port());
+        break;
+      }
+      if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
+        stop_gracefully = true;
       }
 
-      if (err == ESP_OK) {
-        err = this_speaker->start_i2s_driver_();
+      size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample;
+      size_t bytes_read = this_speaker->audio_ring_buffer_->read((void *) this_speaker->data_buffer_, bytes_to_read,
+                                                                 pdMS_TO_TICKS(TASK_DELAY_MS));
 
-        if (err == ESP_OK) {
-          err = this_speaker->set_i2s_stream_info_(audio_stream_info);
+      if (bytes_read > 0) {
+        last_data_received_time = millis();
+        size_t bytes_written = 0;
+
+        if ((audio_stream_info.bits_per_sample <= 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
+          // Scale samples by the volume factor in place
+          q15_multiplication((int16_t *) this_speaker->data_buffer_, (int16_t *) this_speaker->data_buffer_,
+                             bytes_read / sizeof(int16_t), this_speaker->q15_volume_factor_);
         }
 
-        if (err != ESP_OK) {
-          xEventGroupSetBits(this_speaker->event_group_, esp_err_to_err_bit(err));
-        } else {
-          xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STARTED);
+        if (audio_stream_info.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
+          i2s_write(this_speaker->parent_->get_port(), this_speaker->data_buffer_, bytes_read, &bytes_written,
+                    portMAX_DELAY);
+        } else if (audio_stream_info.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
+          i2s_write_expand(this_speaker->parent_->get_port(), this_speaker->data_buffer_, bytes_read,
+                           audio_stream_info.bits_per_sample, this_speaker->bits_per_sample_, &bytes_written,
+                           portMAX_DELAY);
+        }  // TODO: Unhandled case where the incoming stream has more bits per sample than the outgoing stream
 
-          bool stop_gracefully = false;
-          uint32_t last_data_received_time = millis();
+        if (bytes_written != bytes_read) {
+          xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::ERR_INVALID_SIZE);
+        }
 
-          while (true) {
-            event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
+      } else {
+        // No data received
+        i2s_zero_dma_buffer(this_speaker->parent_->get_port());
 
-            if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP) {
-              break;
-            }
-            if (event_group_bits & SpeakerTaskNotificationBits::COMMAND_STOP_GRACEFULLY) {
-              stop_gracefully = true;
-            }
-
-            size_t bytes_read = 0;
-            size_t bytes_to_read = SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample;
-            bytes_read = this_speaker->audio_ring_buffer_->read((void *) data_buffer, bytes_to_read,
-                                                                pdMS_TO_TICKS(TASK_DELAY_MS));
-
-            if (bytes_read > 0) {
-              last_data_received_time = millis();
-              size_t bytes_written = 0;
-
-              if ((audio_stream_info.bits_per_sample <= 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
-                // Scale samples by the volume factor in place
-                q15_multiplication((int16_t *) data_buffer, (int16_t *) data_buffer, bytes_read / sizeof(int16_t),
-                                   this_speaker->q15_volume_factor_);
-              }
-
-              if (audio_stream_info.bits_per_sample == (uint8_t) this_speaker->bits_per_sample_) {
-                i2s_write(this_speaker->parent_->get_port(), data_buffer, bytes_read, &bytes_written, portMAX_DELAY);
-              } else if (audio_stream_info.bits_per_sample < (uint8_t) this_speaker->bits_per_sample_) {
-                i2s_write_expand(this_speaker->parent_->get_port(), data_buffer, bytes_read,
-                                 audio_stream_info.bits_per_sample, this_speaker->bits_per_sample_, &bytes_written,
-                                 portMAX_DELAY);
-              }  // TODO: Unhandled case where the incoming stream has more bits per sample than the outgoing stream
-
-              if (bytes_written != bytes_read) {
-                err = ESP_ERR_INVALID_SIZE;
-                xEventGroupSetBits(this_speaker->event_group_, esp_err_to_err_bit(err));
-              }
-
-            } else {
-              // No data received
-              if (stop_gracefully || ((millis() - last_data_received_time) > this_speaker->timeout_)) {
-                break;
-              }
-
-              i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-            }
-          }
-
-          i2s_zero_dma_buffer(this_speaker->parent_->get_port());
-
-          xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STOPPING);
-
-          i2s_stop(this_speaker->parent_->get_port());
-          i2s_driver_uninstall(this_speaker->parent_->get_port());
-
-          this_speaker->parent_->unlock();
+        if (stop_gracefully) {
+          break;
         }
       }
-
-      if (this_speaker->audio_ring_buffer_ != nullptr) {
-        xEventGroupWaitBits(this_speaker->event_group_,
-                            MESSAGE_NOT_WRITING_TO_RING_BUFFER,  // Bit message to read
-                            pdFALSE,                             // Don't clear the bits on exit
-                            pdTRUE,                              // Don't wait for all the bits,
-                            portMAX_DELAY);                      // Block indefinitely until a command bit is set
-
-        this_speaker->audio_ring_buffer_.reset();  // Deallocates the ring buffer stored in the unique_ptr
-        this_speaker->audio_ring_buffer_ = nullptr;
-      }
-
-      if (data_buffer != nullptr) {
-        allocator.deallocate(data_buffer, SAMPLES_IN_ALL_DMA_BUFFERS * bytes_per_sample);
-      }
-
-      xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STOPPED);
     }
   }
-  while (true) {
-    delay(10);
-  }
+  xEventGroupSetBits(this_speaker->event_group_, SpeakerTaskNotificationBits::STATE_STOPPING);
+
+  i2s_stop(this_speaker->parent_->get_port());
+  i2s_driver_uninstall(this_speaker->parent_->get_port());
+
+  this_speaker->parent_->unlock();
+  this_speaker->delete_task_();
 }
 
 void I2SAudioSpeaker::stop() { this->stop_(false); }
@@ -358,10 +371,10 @@ void I2SAudioSpeaker::loop() {
     this->state_ = speaker::STATE_STARTING;
     xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STARTING);
   }
-  if (event_group_bits & SpeakerTaskNotificationBits::STATE_STARTED) {
+  if (event_group_bits & SpeakerTaskNotificationBits::STATE_RUNNING) {
     ESP_LOGD(TAG, "Started Speaker");
     this->state_ = speaker::STATE_RUNNING;
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STARTED);
+    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_RUNNING);
   }
   if (event_group_bits & SpeakerTaskNotificationBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping Speaker");
@@ -369,13 +382,11 @@ void I2SAudioSpeaker::loop() {
     xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STOPPING);
   }
   if (event_group_bits & SpeakerTaskNotificationBits::STATE_STOPPED) {
-    ESP_LOGD(TAG, "Stopped Speaker");
-    this->state_ = speaker::STATE_STOPPED;
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::STATE_STOPPED);
-    if (this->task_created_) {
-      vTaskDelete(this->speaker_task_handle_);
+    if (!this->task_created_) {
+      ESP_LOGD(TAG, "Stopped Speaker");
+      this->state_ = speaker::STATE_STOPPED;
+      xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::ALL_BITS);
       this->speaker_task_handle_ = nullptr;
-      this->task_created_ = false;
     }
   }
 }
@@ -389,12 +400,18 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
     this->start();
   }
 
-  if (this->audio_ring_buffer_.get() != nullptr) {
-    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
+  // Wait for the ring buffer to be available
+  uint32_t event_bits =
+      xEventGroupWaitBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE,
+                          pdFALSE, pdFALSE, pdMS_TO_TICKS(10));
+
+  if (event_bits & SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE) {
+    // Ring buffer is available to write
+    xEventGroupClearBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
 
     size_t bytes_written = this->audio_ring_buffer_->write_without_replacement((void *) data, length, ticks_to_wait);
 
-    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_NOT_WRITING_TO_RING_BUFFER);
+    xEventGroupSetBits(this->event_group_, SpeakerTaskNotificationBits::MESSAGE_RING_BUFFER_AVAILABLE_TO_WRITE);
 
     return bytes_written;
   }

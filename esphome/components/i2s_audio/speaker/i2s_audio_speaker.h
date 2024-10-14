@@ -49,14 +49,17 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   float get_volume() override { return this->volume_; }
 
  protected:
+  bool set_event_group_error_(esp_err_t err);
   esp_err_t start_i2s_driver_();
-  static void speaker_task(void *params);
+  void delete_task_();
 
+  static void speaker_task(void *params);
   TaskHandle_t speaker_task_handle_{nullptr};
 
   // Used to communicate between the speaker task and the main loop
   EventGroupHandle_t event_group_{nullptr};
 
+  uint8_t *data_buffer_;
   std::unique_ptr<RingBuffer> audio_ring_buffer_;
 
   void stop_(bool wait_on_empty);
