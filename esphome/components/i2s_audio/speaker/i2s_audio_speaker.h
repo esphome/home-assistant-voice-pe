@@ -8,7 +8,6 @@
 
 #include <freertos/event_groups.h>
 #include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
 
 #include "esphome/components/speaker/speaker.h"
 
@@ -20,19 +19,6 @@
 
 namespace esphome {
 namespace i2s_audio {
-
-enum class TaskEventType : uint8_t {
-  STARTING = 0,
-  STARTED,
-  STOPPING,
-  STOPPED,
-  WARNING = 255,
-};
-
-struct TaskEvent {
-  TaskEventType type;
-  esp_err_t err;
-};
 
 class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Component {
  public:
@@ -67,11 +53,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   static void speaker_task(void *params);
 
   TaskHandle_t speaker_task_handle_{nullptr};
-  QueueHandle_t speaker_event_queue_;
 
   // Used to communicate between the speaker task and the main loop
   EventGroupHandle_t event_group_{nullptr};
-
 
   std::unique_ptr<RingBuffer> audio_ring_buffer_;
 
