@@ -847,6 +847,11 @@ light:
     icon: "mdi:circle-outline"
     default_transition_length: 0ms
     restore_mode: RESTORE_DEFAULT_OFF
+    initial_state:
+      color_mode: rgb
+      red: 9.4%
+      green: 73.3%
+      blue: 94.9%
     segments:
       - id: leds_internal
         from: 7
@@ -971,9 +976,9 @@ script:
           then:
             - light.turn_on:
                 brightness: 100%
-                red: 0
-                green: 0
-                blue: 1.0
+                red: 9.4%
+                green: 73.3%
+                blue: 94.9%
                 id: voice_assistant_leds
                 effect: "Twinkle"
           else:
