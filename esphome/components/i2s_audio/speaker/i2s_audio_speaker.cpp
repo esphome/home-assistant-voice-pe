@@ -96,13 +96,6 @@ void I2SAudioSpeaker::setup() {
     this->mark_failed();
     return;
   }
-
-  // Audio stream information defaults to the original ESPHome settings
-  AudioStreamInfo audio_stream_info;
-  audio_stream_info.channels = 1;
-  audio_stream_info.bits_per_sample = (uint8_t) this->bits_per_sample_;
-  audio_stream_info.sample_rate = 16000;
-  this->set_audio_stream_info(audio_stream_info);
 }
 
 void I2SAudioSpeaker::loop() {
