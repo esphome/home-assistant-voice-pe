@@ -2,7 +2,8 @@
 
 #include "nabu_media_player.h"
 
-#include "esphome/core/audio.h"
+#include "esphome/components/audio/audio.h"
+
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -131,7 +132,7 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
   esp_err_t err = ESP_OK;
 
   if (this->speaker_ != nullptr) {
-    AudioStreamInfo audio_stream_info;
+    audio::AudioStreamInfo audio_stream_info;
     audio_stream_info.channels = 2;
     audio_stream_info.bits_per_sample = 16;
     audio_stream_info.sample_rate = 48000;

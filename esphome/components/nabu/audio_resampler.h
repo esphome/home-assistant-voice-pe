@@ -5,9 +5,9 @@
 #include "biquad.h"
 #include "resampler.h"
 
+#include "esphome/components/audio/audio.h"
 #include "esphome/components/media_player/media_player.h"
 
-#include "esphome/core/audio.h"
 #include "esphome/core/ring_buffer.h"
 
 namespace esphome {
@@ -35,7 +35,7 @@ class AudioResampler {
   /// @param audio_stream_info the incoming sample rate, bits per sample, and number of channels
   /// @param target_sample_rate the necessary sample rate to convert to
   /// @return ESP_OK if it is able to convert the incoming stream or an error otherwise
-  esp_err_t start(AudioStreamInfo &audio_stream_info, uint32_t target_sample_rate, ResampleInfo &resample_info);
+  esp_err_t start(audio::AudioStreamInfo &audio_stream_info, uint32_t target_sample_rate, ResampleInfo &resample_info);
 
   AudioResamplerState resample(bool stop_gracefully);
 
@@ -62,7 +62,7 @@ class AudioResampler {
   float *float_output_buffer_current_{nullptr};
   size_t float_output_buffer_length_;
 
-  AudioStreamInfo audio_stream_info_;
+  audio::AudioStreamInfo audio_stream_info_;
   ResampleInfo resample_info_;
 
   Resample *resampler_{nullptr};

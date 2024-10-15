@@ -7,9 +7,9 @@
 #include "audio_resampler.h"
 #include "audio_mixer.h"
 
+#include "esphome/components/audio/audio.h"
 #include "esphome/components/media_player/media_player.h"
 
-#include "esphome/core/audio.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"
@@ -45,7 +45,7 @@ struct InfoErrorEvent {
   InfoErrorSource source;
   optional<esp_err_t> err;
   optional<media_player::MediaFileType> file_type;
-  optional<AudioStreamInfo> audio_stream_info;
+  optional<audio::AudioStreamInfo> audio_stream_info;
   optional<ResampleInfo> resample_info;
 };
 
@@ -106,7 +106,7 @@ class AudioPipeline {
   media_player::MediaFile *current_media_file_{nullptr};
 
   media_player::MediaFileType current_media_file_type_;
-  AudioStreamInfo current_audio_stream_info_;
+  audio::AudioStreamInfo current_audio_stream_info_;
   ResampleInfo current_resample_info_;
   uint32_t target_sample_rate_;
 

@@ -44,6 +44,8 @@ try:
 except ImportError:
     from esphome.components.font import download_content
 
+AUTO_LOAD = ["audio"]
+
 CODEOWNERS = ["@synesthesiam", "@kahrendt"]
 DEPENDENCIES = ["media_player"]
 DOMAIN = "file"
