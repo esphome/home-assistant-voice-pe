@@ -89,7 +89,7 @@ class WakeWordModel final : public StreamingModel {
  public:
   WakeWordModel(const std::string &id, const uint8_t *model_start, uint8_t probability_cutoff,
                 size_t sliding_window_average_size, const std::string &wake_word, size_t tensor_arena_size,
-                bool default_enabled);
+                bool default_enabled, bool internal_only);
 
   void log_model_config() override;
 
@@ -110,10 +110,14 @@ class WakeWordModel final : public StreamingModel {
   /// @brief Disable the model and save to flash. The next performing_streaming_inference call will unload it.
   virtual void disable() override;
 
+  bool get_internal_only() { return this->internal_only_; }
+
  protected:
   std::string id_;
   std::string wake_word_;
   std::vector<std::string> trained_languages_;
+  
+  bool internal_only_;
 
   ESPPreferenceObject pref_;
 };

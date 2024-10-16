@@ -162,7 +162,7 @@ void StreamingModel::reset_probabilities() {
 
 WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start, uint8_t probability_cutoff,
                              size_t sliding_window_average_size, const std::string &wake_word, size_t tensor_arena_size,
-                             bool default_enabled) {
+                             bool default_enabled, bool internal_only) {
   this->id_ = id;
   this->model_start_ = model_start;
   this->probability_cutoff_ = probability_cutoff;
@@ -172,6 +172,7 @@ WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start, 
   this->tensor_arena_size_ = tensor_arena_size;
   this->register_streaming_ops_(this->streaming_op_resolver_);
   this->current_stride_step_ = 0;
+  this->internal_only_ = internal_only;
 
   this->pref_ = global_preferences->make_preference<bool>(fnv1_hash(id));
   bool enabled;
@@ -186,12 +187,16 @@ WakeWordModel::WakeWordModel(const std::string &id, const uint8_t *model_start, 
 
 void WakeWordModel::enable() {
   this->enabled_ = true;
-  this->pref_.save(&this->enabled_);
+  if (!this->internal_only_) {
+    this->pref_.save(&this->enabled_);
+  }
 }
 
 void WakeWordModel::disable() {
   this->enabled_ = false;
-  this->pref_.save(&this->enabled_);
+  if (!this->internal_only_) {
+    this->pref_.save(&this->enabled_);
+  }
 }
 
 DetectionEvent WakeWordModel::determine_detected() {

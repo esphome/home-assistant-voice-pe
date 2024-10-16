@@ -19,6 +19,7 @@ from esphome.automation import register_action, register_condition
 from esphome.const import (
     __version__,
     CONF_ID,
+    CONF_INTERNAL,
     CONF_MICROPHONE,
     CONF_MODEL,
     CONF_URL,
@@ -331,6 +332,7 @@ MODEL_SCHEMA = cv.Schema(
         cv.Optional(CONF_MODEL): MODEL_SOURCE_SCHEMA,
         cv.Optional(CONF_PROBABILITY_CUTOFF): cv.percentage,
         cv.Optional(CONF_SLIDING_WINDOW_SIZE): cv.positive_int,
+        cv.Optional(CONF_INTERNAL, default=False): cv.boolean,
         cv.GenerateID(CONF_RAW_DATA_ID): cv.declare_id(cg.uint8),
     }
 )
@@ -511,6 +513,7 @@ async def to_code(config):
                 manifest[KEY_WAKE_WORD],
                 manifest[KEY_MICRO][CONF_TENSOR_ARENA_SIZE],
                 default_enabled,
+                model_parameters[CONF_INTERNAL],
             )
 
             for lang in manifest[KEY_TRAINED_LANGUAGES]:

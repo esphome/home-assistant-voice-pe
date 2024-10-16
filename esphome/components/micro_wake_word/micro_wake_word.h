@@ -55,7 +55,7 @@ class MicroWakeWord : public Component {
 
   // Intended for the voice assistant component to know which wake words are available
   // Since these are pointers to the WakeWordModel objects, the voice assistant component can enable or disable them
-  const std::vector<WakeWordModel *> &get_wake_words() const { return this->wake_word_models_; }
+  std::vector<WakeWordModel *> get_wake_words();
 
  protected:
   microphone::Microphone *microphone_{nullptr};

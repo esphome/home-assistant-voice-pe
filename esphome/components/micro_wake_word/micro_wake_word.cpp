@@ -214,6 +214,16 @@ void MicroWakeWord::preprocessor_task_(void *params) {
   }
 }
 
+std::vector<WakeWordModel *> MicroWakeWord::get_wake_words() {
+  std::vector<WakeWordModel *> external_wake_word_models;
+  for (auto model : this->wake_word_models_) {
+    if (!model->get_internal_only()) {
+      external_wake_word_models.push_back(model);
+    }
+  }
+  return external_wake_word_models;
+}
+
 void MicroWakeWord::inference_task_(void *params) {
   MicroWakeWord *this_mww = (MicroWakeWord *) params;
 
