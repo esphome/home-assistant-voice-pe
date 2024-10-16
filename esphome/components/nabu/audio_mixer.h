@@ -2,8 +2,6 @@
 
 #ifdef USE_ESP_IDF
 
-#include "esphome/components/media_player/media_player.h"
-
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/ring_buffer.h"

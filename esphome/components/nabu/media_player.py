@@ -36,6 +36,8 @@ _LOGGER = logging.getLogger(__name__)
 
 from esphome.external_files import download_content
 
+AUTO_LOAD = ["audio"]
+
 CODEOWNERS = ["@synesthesiam", "@kahrendt"]
 DEPENDENCIES = ["media_player"]
 DOMAIN = "file"

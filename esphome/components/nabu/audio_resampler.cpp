@@ -69,7 +69,7 @@ esp_err_t AudioResampler::allocate_buffers_() {
   return ESP_OK;
 }
 
-esp_err_t AudioResampler::start(media_player::StreamInfo &stream_info, uint32_t target_sample_rate,
+esp_err_t AudioResampler::start(audio::AudioStreamInfo &stream_info, uint32_t target_sample_rate,
                                 ResampleInfo &resample_info) {
   esp_err_t err = this->allocate_buffers_();
   if (err != ESP_OK) {
