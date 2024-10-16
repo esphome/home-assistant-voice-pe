@@ -45,10 +45,7 @@ namespace nabu {
 //    - Each stream has a corresponding input buffer that the ``AudioResampler`` feeds directly
 //    - Pausing the media stream is done here
 //    - Media stream ducking is done here
-//    - The output ring buffer feeds the ``speaker_task`` directly. It is kept small intentionally to avoid latency when
-//      pausing
-//  - Audio output is handled by the ``speaker_task``. It configures the I2S bus and copies audio from the mixer's
-//    output ring buffer to the DMA buffers
+//    - The output ring buffer feeds the configured speaker the audio directly
 //  - Media player commands are received by the ``control`` function. The commands are added to the
 //    ``media_control_command_queue_`` to be processed in the component's loop
 //    - Starting a stream intializes the appropriate pipeline or stops it if it is already running
@@ -66,15 +63,10 @@ namespace nabu {
 static const size_t QUEUE_LENGTH = 20;
 
 static const uint8_t NUMBER_OF_CHANNELS = 2;  // Hard-coded expectation of stereo (2 channel) audio
-static const size_t DMA_BUFFER_SIZE = 512;
-static const size_t SAMPLES_IN_ONE_DMA_BUFFER = DMA_BUFFER_SIZE * NUMBER_OF_CHANNELS;
-static const size_t DMA_BUFFERS_COUNT = 4;
-static const size_t SAMPLES_IN_ALL_DMA_BUFFERS = SAMPLES_IN_ONE_DMA_BUFFER * DMA_BUFFERS_COUNT;
 
 static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 1;
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
-static const UBaseType_t SPEAKER_TASK_PRIORITY = 23;
 
 static const size_t TASK_DELAY_MS = 10;
 
