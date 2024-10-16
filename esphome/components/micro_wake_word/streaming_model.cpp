@@ -195,7 +195,7 @@ void WakeWordModel::enable() {
 void WakeWordModel::disable() {
   this->enabled_ = false;
   if (!this->internal_only_) {
-    this->pref_.save(&this->enabled_);˝
+    this->pref_.save(&this->enabled_);
   }
 }
 
