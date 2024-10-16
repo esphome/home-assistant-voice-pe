@@ -167,7 +167,7 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-  # Global varaible storing the first active timer
+  # Global variable storing the first active timer
   - id: first_active_timer
     type: voice_assistant::Timer
     restore_value: false
