@@ -133,12 +133,14 @@ void VoiceAssistant::clear_buffers_() {
   }
 
 #ifdef USE_SPEAKER
-  if (this->speaker_buffer_ != nullptr) {
-    memset(this->speaker_buffer_, 0, SPEAKER_BUFFER_SIZE);
+  if (this->speaker_ != nullptr) {
+    if (this->speaker_buffer_ != nullptr) {
+      memset(this->speaker_buffer_, 0, SPEAKER_BUFFER_SIZE);
 
-    this->speaker_buffer_size_ = 0;
-    this->speaker_buffer_index_ = 0;
-    this->speaker_bytes_received_ = 0;
+      this->speaker_buffer_size_ = 0;
+      this->speaker_buffer_index_ = 0;
+      this->speaker_bytes_received_ = 0;
+    }
   }
 #endif
 }
@@ -165,10 +167,12 @@ void VoiceAssistant::deallocate_buffers_() {
   this->input_buffer_ = nullptr;
 
 #ifdef USE_SPEAKER
-  if (this->speaker_buffer_ != nullptr) {
-    ExternalRAMAllocator<uint8_t> speaker_deallocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
-    speaker_deallocator.deallocate(this->speaker_buffer_, SPEAKER_BUFFER_SIZE);
-    this->speaker_buffer_ = nullptr;
+  if (this->speaker_ != nullptr) {
+    if (this->speaker_buffer_ != nullptr) {
+      ExternalRAMAllocator<uint8_t> speaker_deallocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+      speaker_deallocator.deallocate(this->speaker_buffer_, SPEAKER_BUFFER_SIZE);
+      this->speaker_buffer_ = nullptr;
+    }
   }
 #endif
 }
@@ -435,16 +439,18 @@ void VoiceAssistant::loop() {
 
 #ifdef USE_SPEAKER
 void VoiceAssistant::write_speaker_() {
-  if (this->speaker_buffer_size_ > 0) {
-    size_t write_chunk = std::min<size_t>(this->speaker_buffer_size_, 4 * 1024);
-    size_t written = this->speaker_->play(this->speaker_buffer_, write_chunk);
-    if (written > 0) {
-      memmove(this->speaker_buffer_, this->speaker_buffer_ + written, this->speaker_buffer_size_ - written);
-      this->speaker_buffer_size_ -= written;
-      this->speaker_buffer_index_ -= written;
-      this->set_timeout("speaker-timeout", 5000, [this]() { this->speaker_->stop(); });
-    } else {
-      ESP_LOGV(TAG, "Speaker buffer full, trying again next loop");
+  if (this->speaker_ != nullptr) {
+    if (this->speaker_buffer_size_ > 0) {
+      size_t write_chunk = std::min<size_t>(this->speaker_buffer_size_, 4 * 1024);
+      size_t written = this->speaker_->play(this->speaker_buffer_, write_chunk);
+      if (written > 0) {
+        memmove(this->speaker_buffer_, this->speaker_buffer_ + written, this->speaker_buffer_size_ - written);
+        this->speaker_buffer_size_ -= written;
+        this->speaker_buffer_index_ -= written;
+        this->set_timeout("speaker-timeout", 5000, [this]() { this->speaker_->stop(); });
+      } else {
+        ESP_LOGV(TAG, "Speaker buffer full, trying again next loop");
+      }
     }
   }
 }
@@ -692,7 +698,9 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       this->defer([this, text]() {
         this->tts_start_trigger_->trigger(text);
 #ifdef USE_SPEAKER
-        this->speaker_->start();
+        if (this->speaker_ != nullptr) {
+          this->speaker_->start();
+        }
 #endif
       });
       break;
@@ -775,16 +783,20 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
     }
     case api::enums::VOICE_ASSISTANT_TTS_STREAM_START: {
 #ifdef USE_SPEAKER
-      this->wait_for_stream_end_ = true;
-      ESP_LOGD(TAG, "TTS stream start");
-      this->defer([this] { this->tts_stream_start_trigger_->trigger(); });
+      if (this->speaker_ != nullptr) {
+        this->wait_for_stream_end_ = true;
+        ESP_LOGD(TAG, "TTS stream start");
+        this->defer([this] { this->tts_stream_start_trigger_->trigger(); });
+      }
 #endif
       break;
     }
     case api::enums::VOICE_ASSISTANT_TTS_STREAM_END: {
 #ifdef USE_SPEAKER
-      this->stream_ended_ = true;
-      ESP_LOGD(TAG, "TTS stream end");
+      if (this->speaker_ != nullptr) {
+        this->stream_ended_ = true;
+        ESP_LOGD(TAG, "TTS stream end");
+      }
 #endif
       break;
     }
@@ -805,14 +817,16 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 
 void VoiceAssistant::on_audio(const api::VoiceAssistantAudio &msg) {
 #ifdef USE_SPEAKER  // We should never get to this function if there is no speaker anyway
-  if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
-    memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
-    this->speaker_buffer_index_ += msg.data.length();
-    this->speaker_buffer_size_ += msg.data.length();
-    this->speaker_bytes_received_ += msg.data.length();
-    ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
-  } else {
-    ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
+  if (this->speaker_ != nullptr) {
+    if (this->speaker_buffer_index_ + msg.data.length() < SPEAKER_BUFFER_SIZE) {
+      memcpy(this->speaker_buffer_ + this->speaker_buffer_index_, msg.data.data(), msg.data.length());
+      this->speaker_buffer_index_ += msg.data.length();
+      this->speaker_buffer_size_ += msg.data.length();
+      this->speaker_bytes_received_ += msg.data.length();
+      ESP_LOGV(TAG, "Received audio: %u bytes from API", msg.data.length());
+    } else {
+      ESP_LOGE(TAG, "Cannot receive audio, buffer is full");
+    }
   }
 #endif
 }
