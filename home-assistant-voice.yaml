@@ -219,6 +219,8 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
     on_turn_off:
+      # Disable stop wake word
+      - lambda: id(stop).disable();
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
           condition:
@@ -241,6 +243,8 @@ switch:
       - nabu.set_ducking:
           decibel_reduction: 20
           duration: 0.0s
+      # Enable stop wake word
+      - lambda: id(stop).enable();
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED
@@ -1457,6 +1461,9 @@ micro_wake_word:
       id: hey_jarvis
     - model: hey_mycroft
       id: hey_mycroft
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
+      id: stop
+      internal: true
   vad:
   microphone: comm_mic
   on_wake_word_detected:
