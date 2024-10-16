@@ -167,6 +167,14 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable storing the first active timer
+  - id: first_active_timer
+    type: voice_assistant::Timer
+    restore_value: false
+  # Global variable storing if a timer is active
+  - id: is_timer_active
+    type: bool
+    restore_value: false
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -743,8 +751,13 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
+            Color muted_color(255, 0, 0);
             for (int i = 0; i < 12; i++) {
               it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
+            }
+            if ( id(master_mute_switch).state ) {
+              it[3] = muted_color;
+              it[9] = muted_color;
             }
             if (brightness_decreasing) {
               brightness_step++;
@@ -754,6 +767,24 @@ light:
             if (brightness_step == 0 || brightness_step == brightness_step_number) {
               brightness_decreasing = !brightness_decreasing;
             }
+      - addressable_lambda:
+          name: "Timer Tick"
+          update_interval: 100ms
+          lambda: |-
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            Color muted_color(255, 0, 0);
+            auto timer_ratio = 12.0f * id(first_active_timer).seconds_left / max(id(first_active_timer).total_seconds , static_cast<uint32_t>(1));
+            for (int i = 0; i < 12; i++) {
+              float brightness_dip = ( timer_ratio > 11.0f &&  i == id(global_led_animation_index) % 12 ) ? 0.75f : 1.0f ;
+              if (i <= timer_ratio) {
+                it[i] = color * min (255.0f * brightness_dip * (timer_ratio - i) , 255.0f * brightness_dip) ;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            id(global_led_animation_index) = (12 + id(global_led_animation_index) - 1) % 12;
       - addressable_rainbow:
           name: "Rainbow"
           width: 12
@@ -919,6 +950,10 @@ script:
   - id: control_leds
     then:
       - lambda: |
+          id(check_if_timers_active).execute();
+          if (id(is_timer_active)){
+            id(fetch_first_active_timer).execute();
+          }
           if (id(improv_ble_in_progress)) {
             id(control_leds_improv_ble_state).execute();
           } else if (id(init_in_progress)) {
@@ -947,6 +982,8 @@ script:
             id(control_leds_voice_assistant_error_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
             id(control_leds_voice_assistant_not_ready_phase).execute();
+          } else if (id(is_timer_active)) {
+            id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
@@ -1068,7 +1105,7 @@ script:
   - id: control_leds_muted_or_silent
     then:
       - light.turn_on:
-          brightness: 50%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Muted or Silent"
 
@@ -1127,6 +1164,15 @@ script:
           brightness: 100%
           id: voice_assistant_leds
           effect: "Timer Ring"
+
+  # Script executed when the timer is ticking, to control the LEDs
+  # The LED ring blinks.
+  - id: control_leds_timer_ticking
+    then:
+      - light.turn_on:
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
+          id: voice_assistant_leds
+          effect: "Timer tick"
 
   # Script executed when the volume is increased/decreased from the dial
   - id: control_volume
@@ -1250,6 +1296,33 @@ script:
               .perform();
           }
 
+  # Script used to fetch the first active timer (Stored in global first_active_timer)
+  - id: fetch_first_active_timer
+    then:
+      - lambda: |
+          const auto timers = id(va).get_timers();
+          auto output_timer = timers.begin()->second;
+          for (auto &iterable_timer : timers) {
+            if (iterable_timer.second.is_active && iterable_timer.second.seconds_left <= output_timer.seconds_left) {
+              output_timer = iterable_timer.second;
+            }
+          }
+          id(first_active_timer) = output_timer;
+
+  # Script used to check if a timer is active (Stored in global is_timer_active)
+  - id: check_if_timers_active
+    then:
+      - lambda: |
+          const auto timers = id(va).get_timers();
+          bool output = false;
+          if (timers.size() > 0) {
+            for (auto &iterable_timer : timers) {
+              if(iterable_timer.second.is_active) {
+                output = true;
+              }
+            }
+          }
+          id(is_timer_active) = output;
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1479,6 +1552,14 @@ voice_assistant:
     - script.execute: control_leds
   on_timer_finished:
     - switch.turn_on: timer_ringing
+  on_timer_started:
+    - script.execute: control_leds
+  on_timer_cancelled:
+    - script.execute: control_leds
+  on_timer_updated:
+    - script.execute: control_leds
+  on_timer_tick:
+    - script.execute: control_leds
 
 button:
   - platform: factory_reset
