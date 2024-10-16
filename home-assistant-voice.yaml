@@ -167,15 +167,14 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-  # Global varaible storing the first active timer 
+  # Global varaible storing the first active timer
   - id: first_active_timer
     type: voice_assistant::Timer
     restore_value: false
-  # Global varaible storing if a timer is active or not in the device 
+  # Global varaible storing if a timer is active or not in the device
   - id: is_timer_active
     type: bool
     restore_value: false
-    
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
