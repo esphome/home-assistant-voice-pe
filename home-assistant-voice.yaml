@@ -152,6 +152,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable tracking if the LED color was recently changed.
+  - id: color_changed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global variable tracking if the jack has been plugged touched.
   - id: jack_plugged_recently
     type: bool
@@ -267,7 +272,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - if:
                     condition:
@@ -321,7 +326,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - script.execute:
                     id: play_sound
@@ -342,7 +347,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
                 - script.execute:
                     id: play_sound
@@ -358,20 +363,16 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                lambda: return !id(init_in_progress) && !id(color_changed);
               then:
-                - if:
-                    condition:
-                      lambda: return !id(dial_touched);
-                    then:
-                      - script.execute:
-                          id: play_sound
-                          priority: false
-                          sound_file: !lambda return id(center_button_long_press_sound);
-                      - light.turn_off: voice_assistant_leds
-                      - event.trigger:
-                          id: button_press_event
-                          event_type: "long_press"
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: !lambda return id(center_button_long_press_sound);
+                - light.turn_off: voice_assistant_leds
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "long_press"
       # Very important do not remove. Trust me :D
       - timing:
           # E .
@@ -704,7 +705,16 @@ light:
           name: "Center Button Touched"
           update_interval: 16ms
           lambda: |-
-            auto light_color = id(led_ring).current_values;
+            if (initial_run) {
+              // set voice_assistant_leds light to colors based on led_ring
+              auto led_ring_cv = id(led_ring).current_values;
+              auto va_leds_call = id(voice_assistant_leds).make_call();
+              va_leds_call.from_light_color_values(led_ring_cv);
+              va_leds_call.set_brightness(1.0);
+              va_leds_call.set_state(true);
+              va_leds_call.perform();
+            }
+            auto light_color = id(voice_assistant_leds).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             for (int i = 0; i < 12; i++) {
@@ -837,6 +847,12 @@ light:
     icon: "mdi:circle-outline"
     default_transition_length: 0ms
     restore_mode: RESTORE_DEFAULT_OFF
+    initial_state:
+      color_mode: rgb
+      brightness: 66%
+      red: 9.4%
+      green: 73.3%
+      blue: 94.9%
     segments:
       - id: leds_internal
         from: 7
@@ -961,9 +977,9 @@ script:
           then:
             - light.turn_on:
                 brightness: 100%
-                red: 0
-                green: 0
-                blue: 1.0
+                red: 9.4%
+                green: 73.3%
+                blue: 94.9%
                 id: voice_assistant_leds
                 effect: "Twinkle"
           else:
@@ -1003,7 +1019,7 @@ script:
   - id: control_leds_voice_assistant_waiting_for_command_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Waiting for Command"
 
@@ -1012,7 +1028,7 @@ script:
   - id: control_leds_voice_assistant_listening_for_command_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Listening For Command"
 
@@ -1021,7 +1037,7 @@ script:
   - id: control_leds_voice_assistant_thinking_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Thinking"
 
@@ -1030,7 +1046,7 @@ script:
   - id: control_leds_voice_assistant_replying_phase
     then:
       - light.turn_on:
-          brightness: 100%
+          brightness: !lambda return id(led_ring).current_values.get_brightness();
           id: voice_assistant_leds
           effect: "Replying"
 
@@ -1127,50 +1143,71 @@ script:
           else:
             - media_player.volume_down:
       - script.execute: control_leds
-      - delay: 2s
+      - delay: 1s
       - lambda: id(dial_touched) = false;
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
       - script.execute: control_leds
 
   # Script executed when the hue is increased/decreased from the dial
   - id: control_hue
     mode: restart
     parameters:
-      increase_hue: bool  # True: Increase volume / False: Decrease volume.
+      increase_hue: bool  # True: Increase hue / False: Decrease hue.
     then:
       - delay: 16ms
-      - lambda: |
-          auto light_color = id(led_ring).current_values;
-          int hue = 0;
-          float saturation = 0;
-          float value = 0;
-          rgb_to_hsv( light_color.get_red(),
-                      light_color.get_green(),
-                      light_color.get_blue(),
-                      hue,
-                      saturation,
-                      value);
-          if (increase_hue) {
-            hue = (hue + 10) % 360;
-          } else {
-            hue = (hue + 350) % 360;
-          }
-          if (saturation < 0.05) {
-            saturation = 1;
-          }
-          float red = 0;
-          float green = 0;
-          float blue = 0;
-          hsv_to_rgb( hue,
-                      saturation,
-                      value,
-                      red,
-                      green,
-                      blue);
-          id(led_ring).make_call().set_rgb(red, green, blue).perform();
+      - if:
+          condition:
+            lambda: return(abs(int(id(dial).state)) > 3 || id(color_changed));
+          then:
+            - lambda: |
+                id(color_changed) = true;
+                auto light_color = id(voice_assistant_leds).current_values;
+                int hue = 0;
+                float saturation = 0;
+                float value = 0;
+                rgb_to_hsv( light_color.get_red(),
+                            light_color.get_green(),
+                            light_color.get_blue(),
+                            hue,
+                            saturation,
+                            value);
+                if (increase_hue) {
+                  hue = (hue + 10) % 360;
+                } else {
+                  hue = (hue + 350) % 360;
+                }
+                if (saturation < 0.05) {
+                  saturation = 1;
+                }
+                float red = 0;
+                float green = 0;
+                float blue = 0;
+                hsv_to_rgb( hue,
+                            saturation,
+                            value,
+                            red,
+                            green,
+                            blue);
+                id(voice_assistant_leds).make_call().set_rgb(red, green, blue).perform();
       - wait_until:
           binary_sensor.is_off: center_button
-      - lambda: id(dial_touched) = false;
+      - lambda: |
+          id(dial_touched) = false;
+          // now we "save" the new LED color/state to led_ring, maintaining its brightness and state
+          auto led_ring_call = id(led_ring).make_call();
+          auto va_leds_cv = id(voice_assistant_leds).current_values;
+          led_ring_call.from_light_color_values(va_leds_cv);
+          led_ring_call.set_brightness(id(led_ring).current_values.get_brightness());
+          led_ring_call.set_state(id(led_ring).current_values.is_on());
+          led_ring_call.perform();
+      - sensor.rotary_encoder.set_value:
+          id: dial
+          value: 0
       - script.execute: control_leds
+      - delay: 500ms
+      - lambda: id(color_changed) = false;
 
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
@@ -1341,7 +1378,7 @@ audio_dac:
 micro_wake_word:
   id: mww
   models:
-    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu/okay_nabu.json
+    - model: okay_nabu
       id: okay_nabu
     - model: hey_jarvis
       id: hey_jarvis
