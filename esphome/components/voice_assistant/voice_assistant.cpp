@@ -908,17 +908,18 @@ const Configuration &VoiceAssistant::get_configuration() {
     this->config_.max_active_wake_words = 1;
 
     for (auto &model : this->micro_wake_word_->get_wake_words()) {
+      if (!model->get_internal_only()) {
+        WakeWord wake_word;
+        wake_word.id = model->get_id();
+        wake_word.wake_word = model->get_wake_word();
+        for (const auto &lang : model->get_trained_languages()) {
+          wake_word.trained_languages.push_back(lang);
+        }
+        this->config_.available_wake_words.push_back(std::move(wake_word));
+      }
       if (model->is_enabled()) {
         this->config_.active_wake_words.push_back(model->get_id());
       }
-
-      WakeWord wake_word;
-      wake_word.id = model->get_id();
-      wake_word.wake_word = model->get_wake_word();
-      for (const auto &lang : model->get_trained_languages()) {
-        wake_word.trained_languages.push_back(lang);
-      }
-      this->config_.available_wake_words.push_back(std::move(wake_word));
     }
   } else {
     // No microWakeWord
