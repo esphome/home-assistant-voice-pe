@@ -2,6 +2,7 @@
 
 #ifdef USE_ESP_IDF
 
+#include "esphome/components/media_player/media_player.h"
 #include "esphome/core/ring_buffer.h"
 
 #include <esp_http_client.h>

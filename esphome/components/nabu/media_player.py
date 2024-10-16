@@ -3,24 +3,14 @@
 import hashlib
 import logging
 from pathlib import Path
+import puremagic
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+
 from esphome import automation, external_files, pins
-from esphome.components import audio_dac, esp32, media_player
-from esphome.components.i2s_audio import (
-    CONF_BITS_PER_SAMPLE,
-    CONF_I2S_AUDIO_ID,
-    CONF_I2S_DOUT_PIN,
-    CONF_I2S_MODE,
-    CONF_PRIMARY,
-    I2S_BITS_PER_SAMPLE,
-    I2S_MODE_OPTIONS,
-    I2SAudioComponent,
-    I2SAudioOut,
-    _validate_bits,
-)
-from esphome.components.media_player import MEDIA_FILE_TYPE_ENUM, MediaFile
+from esphome.components import audio_dac, esp32, media_player, speaker
+from esphome.components.media_player import MediaFile, MEDIA_FILE_TYPE_ENUM
 from esphome.const import (
     CONF_DURATION,
     CONF_FILE,
@@ -29,12 +19,30 @@ from esphome.const import (
     CONF_RAW_DATA_ID,
     CONF_TYPE,
     CONF_URL,
+    CONF_SPEAKER,
 )
-from esphome.core import CORE, HexInt
+from esphome.core import HexInt, CORE
+
+
+from esphome.components.i2s_audio import (
+    I2S_BITS_PER_SAMPLE,
+    CONF_BITS_PER_SAMPLE,
+    CONF_I2S_MODE,
+    CONF_PRIMARY,
+    I2S_MODE_OPTIONS,
+    CONF_I2S_AUDIO_ID,
+    CONF_I2S_DOUT_PIN,
+    I2SAudioComponent,
+    I2SAudioOut,
+    _validate_bits,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-from esphome.external_files import download_content
+try:
+    from esphome.external_files import download_content
+except ImportError:
+    from esphome.components.font import download_content
 
 AUTO_LOAD = ["audio"]
 
@@ -184,6 +192,7 @@ MEDIA_FILE_TYPE_SCHEMA = cv.Schema(
 CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(NabuMediaPlayer),
+        cv.Required(CONF_SPEAKER): cv.use_id(speaker.Speaker),
         cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
         cv.Optional(CONF_AUDIO_DAC): cv.use_id(audio_dac.AudioDac),
         cv.Required(CONF_I2S_DOUT_PIN): pins.internal_gpio_output_pin_number,
@@ -216,27 +225,14 @@ def _read_audio_file_and_type(file_config):
     with open(path, "rb") as f:
         data = f.read()
 
-    try:
-        import puremagic
-
-        file_type: str = puremagic.from_string(data)
-    except ImportError:
-        try:
-            from magic import Magic
-
-            magic = Magic(mime=True)
-            file_type: str = magic.from_buffer(data)
-        except ImportError:
-            raise cv.Invalid("Please install puremagic")
-    if file_type.startswith("."):
-        file_type = file_type[1:]
+    file_type = puremagic.from_string(data)
 
     media_file_type = MEDIA_FILE_TYPE_ENUM["NONE"]
-    if file_type in ("wav"):
+    if "wav" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["WAV"]
-    elif file_type in ("mp3", "mpeg", "mpga"):
+    elif "mp3" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["MP3"]
-    elif file_type in ("flac"):
+    elif "flac" in file_type:
         media_file_type = MEDIA_FILE_TYPE_ENUM["FLAC"]
 
     return data, media_file_type
@@ -275,6 +271,9 @@ async def to_code(config):
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
     cg.add(var.set_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.set_volume_min(config[CONF_VOLUME_MIN]))
+
+    spkr = await cg.get_variable(config[CONF_SPEAKER])
+    cg.add(var.set_speaker(spkr))
 
     if on_mute := config.get(CONF_ON_MUTE):
         await automation.build_automation(
