@@ -54,7 +54,7 @@ class AudioDecoder {
   uint8_t *input_buffer_{nullptr};
   uint8_t *input_buffer_current_{nullptr};
   size_t input_buffer_length_;
-
+  
   uint8_t *output_buffer_{nullptr};
   uint8_t *output_buffer_current_{nullptr};
   size_t output_buffer_length_;
