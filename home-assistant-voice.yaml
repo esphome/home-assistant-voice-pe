@@ -171,7 +171,7 @@ globals:
   - id: first_active_timer
     type: voice_assistant::Timer
     restore_value: false
-  # Global varaible storing if a timer is active or not in the device
+  # Global variable storing if a timer is active
   - id: is_timer_active
     type: bool
     restore_value: false
