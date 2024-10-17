@@ -1093,7 +1093,6 @@ script:
 
   # Script executed when the voice assistant is in error
   # Fast Red Pulse
-  # Note: Today on_end happens too fast after an error. This is barely visible.
   - id: control_leds_voice_assistant_error_phase
     then:
       - light.turn_on:
