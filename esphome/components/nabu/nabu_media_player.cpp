@@ -466,7 +466,7 @@ void NabuMediaPlayer::set_volume_(float volume, bool publish) {
   }
 
   if (publish) {
-    this->volume = bounded_volume;
+    this->volume = volume;
     this->save_volume_restore_state_();
   }
 
