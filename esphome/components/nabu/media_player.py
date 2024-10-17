@@ -7,7 +7,7 @@ from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation, external_files, pins
-from esphome.components import audio_dac, esp32, media_player
+from esphome.components import audio_dac, esp32, media_player, speaker
 from esphome.components.i2s_audio import (
     CONF_BITS_PER_SAMPLE,
     CONF_I2S_AUDIO_ID,
@@ -27,6 +27,8 @@ from esphome.const import (
     CONF_ID,
     CONF_PATH,
     CONF_RAW_DATA_ID,
+    CONF_SAMPLE_RATE,
+    CONF_SPEAKER,
     CONF_TYPE,
     CONF_URL,
 )
@@ -35,6 +37,8 @@ from esphome.core import CORE, HexInt
 _LOGGER = logging.getLogger(__name__)
 
 from esphome.external_files import download_content
+
+AUTO_LOAD = ["audio"]
 
 CODEOWNERS = ["@synesthesiam", "@kahrendt"]
 DEPENDENCIES = ["media_player"]
@@ -48,7 +52,6 @@ CONF_DECIBEL_REDUCTION = "decibel_reduction"
 CONF_AUDIO_DAC = "audio_dac"
 CONF_MEDIA_FILE = "media_file"
 CONF_FILES = "files"
-CONF_SAMPLE_RATE = "sample_rate"
 CONF_VOLUME_INCREMENT = "volume_increment"
 CONF_VOLUME_MIN = "volume_min"
 CONF_VOLUME_MAX = "volume_max"
@@ -64,7 +67,6 @@ NabuMediaPlayer = nabu_ns.class_(
     NabuMediaPlayer,
     media_player.MediaPlayer,
     cg.Component,
-    I2SAudioOut,
 )
 
 DuckingSetAction = nabu_ns.class_(
@@ -182,16 +184,9 @@ MEDIA_FILE_TYPE_SCHEMA = cv.Schema(
 CONFIG_SCHEMA = media_player.MEDIA_PLAYER_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(NabuMediaPlayer),
-        cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
+        cv.Required(CONF_SPEAKER): cv.use_id(speaker.Speaker),
         cv.Optional(CONF_AUDIO_DAC): cv.use_id(audio_dac.AudioDac),
-        cv.Required(CONF_I2S_DOUT_PIN): pins.internal_gpio_output_pin_number,
-        cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.enum(
-            I2S_MODE_OPTIONS, lower=True
-        ),
         cv.Optional(CONF_SAMPLE_RATE, default=16000): cv.int_range(min=1),
-        cv.Optional(CONF_BITS_PER_SAMPLE, default="16bit"): cv.All(
-            _validate_bits, cv.enum(I2S_BITS_PER_SAMPLE)
-        ),
         cv.Optional(CONF_VOLUME_INCREMENT, default=0.05): cv.percentage,
         cv.Optional(CONF_VOLUME_MAX, default=1.0): cv.percentage,
         cv.Optional(CONF_VOLUME_MIN, default=0.0): cv.percentage,
@@ -264,15 +259,14 @@ async def to_code(config):
 
     cg.add_define("USE_OTA_STATE_CALLBACK")
 
-    await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
-    cg.add(var.set_dout_pin(config[CONF_I2S_DOUT_PIN]))
-    cg.add(var.set_bits_per_sample(config[CONF_BITS_PER_SAMPLE]))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
-    cg.add(var.set_i2s_mode(config[CONF_I2S_MODE]))
 
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
     cg.add(var.set_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.set_volume_min(config[CONF_VOLUME_MIN]))
+
+    spkr = await cg.get_variable(config[CONF_SPEAKER])
+    cg.add(var.set_speaker(spkr))
 
     if on_mute := config.get(CONF_ON_MUTE):
         await automation.build_automation(

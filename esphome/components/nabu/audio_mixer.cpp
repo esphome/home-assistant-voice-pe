@@ -10,8 +10,8 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t INPUT_RING_BUFFER_SAMPLES = 24000;  // Audio samples
-static const size_t OUTPUT_BUFFER_SAMPLES = 8192;       // Audio samples - keep small for fast pausing
+static const size_t INPUT_RING_BUFFER_SAMPLES = 24000;
+static const size_t OUTPUT_BUFFER_SAMPLES = 8192;
 static const size_t QUEUE_COUNT = 20;
 
 static const uint32_t TASK_STACK_SIZE = 3072;
@@ -20,7 +20,7 @@ static const size_t TASK_DELAY_MS = 25;
 static const int16_t MAX_AUDIO_SAMPLE_VALUE = INT16_MAX;
 static const int16_t MIN_AUDIO_SAMPLE_VALUE = INT16_MIN;
 
-esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) {
+esp_err_t AudioMixer::start(speaker::Speaker *speaker, const std::string &task_name, UBaseType_t priority) {
   esp_err_t err = this->allocate_buffers_();
 
   if (err != ESP_OK) {
@@ -36,6 +36,8 @@ esp_err_t AudioMixer::start(const std::string &task_name, UBaseType_t priority) 
     return ESP_FAIL;
   }
 
+  this->speaker_ = speaker;
+
   return ESP_OK;
 }
 
@@ -45,10 +47,6 @@ void AudioMixer::stop() {
 
   xQueueReset(this->event_queue_);
   xQueueReset(this->command_queue_);
-}
-
-size_t AudioMixer::read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait) {
-  return this->output_ring_buffer_->read((void *) buffer, length, ticks_to_wait);
 }
 
 void AudioMixer::suspend_task() {
@@ -151,8 +149,8 @@ void AudioMixer::audio_mixer_task_(void *params) {
     }
 
     if (combination_buffer_length > 0) {
-      size_t output_bytes_written = this_mixer->output_ring_buffer_->write_without_replacement(
-          (void *) combination_buffer, combination_buffer_length, pdMS_TO_TICKS(TASK_DELAY_MS));
+      size_t output_bytes_written = this_mixer->speaker_->play(
+          (uint8_t*) combination_buffer, combination_buffer_length, pdMS_TO_TICKS(TASK_DELAY_MS));
       combination_buffer_length -= output_bytes_written;
       if ((combination_buffer_length > 0) && (output_bytes_written > 0)) {
         memmove(combination_buffer, combination_buffer + output_bytes_written / sizeof(int16_t),
@@ -294,11 +292,7 @@ esp_err_t AudioMixer::allocate_buffers_() {
   if (this->announcement_ring_buffer_ == nullptr)
     this->announcement_ring_buffer_ = RingBuffer::create(INPUT_RING_BUFFER_SAMPLES * sizeof(int16_t));
 
-  if (this->output_ring_buffer_ == nullptr)
-    this->output_ring_buffer_ = RingBuffer::create(OUTPUT_BUFFER_SAMPLES * sizeof(int16_t));
-
-  if ((this->output_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr) ||
-      ((this->output_ring_buffer_ == nullptr))) {
+  if ((this->announcement_ring_buffer_ == nullptr) || (this->media_ring_buffer_ == nullptr)) {
     return ESP_ERR_NO_MEM;
   }
 
@@ -323,7 +317,6 @@ esp_err_t AudioMixer::allocate_buffers_() {
 }
 
 void AudioMixer::reset_ring_buffers_() {
-  this->output_ring_buffer_->reset();
   this->media_ring_buffer_->reset();
   this->announcement_ring_buffer_->reset();
 }

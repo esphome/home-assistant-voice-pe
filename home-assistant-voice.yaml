@@ -1370,17 +1370,24 @@ microphone:
       id: comm_mic
       amplify_shift: 2
 
+speaker:
+  - platform: i2s_audio
+    sample_rate: 48000
+    i2s_mode: secondary
+    i2s_dout_pin: GPIO10
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_output
+    dac_type: external
+    channel: left
+
 media_player:
   - platform: nabu
     id: nabu_media_player
     name: Media Player
     internal: false
     audio_dac:
+    speaker:
     sample_rate: 48000
-    i2s_dout_pin: GPIO10
-    bits_per_sample: 32bit
-    i2s_mode: secondary
-    i2s_audio_id: i2s_output
     volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.85
@@ -1448,7 +1455,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: dev
+      ref: kahrendt-20241016-use-speaker-output
     components:
       - aic3204
       - audio_dac

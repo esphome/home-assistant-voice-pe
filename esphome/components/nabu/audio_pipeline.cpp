@@ -180,10 +180,10 @@ AudioPipelineState AudioPipeline::get_state() {
         case InfoErrorSource::DECODER:
           if (event.err.has_value()) {
             ESP_LOGE(TAG, "Decoder encountered an error: %s", esp_err_to_name(event.err.value()));
-          } else if (event.stream_info.has_value()) {
+          } else if (event.audio_stream_info.has_value()) {
             ESP_LOGD(TAG, "Decoded audio has %d channels, %" PRId32 " Hz sample rate, and %d bits per sample",
-                     event.stream_info.value().channels, event.stream_info.value().sample_rate,
-                     event.stream_info.value().bits_per_sample);
+                     event.audio_stream_info.value().channels, event.audio_stream_info.value().sample_rate,
+                     event.audio_stream_info.value().bits_per_sample);
           }
           break;
         case InfoErrorSource::RESAMPLER:
@@ -244,7 +244,7 @@ esp_err_t AudioPipeline::stop() {
     xEventGroupSetBits(this->event_group_, EventGroupBits::READER_MESSAGE_ERROR);
   }
   if (!(event_group_bits & DECODER_MESSAGE_FINISHED)) {
-    // Decoder failed to stop
+    // Ddecoder failed to stop
     xEventGroupSetBits(this->event_group_, EventGroupBits::DECODER_MESSAGE_ERROR);
   }
   if (!(event_group_bits & RESAMPLER_MESSAGE_FINISHED)) {
@@ -420,13 +420,13 @@ void AudioPipeline::decode_task_(void *params) {
           break;
         }
 
-        if (!has_stream_info && decoder->get_stream_info().has_value()) {
+        if (!has_stream_info && decoder->get_audio_stream_info().has_value()) {
           has_stream_info = true;
 
-          this_pipeline->current_stream_info_ = decoder->get_stream_info().value();
+          this_pipeline->current_audio_stream_info_ = decoder->get_audio_stream_info().value();
 
           // Send the stream information to the pipeline
-          event.stream_info = this_pipeline->current_stream_info_;
+          event.audio_stream_info = this_pipeline->current_audio_stream_info_;
           xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
 
           // Inform the resampler that the stream information is available
@@ -467,7 +467,7 @@ void AudioPipeline::resample_task_(void *params) {
       AudioResampler resampler =
           AudioResampler(this_pipeline->decoded_ring_buffer_.get(), output_ring_buffer, BUFFER_SIZE_SAMPLES);
 
-      esp_err_t err = resampler.start(this_pipeline->current_stream_info_, this_pipeline->target_sample_rate_,
+      esp_err_t err = resampler.start(this_pipeline->current_audio_stream_info_, this_pipeline->target_sample_rate_,
                                       this_pipeline->current_resample_info_);
 
       if (err != ESP_OK) {

@@ -3,6 +3,7 @@
 #ifdef USE_ESP_IDF
 
 #include "esphome/components/media_player/media_player.h"
+#include "esphome/components/speaker/speaker.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -23,7 +24,7 @@ namespace nabu {
 //    - Unable to pause
 //  - Each stream has a corresponding input ring buffer. Retrieved via the `get_media_ring_buffer` and
 //    `get_announcement_ring_buffer` functions
-//  - The mixed audio is stored in the output ring buffer. Use the `read` function to access
+//  - The mixed audio is sent to the configured speaker component.
 //  - The mixer runs as a FreeRTOS task
 //    - The task reports its state using the TaskEvent queue. Regularly call the  `read_event` function to obtain the
 //      current state
@@ -73,15 +74,6 @@ static const std::vector<int16_t> decibel_reduction_table = {
 
 class AudioMixer {
  public:
-  /// @brief Returns the number of bytes available to read from the ring buffer
-  size_t available() { return this->output_ring_buffer_->available(); }
-
-  /// @brief Reads from the output ring buffer
-  /// @param buffer stores the read data
-  /// @param length how many bytes requested to read from the ring buffer
-  /// @return number of bytes actually read; will be less than length if not available in ring buffer
-  size_t read(uint8_t *buffer, size_t length, TickType_t ticks_to_wait = 0);
-
   /// @brief Sends a CommandEvent to the command queue
   /// @param command Pointer to CommandEvent object to be sent
   /// @param ticks_to_wait The number of FreeRTOS ticks to wait for an event to appear on the queue. Defaults to 0.
@@ -99,10 +91,11 @@ class AudioMixer {
   }
 
   /// @brief Starts the mixer task
+  /// @param speaker Pointer to Speaker component
   /// @param task_name FreeRTOS task name
   /// @param priority FreeRTOS task priority. Defaults to 1
   /// @return ESP_OK if successful, and error otherwise
-  esp_err_t start(const std::string &task_name, UBaseType_t priority = 1);
+  esp_err_t start(speaker::Speaker *speaker, const std::string &task_name, UBaseType_t priority = 1);
 
   /// @brief Stops the mixer task and clears the queues
   void stop();
@@ -125,7 +118,7 @@ class AudioMixer {
   /// @return ESP_OK if successful or an error otherwise
   esp_err_t allocate_buffers_();
 
-  /// @brief Resets teh output, media, and anouncement ring buffers
+  /// @brief Resets the media and anouncement ring buffers
   void reset_ring_buffers_();
 
   /// @brief Mixes the media and announcement samples. If the resulting audio clips, the media samples are first scaled.
@@ -136,7 +129,7 @@ class AudioMixer {
   void mix_audio_samples_without_clipping_(int16_t *media_buffer, int16_t *announcement_buffer,
                                            int16_t *combination_buffer, size_t samples_to_mix);
 
-  /// @brief Scales audio samples. Scales in place when audio_samples = output_buffer.
+  /// @brief Scales audio samples. Scales in place when audio_samples == output_buffer.
   /// @param audio_samples PCM int16 audio samples
   /// @param output_buffer Buffer to store the scaled samples
   /// @param scale_factor Q15 fixed point scaling factor
@@ -155,8 +148,7 @@ class AudioMixer {
   // Stores commands to send the mixer task
   QueueHandle_t command_queue_;
 
-  // Stores the mixed audio
-  std::unique_ptr<RingBuffer> output_ring_buffer_;
+  speaker::Speaker *speaker_{nullptr};
 
   std::unique_ptr<RingBuffer> media_ring_buffer_;
   std::unique_ptr<RingBuffer> announcement_ring_buffer_;
