@@ -247,11 +247,7 @@ FINAL_VALIDATE_SCHEMA = _supported_local_file_validate
 
 
 async def to_code(config):
-    esp32.add_idf_component(
-        name="esp-dsp",
-        repo="https://github.com/kahrendt/esp-dsp",
-        ref="no-round-dot-product",
-    )
+    cg.add_library("https://github.com/esphome/esp-audio-libs", "0.1.0")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

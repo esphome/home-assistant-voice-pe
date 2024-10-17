@@ -2,7 +2,7 @@
 
 #include "audio_mixer.h"
 
-#include "esp_dsp.h"
+#include <dsp.h>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -149,8 +149,8 @@ void AudioMixer::audio_mixer_task_(void *params) {
     }
 
     if (combination_buffer_length > 0) {
-      size_t output_bytes_written = this_mixer->speaker_->play(
-          (uint8_t*) combination_buffer, combination_buffer_length, pdMS_TO_TICKS(TASK_DELAY_MS));
+      size_t output_bytes_written = this_mixer->speaker_->play((uint8_t *) combination_buffer,
+                                                               combination_buffer_length, pdMS_TO_TICKS(TASK_DELAY_MS));
       combination_buffer_length -= output_bytes_written;
       if ((combination_buffer_length > 0) && (output_bytes_written > 0)) {
         memmove(combination_buffer, combination_buffer + output_bytes_written / sizeof(int16_t),
@@ -367,24 +367,14 @@ void AudioMixer::mix_audio_samples_without_clipping_(int16_t *media_buffer, int1
     // The dsps_add functions have the following inputs:
     // (buffer 1, buffer 2, output buffer, number of samples, buffer 1 step, buffer 2 step, output, buffer step,
     // bitshift)
-#if defined(USE_ESP32_VARIANT_ESP32S3)
-    dsps_add_s16_aes3(media_buffer, announcement_buffer, combination_buffer, samples_to_mix, 1, 1, 1, 0);
-#elif defined(USE_ESP32_VARIANT_ESP32)
-    dsps_add_s16_ae32(media_buffer, announcement_buffer, combination_buffer, samples_to_mix, 1, 1, 1, 0);
-#else
-    dsps_add_s16_ansi(media_buffer, announcement_buffer, combination_buffer, samples_to_mix, 1, 1, 1, 0);
-#endif
+    dsps_add_s16(media_buffer, announcement_buffer, combination_buffer, samples_to_mix, 1, 1, 1, 0);
   }
 }
 
 void AudioMixer::scale_audio_samples_(int16_t *audio_samples, int16_t *output_buffer, int16_t scale_factor,
                                       size_t samples_to_scale) {
   // Scale the audio samples and store them in the output buffer
-#if defined(USE_ESP32_VARIANT_ESP32S3) || defined(USE_ESP32_VARIANT_ESP32)
-  dsps_mulc_s16_ae32(audio_samples, output_buffer, samples_to_scale, scale_factor, 1, 1);
-#else
-  dsps_mulc_s16_ansi(audio_samples, output_buffer, samples_to_scale, scale_factor, 1, 1);
-#endif
+  dsps_mulc_s16(audio_samples, output_buffer, samples_to_scale, scale_factor, 1, 1);
 }
 
 }  // namespace nabu
