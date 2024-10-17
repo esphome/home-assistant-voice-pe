@@ -1327,6 +1327,17 @@ script:
             }
           }
           id(is_timer_active) = output;
+
+  # Script used activate the stop word if the TTS step is long.
+  # Why is this wrapped on a script?
+  #   Becasue we want to stop the sequence if the TTS step is faster than that.
+  #   This allows us to prevent having the deactivation of the stop word before its own activation.
+  - id: activate_stop_word_if_tts_step_is_long
+    then:
+      - delay: 1s
+      # Enable stop wake word
+      - lambda: id(stop).enable();
+
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1490,17 +1501,18 @@ micro_wake_word:
                           .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
                           .set_announcement(true)
                           .perform();
-                - if:
-                    condition:
-                      switch.is_on: wake_sound
-                    then:
-                      - script.execute:
-                          id: play_sound
-                          priority: true
-                          sound_file: !lambda return id(wake_word_triggered_sound);
-                      - delay: 300ms
-                - voice_assistant.start:
-                    wake_word: !lambda return wake_word;
+                    else:
+                      - if:
+                          condition:
+                            switch.is_on: wake_sound
+                          then:
+                            - script.execute:
+                                id: play_sound
+                                priority: true
+                                sound_file: !lambda return id(wake_word_triggered_sound);
+                            - delay: 300ms
+                      - voice_assistant.start:
+                          wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
@@ -1527,9 +1539,6 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
-          - delay: 1s
-          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-          - script.execute: control_leds
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
     - nabu.set_ducking:
@@ -1547,6 +1556,7 @@ voice_assistant:
   on_tts_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: control_leds
+    - script.execute: activate_stop_word_if_tts_step_is_long
   # When the voice assistant ends: Stop ducking audio.
   on_end:
     - wait_until:
@@ -1555,6 +1565,13 @@ voice_assistant:
     - nabu.set_ducking:
         decibel_reduction: 0   # 0 dB means no reduction
         duration: 1.0s
+    - script.stop: activate_stop_word_if_tts_step_is_long
+    - lambda: id(stop).disable();
+    - if:
+        condition:
+          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+        then:
+          - delay: 1s
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_timer_finished:
