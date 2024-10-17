@@ -127,7 +127,7 @@ esp_err_t NabuMediaPlayer::start_pipeline_(AudioPipelineType type, bool url) {
     audio::AudioStreamInfo audio_stream_info;
     audio_stream_info.channels = 2;
     audio_stream_info.bits_per_sample = 16;
-    audio_stream_info.sample_rate = 48000;
+    audio_stream_info.sample_rate = this->sample_rate_;
 
     this->speaker_->set_audio_stream_info(audio_stream_info);
   }
