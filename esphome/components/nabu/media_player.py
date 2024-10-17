@@ -3,34 +3,40 @@
 import hashlib
 import logging
 from pathlib import Path
-import puremagic
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-
 from esphome import automation, external_files, pins
 from esphome.components import audio_dac, esp32, media_player, speaker
-from esphome.components.media_player import MediaFile, MEDIA_FILE_TYPE_ENUM
+from esphome.components.i2s_audio import (
+    CONF_BITS_PER_SAMPLE,
+    CONF_I2S_AUDIO_ID,
+    CONF_I2S_DOUT_PIN,
+    CONF_I2S_MODE,
+    CONF_PRIMARY,
+    I2S_BITS_PER_SAMPLE,
+    I2S_MODE_OPTIONS,
+    I2SAudioComponent,
+    I2SAudioOut,
+    _validate_bits,
+)
+from esphome.components.media_player import MEDIA_FILE_TYPE_ENUM, MediaFile
 from esphome.const import (
     CONF_DURATION,
     CONF_FILE,
     CONF_ID,
     CONF_PATH,
-    CONF_SAMPLE_RATE,
     CONF_RAW_DATA_ID,
+    CONF_SAMPLE_RATE,
+    CONF_SPEAKER,
     CONF_TYPE,
     CONF_URL,
-    CONF_SPEAKER,
 )
-from esphome.core import HexInt, CORE
-
+from esphome.core import CORE, HexInt
 
 _LOGGER = logging.getLogger(__name__)
 
-try:
-    from esphome.external_files import download_content
-except ImportError:
-    from esphome.components.font import download_content
+from esphome.external_files import download_content
 
 AUTO_LOAD = ["audio"]
 
@@ -203,14 +209,27 @@ def _read_audio_file_and_type(file_config):
     with open(path, "rb") as f:
         data = f.read()
 
-    file_type = puremagic.from_string(data)
+    try:
+        import puremagic
+
+        file_type: str = puremagic.from_string(data)
+    except ImportError:
+        try:
+            from magic import Magic
+
+            magic = Magic(mime=True)
+            file_type: str = magic.from_buffer(data)
+        except ImportError:
+            raise cv.Invalid("Please install puremagic")
+    if file_type.startswith("."):
+        file_type = file_type[1:]
 
     media_file_type = MEDIA_FILE_TYPE_ENUM["NONE"]
-    if "wav" in file_type:
+    if file_type in ("wav"):
         media_file_type = MEDIA_FILE_TYPE_ENUM["WAV"]
-    elif "mp3" in file_type:
+    elif file_type in ("mp3", "mpeg", "mpga"):
         media_file_type = MEDIA_FILE_TYPE_ENUM["MP3"]
-    elif "flac" in file_type:
+    elif file_type in ("flac"):
         media_file_type = MEDIA_FILE_TYPE_ENUM["FLAC"]
 
     return data, media_file_type
@@ -241,7 +260,7 @@ async def to_code(config):
     cg.add_define("USE_OTA_STATE_CALLBACK")
 
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
-    
+
     cg.add(var.set_volume_increment(config[CONF_VOLUME_INCREMENT]))
     cg.add(var.set_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.set_volume_min(config[CONF_VOLUME_MIN]))
