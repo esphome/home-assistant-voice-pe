@@ -52,8 +52,3 @@ esp32_improv:
   on_stop:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
-
-external_components:
-  - source: github://pr#7461
-    components: [esp32_improv]
-    refresh: 0s
