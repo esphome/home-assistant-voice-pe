@@ -259,6 +259,7 @@ switch:
     entity_category: config
     restore_mode: ALWAYS_OFF
     internal: true
+
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
   - platform: gpio
