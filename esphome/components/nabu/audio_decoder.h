@@ -2,13 +2,12 @@
 
 #ifdef USE_ESP_IDF
 
-#include "flac_decoder.h"
-#include "wav_decoder.h"
-#include "mp3_decoder.h"
+#include <flac_decoder.h>
+#include <wav_decoder.h>
+#include <mp3_decoder.h>
 
 #include "esphome/components/audio/audio.h"
 #include "esphome/components/media_player/media_player.h"
-
 
 #include "esphome/core/ring_buffer.h"
 

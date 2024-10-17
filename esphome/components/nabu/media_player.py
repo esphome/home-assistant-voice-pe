@@ -6,20 +6,8 @@ from pathlib import Path
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome import automation, external_files, pins
-from esphome.components import audio_dac, esp32, media_player, speaker
-from esphome.components.i2s_audio import (
-    CONF_BITS_PER_SAMPLE,
-    CONF_I2S_AUDIO_ID,
-    CONF_I2S_DOUT_PIN,
-    CONF_I2S_MODE,
-    CONF_PRIMARY,
-    I2S_BITS_PER_SAMPLE,
-    I2S_MODE_OPTIONS,
-    I2SAudioComponent,
-    I2SAudioOut,
-    _validate_bits,
-)
+from esphome import automation, external_files
+from esphome.components import audio_dac, media_player, speaker
 from esphome.components.media_player import MEDIA_FILE_TYPE_ENUM, MediaFile
 from esphome.const import (
     CONF_DURATION,
@@ -247,11 +235,7 @@ FINAL_VALIDATE_SCHEMA = _supported_local_file_validate
 
 
 async def to_code(config):
-    esp32.add_idf_component(
-        name="esp-dsp",
-        repo="https://github.com/kahrendt/esp-dsp",
-        ref="no-round-dot-product",
-    )
+    cg.add_library("https://github.com/esphome/esp-audio-libs", "0.1.0")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
