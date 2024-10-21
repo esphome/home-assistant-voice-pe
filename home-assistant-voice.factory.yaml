@@ -52,3 +52,44 @@ esp32_improv:
   on_stop:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
+
+# BETA firmware additions
+
+binary_sensor:
+  - id: !extend center_button
+    on_multi_click:
+      - timing:
+          # B -...
+          - ON for 0.2s to 2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # E .
+          - ON for at most 0.2s
+          - OFF for 0.5s to 2s
+          # T -
+          - ON for 0.2s to 2s
+          - OFF for 0.5s to 2s
+          # A .-
+          - ON for at most 0.2s
+          - OFF for 0s to 2s
+          - ON for 0.2s to 2s
+          - OFF for at least 0.5s
+        then:
+          - switch.turn_on: beta_firmware
+
+switch:
+  - platform: template
+    id: beta_firmware
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "OTA updates set to use Beta firmware"
+      - lambda: id(update_http_request).set_source_url("https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest-beta.json");
+    on_turn_off:
+      - logger.log: "OTA updates set to use Production firmware"
+      - lambda: id(update_http_request).set_source_url("https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest.json");
