@@ -291,8 +291,8 @@ class VoiceAssistant : public Component {
   uint8_t auto_gain_;
   float volume_multiplier_;
 
-  uint8_t *send_buffer_;
-  int16_t *input_buffer_;
+  uint8_t *send_buffer_{nullptr};
+  int16_t *input_buffer_{nullptr};
 
   bool continuous_{false};
   bool silence_detection_;
