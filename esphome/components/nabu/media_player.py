@@ -38,6 +38,7 @@ TYPE_WEB = "web"
 CONF_DECIBEL_REDUCTION = "decibel_reduction"
 
 CONF_AUDIO_DAC = "audio_dac"
+CONF_ANNOUNCEMENT = "announcement"
 CONF_MEDIA_FILE = "media_file"
 CONF_VOLUME_INCREMENT = "volume_increment"
 CONF_VOLUME_MIN = "volume_min"
@@ -280,13 +281,6 @@ async def to_code(config):
                 file_config[CONF_ID],
                 media_files_struct,
             )
-            # decl = VariableDeclarationExpression(type, "*", name)
-            # CORE.add_global(decl)
-            # var = MockObj(name, "->")
-            # CORE.register_variable(name, var)
-            # return var
-
-            # CORE.register_variable(MediaFile, file_config[CONF_ID])
 
 
 DUCKING_SET_SCHEMA = cv.Schema(
@@ -302,23 +296,25 @@ DUCKING_SET_SCHEMA = cv.Schema(
 )
 
 
-# @automation.register_action(
-#     "nabu.play_local_media_file",
-#     PlayLocalMediaAction,
-#     cv.maybe_simple_value(
-#         {
-#             cv.GenerateID(): cv.use_id(NabuMediaPlayer),
-#             cv.Required(CONF_MEDIA_FILE): cv.use_id(MediaFile),
-#         },
-#         key=CONF_MEDIA_FILE,
-#     ),
-# )
-# async def media_player_play_media_action(config, action_id, template_arg, args):
-#     var = cg.new_Pvariable(action_id, template_arg)
-#     await cg.register_parented(var, config[CONF_ID])
-#     media_file = config[CONF_MEDIA_FILE]
-#     cg.add(var.set_media_file(media_file))
-#     return var
+@automation.register_action(
+    "nabu.play_local_media_file",
+    PlayLocalMediaAction,
+    cv.maybe_simple_value(
+        {
+            cv.GenerateID(): cv.use_id(NabuMediaPlayer),
+            cv.Required(CONF_MEDIA_FILE): cv.use_id(MediaFile),
+            cv.Optional(CONF_ANNOUNCEMENT, default=False): cv.boolean,
+        },
+        key=CONF_MEDIA_FILE,
+    ),
+)
+async def media_player_play_media_action(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    media_file = await cg.get_variable(config[CONF_MEDIA_FILE])
+    cg.add(var.set_media_file(media_file))
+    cg.add(var.set_announcement(config[CONF_ANNOUNCEMENT]))
+    return var
 
 
 @automation.register_action("nabu.set_ducking", DuckingSetAction, DUCKING_SET_SCHEMA)
