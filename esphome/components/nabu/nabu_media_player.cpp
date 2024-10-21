@@ -14,13 +14,6 @@
 namespace esphome {
 namespace nabu {
 
-// TODO:
-//  - Align TLS certification defines with the http_request component
-//  - Clean up process around playing back local media files
-//    - Create a registry of media files in Python
-//    - Add a yaml action to play a specific media file
-//
-//
 // Framework:
 //  - Media player that can handle two streams; one for media and one for announcements
 //    - If played together, they are mixed with the announcement stream staying at full volume

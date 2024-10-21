@@ -277,7 +277,6 @@ FileDecoderState AudioDecoder::decode_mp3_() {
         return FileDecoderState::POTENTIALLY_FAILED;
         break;
       default:
-        // TODO: Better handle mp3 decoder errors
         return FileDecoderState::FAILED;
         break;
     }
