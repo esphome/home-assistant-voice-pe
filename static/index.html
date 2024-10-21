@@ -13,12 +13,10 @@
     </esp-web-install-button>
   </div>
   <br />
-  <div>
-    <a id="specific-version">> Install Specific Version</a>
-    <div id="specific-version-input" style="display: none">
-      Version: <input />
-    </div>
-  </div>
+  <details>
+    <summary>Install Specific Version</summary>
+    Version: <input />
+  </details>
   <script>
     function setVersion(version) {
       document.querySelector('h1').innerHTML = `Install Voice PE v${version}`;
@@ -34,11 +32,6 @@
       const version = urlParams.get('version');
       setVersion(version);
     }
-
-    document.querySelector('#specific-version').addEventListener('click', () => {
-      document.querySelector('#specific-version-input').style.display = 'block';
-    });
-
   </script>
 
 </body>
