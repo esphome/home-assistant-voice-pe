@@ -8,16 +8,14 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t QUEUE_COUNT = 10;
-
 static const size_t FILE_BUFFER_SIZE = 32 * 1024;
 static const size_t FILE_RING_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
 static const size_t BUFFER_SIZE_BYTES = BUFFER_SIZE_SAMPLES * sizeof(int16_t);
 
-static const uint32_t READER_TASK_STACK_SIZE = 4096;
-static const uint32_t DECODER_TASK_STACK_SIZE = 3072;
-static const uint32_t RESAMPLER_TASK_STACK_SIZE = 3072;
+static const uint32_t READER_TASK_STACK_SIZE = 5 * 1024;
+static const uint32_t DECODER_TASK_STACK_SIZE = 3 * 1024;
+static const uint32_t RESAMPLER_TASK_STACK_SIZE = 3 * 1024;
 
 static const size_t INFO_ERROR_QUEUE_COUNT = 5;
 
@@ -180,10 +178,26 @@ AudioPipelineState AudioPipeline::get_state() {
         case InfoErrorSource::DECODER:
           if (event.err.has_value()) {
             ESP_LOGE(TAG, "Decoder encountered an error: %s", esp_err_to_name(event.err.value()));
-          } else if (event.audio_stream_info.has_value()) {
+          }
+
+          if (event.audio_stream_info.has_value()) {
             ESP_LOGD(TAG, "Decoded audio has %d channels, %" PRId32 " Hz sample rate, and %d bits per sample",
                      event.audio_stream_info.value().channels, event.audio_stream_info.value().sample_rate,
                      event.audio_stream_info.value().bits_per_sample);
+          }
+
+          if (event.decoding_err.has_value()) {
+            switch (event.decoding_err.value()) {
+              case DecodingError::FAILED_HEADER:
+                ESP_LOGE(TAG, "Failed to parse the file's header.");
+                break;
+              case DecodingError::INCOMPATIBLE_BITS_PER_SAMPLE:
+                ESP_LOGE(TAG, "Incompatible bits per sample. Only 16 bits per sample is supported");
+                break;
+              case DecodingError::INCOMPATIBLE_CHANNELS:
+                ESP_LOGE(TAG, "Incompatible number of channels. Only 1 or 2 channel audio is supported.");
+                break;
+            }
           }
           break;
         case InfoErrorSource::RESAMPLER:
@@ -415,6 +429,10 @@ void AudioPipeline::decode_task_(void *params) {
         if (decoder_state == AudioDecoderState::FINISHED) {
           break;
         } else if (decoder_state == AudioDecoderState::FAILED) {
+          if (!has_stream_info) {
+            event.decoding_err = DecodingError::FAILED_HEADER;
+            xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
+          }
           xEventGroupSetBits(this_pipeline->event_group_,
                              EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
           break;
@@ -427,10 +445,23 @@ void AudioPipeline::decode_task_(void *params) {
 
           // Send the stream information to the pipeline
           event.audio_stream_info = this_pipeline->current_audio_stream_info_;
-          xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
 
-          // Inform the resampler that the stream information is available
-          xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
+          if (this_pipeline->current_audio_stream_info_.bits_per_sample != 16) {
+            // Error state, incompatible bits per sample
+            event.decoding_err = DecodingError::INCOMPATIBLE_BITS_PER_SAMPLE;
+            xEventGroupSetBits(this_pipeline->event_group_,
+                               EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+          } else if ((this_pipeline->current_audio_stream_info_.channels > 2)) {
+            // Error state, incompatible number of channels
+            event.decoding_err = DecodingError::INCOMPATIBLE_CHANNELS;
+            xEventGroupSetBits(this_pipeline->event_group_,
+                               EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+          } else {
+            // Inform the resampler that the stream information is available
+            xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::DECODER_MESSAGE_LOADED_STREAM_INFO);
+          }
+
+          xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
         }
       }
     }
