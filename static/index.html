@@ -5,13 +5,41 @@
 </head>
 
 <body>
-  <h1>Install Production Firmware</h1>
-  <esp-web-install-button
-    manifest="https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest.json"></esp-web-install-button>
+  <div>
 
-  <h2>Install Beta Firmware</h2>
-  <esp-web-install-button
-    manifest="https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest-beta.json"></esp-web-install-button>
+    <h1>Install Voice PE Latest Firmware</h1>
+    <esp-web-install-button
+      manifest="https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/manifest.json">
+    </esp-web-install-button>
+  </div>
+  <br />
+  <div>
+    <a id="specific-version">> Install Specific Version</a>
+    <div id="specific-version-input" style="display: none">
+      Version: <input />
+    </div>
+  </div>
+  <script>
+    function setVersion(version) {
+      document.querySelector('h1').innerHTML = `Install Voice PE v${version}`;
+      document.querySelector('esp-web-install-button').manifest = `https://firmware.esphome.io/home-assistant-voice-pe/home-assistant-voice/${version}/manifest.json`;
+    }
+
+    document.querySelector('input').addEventListener('change', ev => {
+      const version = ev.target.value;
+      setVersion(version);
+    });
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('version')) {
+      const version = urlParams.get('version');
+      setVersion(version);
+    }
+
+    document.querySelector('#specific-version').addEventListener('click', () => {
+      document.querySelector('#specific-version-input').style.display = 'block';
+    });
+
+  </script>
 
 </body>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
