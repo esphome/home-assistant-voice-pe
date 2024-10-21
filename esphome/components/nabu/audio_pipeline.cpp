@@ -8,8 +8,6 @@
 namespace esphome {
 namespace nabu {
 
-static const size_t QUEUE_COUNT = 10;
-
 static const size_t FILE_BUFFER_SIZE = 32 * 1024;
 static const size_t FILE_RING_BUFFER_SIZE = 64 * 1024;
 static const size_t BUFFER_SIZE_SAMPLES = 32768;
