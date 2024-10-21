@@ -4,14 +4,15 @@ import hashlib
 import logging
 from pathlib import Path
 
-import esphome.codegen as cg
-import esphome.config_validation as cv
 from esphome import automation, external_files
+import esphome.codegen as cg
 from esphome.components import audio_dac, media_player, speaker
 from esphome.components.media_player import MEDIA_FILE_TYPE_ENUM, MediaFile
+import esphome.config_validation as cv
 from esphome.const import (
     CONF_DURATION,
     CONF_FILE,
+    CONF_FILES,
     CONF_ID,
     CONF_PATH,
     CONF_RAW_DATA_ID,
@@ -21,10 +22,9 @@ from esphome.const import (
     CONF_URL,
 )
 from esphome.core import CORE, HexInt
+from esphome.external_files import download_content
 
 _LOGGER = logging.getLogger(__name__)
-
-from esphome.external_files import download_content
 
 AUTO_LOAD = ["audio"]
 
@@ -39,7 +39,6 @@ CONF_DECIBEL_REDUCTION = "decibel_reduction"
 
 CONF_AUDIO_DAC = "audio_dac"
 CONF_MEDIA_FILE = "media_file"
-CONF_FILES = "files"
 CONF_VOLUME_INCREMENT = "volume_increment"
 CONF_VOLUME_MIN = "volume_min"
 CONF_VOLUME_MAX = "volume_max"
@@ -129,35 +128,12 @@ def _file_schema(value):
     return TYPED_FILE_SCHEMA(value)
 
 
-def _validate_file_shorthand(value):
-    value = cv.string_strict(value)
-    if value.startswith("http://") or value.startswith("https://"):
-        return _file_schema(
-            {
-                CONF_TYPE: TYPE_WEB,
-                CONF_URL: value,
-            }
-        )
-    return _file_schema(
-        {
-            CONF_TYPE: TYPE_LOCAL,
-            CONF_PATH: value,
-        }
-    )
-
-
 TYPED_FILE_SCHEMA = cv.typed_schema(
     {
         TYPE_LOCAL: LOCAL_SCHEMA,
         TYPE_WEB: WEB_SCHEMA,
     },
 )
-
-
-def _file_schema(value):
-    if isinstance(value, str):
-        return _validate_file_shorthand(value)
-    return TYPED_FILE_SCHEMA(value)
 
 
 MEDIA_FILE_TYPE_SCHEMA = cv.Schema(
@@ -193,6 +169,8 @@ def _read_audio_file_and_type(file_config):
         path = CORE.relative_config_path(conf_file[CONF_PATH])
     elif file_source == TYPE_WEB:
         path = _compute_local_file_path(conf_file)
+    else:
+        raise cv.Invalid("Unsupported file source.")
 
     with open(path, "rb") as f:
         data = f.read()
@@ -207,8 +185,8 @@ def _read_audio_file_and_type(file_config):
 
             magic = Magic(mime=True)
             file_type: str = magic.from_buffer(data)
-        except ImportError:
-            raise cv.Invalid("Please install puremagic")
+        except ImportError as exc:
+            raise cv.Invalid("Please install puremagic") from exc
     if file_type.startswith("."):
         file_type = file_type[1:]
 

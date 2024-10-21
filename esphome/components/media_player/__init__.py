@@ -1,19 +1,17 @@
 from esphome import automation
-import esphome.config_validation as cv
-import esphome.codegen as cg
-
 from esphome.automation import maybe_simple_id
+import esphome.codegen as cg
+import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID,
+    CONF_ON_IDLE,
     CONF_ON_STATE,
     CONF_TRIGGER_ID,
     CONF_VOLUME,
-    CONF_ON_IDLE,
 )
 from esphome.core import CORE
 from esphome.coroutine import coroutine_with_priority
 from esphome.cpp_helpers import setup_entity
-
 
 CODEOWNERS = ["@jesserockz"]
 
@@ -30,9 +28,6 @@ MEDIA_FILE_TYPE_ENUM = {
     "MP3": MediaFileType.MP3,
     "FLAC": MediaFileType.FLAC,
 }
-
-
-
 
 
 PlayAction = media_player_ns.class_(
@@ -158,6 +153,7 @@ async def media_player_play_media_action(config, action_id, template_arg, args):
     media_url = await cg.templatable(config[CONF_MEDIA_URL], args, cg.std_string)
     cg.add(var.set_media_url(media_url))
     return var
+
 
 @automation.register_action("media_player.play", PlayAction, MEDIA_PLAYER_ACTION_SCHEMA)
 @automation.register_action(
