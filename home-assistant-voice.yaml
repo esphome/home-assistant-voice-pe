@@ -94,7 +94,6 @@ esp32:
 
 wifi:
   id: wifi_id
-  ap:
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
