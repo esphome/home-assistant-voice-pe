@@ -21,7 +21,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2024.12.4
+  min_version: 2025.2.0
   platformio_options:
     board_build.flash_mode: dio
   on_boot:
@@ -559,7 +559,6 @@ light:
   - platform: esp32_rmt_led_strip
     id: leds_internal
     pin: GPIO21
-    rmt_channel: 1
     num_leds: 12
     rgb_order: GRB
     chipset: WS2812
