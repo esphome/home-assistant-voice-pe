@@ -14,6 +14,8 @@ substitutions:
   voice_assist_not_ready_phase_id: '10'
   # The voice assistant encountered an error
   voice_assist_error_phase_id: '11'
+  # Change this to true in case you ahve a hidden SSID at home.
+  hidden_ssid: "false"
 
 esphome:
   name: home-assistant-voice
@@ -56,36 +58,6 @@ esp32:
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
-      CONFIG_ESP32_S3_BOX_BOARD: "y"
-      CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY: "y"
-
-      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
-
-      # Settings based on https://github.com/espressif/esp-adf/issues/297#issuecomment-783811702
-      CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM: "16"
-      CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM: "512"
-      CONFIG_ESP32_WIFI_STATIC_TX_BUFFER: "y"
-      CONFIG_ESP32_WIFI_TX_BUFFER_TYPE: "0"
-      CONFIG_ESP32_WIFI_STATIC_TX_BUFFER_NUM: "8"
-      CONFIG_ESP32_WIFI_CACHE_TX_BUFFER_NUM: "32"
-      CONFIG_ESP32_WIFI_AMPDU_TX_ENABLED: "y"
-      CONFIG_ESP32_WIFI_TX_BA_WIN: "16"
-      CONFIG_ESP32_WIFI_AMPDU_RX_ENABLED: "y"
-      CONFIG_ESP32_WIFI_RX_BA_WIN: "32"
-      CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
-      CONFIG_LWIP_MAX_LISTENING_TCP: "16"
-      CONFIG_TCP_MAXRTX: "12"
-      CONFIG_TCP_SYNMAXRTX: "6"
-      CONFIG_TCP_MSS: "1436"
-      CONFIG_TCP_MSL: "60000"
-      CONFIG_TCP_SND_BUF_DEFAULT: "65535"
-      CONFIG_TCP_WND_DEFAULT: "65535"  # Adjusted from linked settings to avoid compilation error
-      CONFIG_TCP_RECVMBOX_SIZE: "512"
-      CONFIG_TCP_QUEUE_OOSEQ: "y"
-      CONFIG_TCP_OVERSIZE_MSS: "y"
-      CONFIG_LWIP_WND_SCALE: "y"
-      CONFIG_TCP_RCV_SCALE: "3"
-      CONFIG_LWIP_TCPIP_RECVMBOX_SIZE: "512"
 
       CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
       CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
@@ -95,6 +67,7 @@ esp32:
 
 wifi:
   id: wifi_id
+  fast_connect: ${hidden_ssid}
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
@@ -227,26 +200,25 @@ switch:
     on_turn_off:
       # Disable stop wake word
       - lambda: id(stop).disable();
+      - script.execute: disable_repeat
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
           condition:
-            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+            media_player.is_announcing:
           then:
-            lambda: |-
-              id(nabu_media_player)
-                ->make_call()
-                .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                .set_announcement(true)
-                .perform();
+            media_player.stop:
+              announcement: true
       # Set back ducking ratio to zero
-      - nabu.set_ducking:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
           decibel_reduction: 0
           duration: 1.0s
       # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
       # Duck audio
-      - nabu.set_ducking:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
       # Enable stop wake word
@@ -307,14 +279,10 @@ binary_sensor:
                     else:
                       - if:
                           condition:
-                            lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                            media_player.is_announcing:
                           then:
-                            - lambda: |
-                                id(nabu_media_player)
-                                  ->make_call()
-                                  .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                                  .set_announcement(true)
-                                  .perform();
+                            media_player.stop:
+                              announcement: true
                           else:
                             - if:
                                 condition:
@@ -706,7 +674,7 @@ light:
               it[9] = muted_color;
               it[10] = Color::BLACK;
             }
-            if ( id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted() ) {
+            if ( id(external_media_player).volume == 0.0f || id(external_media_player).is_muted() ) {
               it[5] = Color::BLACK;
               it[6] = muted_color;
               it[7] = Color::BLACK;
@@ -719,7 +687,7 @@ light:
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             Color silenced_color(255, 0, 0);
-            auto volume_ratio = 12.0f * id(nabu_media_player).volume;
+            auto volume_ratio = 12.0f * id(external_media_player).volume;
             for (int i = 0; i < 12; i++) {
               if (i <= volume_ratio) {
                 it[(6+i)%12] = color * min( 255.0f * (volume_ratio - i) , 255.0f ) ;
@@ -727,7 +695,7 @@ light:
                 it[(6+i)%12] = Color::BLACK;
               }
             }
-            if (id(nabu_media_player).volume == 0.0f) {
+            if (id(external_media_player).volume == 0.0f) {
               it[6] = silenced_color;
             }
       - addressable_lambda:
@@ -1034,7 +1002,7 @@ script:
             id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
-          } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
+          } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
             id(control_leds_voice_assistant_idle_phase).execute();
@@ -1305,42 +1273,53 @@ script:
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
     then:
-      - while:
-          condition:
-            switch.is_on: timer_ringing
-          then:
-            - script.execute:
-                id: play_sound
-                priority: true
-                sound_file: !lambda return id(timer_finished_sound);
-            - wait_until:
-                lambda: |-
-                  return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-            - wait_until:
-                not:
-                  lambda: |-
-                    return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+      - script.execute: enable_repeat_one
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: !lambda return id(timer_finished_sound);
+
+  # Script executed when the timer is ringing, to repeat the timer finished sound.
+  - id: enable_repeat_one
+    then:
+      # Turn on the repeat mode and pause for 500 ms between playlist items/repeats
+      - lambda: |-
+            id(external_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_ONE)
+              .set_announcement(true)
+              .perform();
+            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 500);
+
+  # Script execute when the timer is done ringing, to disable repeat mode.
+  - id: disable_repeat
+    then:
+      # Turn off the repeat mode and pause for 0 ms between playlist items/repeats
+      - lambda: |-
+            id(external_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_OFF)
+              .set_announcement(true)
+              .perform();
+            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 0);
 
   # Script executed when we want to play sounds on the device.
   - id: play_sound
     parameters:
       priority: bool
-      sound_file: "media_player::MediaFile*"
+      sound_file: "audio::AudioFile*"
     then:
       - lambda: |-
           if (priority) {
-            id(nabu_media_player)
+            id(external_media_player)
               ->make_call()
               .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
               .set_announcement(true)
               .perform();
           }
-          if ( (id(nabu_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
-            id(nabu_media_player)
-              ->make_call()
-              .set_announcement(true)
-              .set_local_media_file(sound_file)
-              .perform();
+          if ( (id(external_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
+            id(external_media_player)
+              ->play_file(sound_file, true, false);
           }
 
   # Script used to fetch the first active timer (Stored in global first_active_timer)
@@ -1413,6 +1392,7 @@ microphone:
       amplify_shift: 2
 
 speaker:
+  # Hardware speaker output
   - platform: i2s_audio
     id: i2s_audio_speaker
     sample_rate: 48000
@@ -1424,18 +1404,49 @@ speaker:
     channel: stereo
     timeout: never
     buffer_duration: 100ms
+    audio_dac: aic3204_dac
+
+  # Virtual speakers to combine the announcement and media streams together into one output
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: i2s_audio_speaker
+    num_channels: 2
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+
+  # Vritual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
 
 media_player:
-  - platform: nabu
-    id: nabu_media_player
-    name: Media Player
-    internal: false
-    audio_dac:
-    speaker:
-    sample_rate: 48000
+  - platform: speaker
+    id: external_media_player
+    name: None
+    internal: False
     volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.85
+    announcement_pipeline:
+      speaker: announcement_resampling_speaker
+      format: FLAC     # FLAC is the least processor intensive codec
+      num_channels: 1  # Stereo audio is unnecessary for announcements
+      sample_rate: 48000
+    media_pipeline:
+      speaker: media_resampling_speaker
+      format: FLAC     # FLAC is the least processor intensive codec
+      num_channels: 2
+      sample_rate: 48000
     on_mute:
       - script.execute: control_leds
     on_unmute:
@@ -1443,7 +1454,8 @@ media_player:
     on_volume:
       - script.execute: control_leds
     on_announcement:
-      - nabu.set_ducking:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
     on_state:
@@ -1454,9 +1466,10 @@ media_player:
             - not:
                 voice_assistant.is_running:
             - not:
-                lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                media_player.is_announcing:
         then:
-          - nabu.set_ducking:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
               decibel_reduction: 0
               duration: 1.0s
     files:
@@ -1505,12 +1518,8 @@ external_components:
       url: https://github.com/esphome/home-assistant-voice-pe
       ref: dev
     components:
-      - aic3204
-      - audio_dac
-      - media_player
       - micro_wake_word
       - microphone
-      - nabu
       - nabu_microphone
       - voice_assistant
       - voice_kit
@@ -1518,6 +1527,7 @@ external_components:
 
 audio_dac:
   - platform: aic3204
+    id: aic3204_dac
     i2c_id: internal_i2c
 
 micro_wake_word:
@@ -1550,14 +1560,10 @@ micro_wake_word:
               else:
                 - if:
                     condition:
-                      lambda: return id(nabu_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      media_player.is_announcing:
                     then:
-                      lambda: |-
-                        id(nabu_media_player)
-                          ->make_call()
-                          .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                          .set_announcement(true)
-                          .perform();
+                      media_player.stop:
+                        announcement: true
                     else:
                       - if:
                           condition:
@@ -1574,7 +1580,7 @@ micro_wake_word:
 voice_assistant:
   id: va
   microphone: asr_mic
-  media_player: nabu_media_player
+  media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
   noise_suppression_level: 0
@@ -1595,14 +1601,16 @@ voice_assistant:
           and:
             - lambda: return !id(init_in_progress);
             - lambda: return code != "duplicate_wake_up_detected";
+            - lambda: return code != "stt-no-text-recognized";
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
-    - nabu.set_ducking:
-        decibel_reduction: 20   # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s          # The duration of the transition (default is 0)
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
+        duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -1623,8 +1631,9 @@ voice_assistant:
         not:
           voice_assistant.is_running:
     # Stop ducking audio.
-    - nabu.set_ducking:
-        decibel_reduction: 0   # 0 dB means no reduction
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 0
         duration: 1.0s
     # Stop the script that would potentially enable the stop word if the response is longer than a second
     - script.stop: activate_stop_word_if_tts_step_is_long
