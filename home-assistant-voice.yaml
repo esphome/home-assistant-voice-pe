@@ -1432,7 +1432,7 @@ speaker:
 media_player:
   - platform: speaker
     id: external_media_player
-    name: None
+    name: Media Player
     internal: False
     volume_increment: 0.05
     volume_min: 0.4
