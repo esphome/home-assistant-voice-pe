@@ -958,6 +958,16 @@ event:
       - triple_press
       - long_press
       - easter_egg_press
+  - platform: template
+    id: timer_event
+    name: "Timer Event"
+    icon: mdi:timer
+    device_class: ''
+    event_types:
+      - started
+      - finished
+      - cancelled
+      - updated
 
 script:
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
@@ -1654,12 +1664,24 @@ voice_assistant:
     - script.execute: control_leds
   on_timer_finished:
     - switch.turn_on: timer_ringing
+    - event.trigger:
+        id: timer_event
+        event_type: "finished"
   on_timer_started:
     - script.execute: control_leds
+    - event.trigger:
+        id: timer_event
+        event_type: "started"
   on_timer_cancelled:
     - script.execute: control_leds
+    - event.trigger:
+        id: timer_event
+        event_type: "cancelled"
   on_timer_updated:
     - script.execute: control_leds
+    - event.trigger:
+        id: timer_event
+        event_type: "updated"
   on_timer_tick:
     - script.execute: control_leds
 
