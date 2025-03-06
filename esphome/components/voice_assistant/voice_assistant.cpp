@@ -896,6 +896,7 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
     this->tts_start_trigger_->trigger(msg.text);
     this->media_player_->make_call().set_media_url(msg.preannounce_media_id).set_announcement(true).perform();
     this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).set_enqueue(true).perform();
+    this->continue_conversation_ = msg.start_conversation;
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
     this->tts_end_trigger_->trigger(msg.media_id);
     this->end_trigger_->trigger();

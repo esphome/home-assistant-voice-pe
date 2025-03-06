@@ -44,6 +44,7 @@ enum VoiceAssistantFeature : uint32_t {
   FEATURE_API_AUDIO = 1 << 2,
   FEATURE_TIMERS = 1 << 3,
   FEATURE_ANNOUNCE = 1 << 4,
+  FEATURE_START_CONVERSATION = 1 << 5,
 };
 
 enum class State {
@@ -145,6 +146,7 @@ class VoiceAssistant : public Component {
 #ifdef USE_MEDIA_PLAYER
     if (this->media_player_ != nullptr) {
       flags |= VoiceAssistantFeature::FEATURE_ANNOUNCE;
+      flags |= VoiceAssistantFeature::FEATURE_START_CONVERSATION;
     }
 #endif
 
