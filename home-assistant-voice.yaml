@@ -1637,7 +1637,7 @@ voice_assistant:
         duration: 1.0s
     # Stop the script that would potentially enable the stop word if the response is longer than a second
     - script.stop: activate_stop_word_if_tts_step_is_long
-    # Disable the stop word (If the tiemr is not ringing)
+    # Disable the stop word (If the timer is not ringing)
     - if:
         condition:
           switch.is_off: timer_ringing
