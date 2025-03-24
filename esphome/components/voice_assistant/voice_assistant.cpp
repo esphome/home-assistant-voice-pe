@@ -894,13 +894,7 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 #ifdef USE_MEDIA_PLAYER
   if (this->media_player_ != nullptr) {
     this->tts_start_trigger_->trigger(msg.text);
-    bool enqueue = false;
-    if (!msg.preannounce_media_id.empty()) {
-      this->media_player_->make_call().set_media_url(msg.preannounce_media_id).set_announcement(true).perform();
-      enqueue = true;
-    }
-    this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).set_enqueue(enqueue).perform();
-    this->continue_conversation_ = msg.start_conversation;
+    this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
     this->tts_end_trigger_->trigger(msg.media_id);
     this->end_trigger_->trigger();
