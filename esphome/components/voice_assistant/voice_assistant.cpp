@@ -1,4 +1,5 @@
 #include "voice_assistant.h"
+#include "esphome/core/defines.h"
 
 #ifdef USE_VOICE_ASSISTANT
 
@@ -16,8 +17,6 @@ static const char *const TAG = "voice_assistant";
 #undef SAMPLE_RATE_HZ
 #endif
 
-// TODO: Make stopping the microphone a configurable option, it's hardcoded removed currently
-
 static const size_t SAMPLE_RATE_HZ = 16000;
 static const size_t INPUT_BUFFER_SIZE = 32 * SAMPLE_RATE_HZ / 1000;  // 32ms * 16kHz / 1000ms
 static const size_t BUFFER_SIZE = 512 * SAMPLE_RATE_HZ / 1000;
@@ -25,9 +24,7 @@ static const size_t SEND_BUFFER_SIZE = INPUT_BUFFER_SIZE * sizeof(int16_t);
 static const size_t RECEIVE_SIZE = 1024;
 static const size_t SPEAKER_BUFFER_SIZE = 16 * RECEIVE_SIZE;
 
-VoiceAssistant::VoiceAssistant() {
-  global_voice_assistant = this;
-}
+VoiceAssistant::VoiceAssistant() { global_voice_assistant = this; }
 
 float VoiceAssistant::get_setup_priority() const { return setup_priority::AFTER_CONNECTION; }
 
@@ -393,14 +390,7 @@ void VoiceAssistant::loop() {
       }
 #endif
       if (playing) {
-        this->set_timeout("playing", 50, [this]() {
-          this->cancel_timeout("speaker-timeout");
-          this->set_state_(State::IDLE, State::IDLE);
-
-          api::VoiceAssistantAnnounceFinished msg;
-          msg.success = true;
-          this->api_client_->send_voice_assistant_announce_finished(msg);
-        });
+        this->start_playback_timeout_();
       }
       break;
     }
@@ -427,7 +417,11 @@ void VoiceAssistant::loop() {
         this->tts_stream_end_trigger_->trigger();
       }
 #endif
-      this->set_state_(State::IDLE, State::IDLE);
+      if (this->continue_conversation_) {
+        this->set_state_(State::START_MICROPHONE, State::START_PIPELINE);
+      } else {
+        this->set_state_(State::IDLE, State::IDLE);
+      }
       break;
     }
     default:
@@ -637,6 +631,17 @@ void VoiceAssistant::signal_stop_() {
   this->api_client_->send_voice_assistant_request(msg);
 }
 
+void VoiceAssistant::start_playback_timeout_() {
+  this->set_timeout("playing", 100, [this]() {
+    this->cancel_timeout("speaker-timeout");
+    this->set_state_(State::RESPONSE_FINISHED, State::RESPONSE_FINISHED);
+
+    api::VoiceAssistantAnnounceFinished msg;
+    msg.success = true;
+    this->api_client_->send_voice_assistant_announce_finished(msg);
+  });
+}
+
 void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
   ESP_LOGD(TAG, "Event Type: %" PRId32, msg.event_type);
   switch (msg.event_type) {
@@ -678,6 +683,8 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
       for (auto arg : msg.data) {
         if (arg.name == "conversation_id") {
           this->conversation_id_ = std::move(arg.value);
+        } else if (arg.name == "continue_conversation") {
+          this->continue_conversation_ = (arg.value.compare("1") == 0);
         }
       }
       this->defer([this]() { this->intent_end_trigger_->trigger(); });
@@ -721,6 +728,8 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 #ifdef USE_MEDIA_PLAYER
         if (this->media_player_ != nullptr) {
           this->media_player_->make_call().set_media_url(url).set_announcement(true).perform();
+          // Start the playback timeout, as the media player state isn't immediately updated
+          this->start_playback_timeout_();
         }
 #endif
         this->tts_end_trigger_->trigger(url);
@@ -731,8 +740,9 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
     }
     case api::enums::VOICE_ASSISTANT_RUN_END: {
       ESP_LOGD(TAG, "Assist Pipeline ended");
-      if (this->state_ == State::STARTING_PIPELINE) {
+      if ((this->state_ == State::STARTING_PIPELINE) || (this->state_ == State::AWAITING_RESPONSE)) {
         // Pipeline ended before starting microphone
+        // Or there wasn't a TTS start event ("nevermind")
         this->set_state_(State::IDLE, State::IDLE);
       } else if (this->state_ == State::STREAMING_MICROPHONE) {
         this->ring_buffer_->reset();
@@ -745,9 +755,6 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
         {
           this->set_state_(State::IDLE, State::IDLE);
         }
-      } else if (this->state_ == State::AWAITING_RESPONSE) {
-        // No TTS start event ("nevermind")
-        this->set_state_(State::IDLE, State::IDLE);
       }
       this->defer([this]() { this->end_trigger_->trigger(); });
       break;
@@ -887,7 +894,12 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 #ifdef USE_MEDIA_PLAYER
   if (this->media_player_ != nullptr) {
     this->tts_start_trigger_->trigger(msg.text);
-    this->media_player_->make_call().set_media_url(msg.media_id).set_announcement(true).perform();
+    if (!msg.preannounce_media_id.empty()) {
+      this->media_player_->make_call().set_media_url(msg.preannounce_media_id).set_announcement(true).perform();
+    }
+    // Enqueueing a URL with an empty playlist will still play the file immediately
+    this->media_player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_ENQUEUE).set_media_url(msg.media_id).set_announcement(true).perform();
+    this->continue_conversation_ = msg.start_conversation;
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
     this->tts_end_trigger_->trigger(msg.media_id);
     this->end_trigger_->trigger();
@@ -896,6 +908,7 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
 }
 
 void VoiceAssistant::on_set_configuration(const std::vector<std::string> &active_wake_words) {
+#ifdef USE_MICRO_WAKE_WORD
   if (this->micro_wake_word_) {
     // Disable all wake words first
     for (auto &model : this->micro_wake_word_->get_wake_words()) {
@@ -912,12 +925,14 @@ void VoiceAssistant::on_set_configuration(const std::vector<std::string> &active
       }
     }
   }
+#endif
 };
 
 const Configuration &VoiceAssistant::get_configuration() {
   this->config_.available_wake_words.clear();
   this->config_.active_wake_words.clear();
 
+#ifdef USE_MICRO_WAKE_WORD
   if (this->micro_wake_word_) {
     this->config_.max_active_wake_words = 1;
 
@@ -935,9 +950,12 @@ const Configuration &VoiceAssistant::get_configuration() {
       this->config_.available_wake_words.push_back(std::move(wake_word));
     }
   } else {
+#endif
     // No microWakeWord
     this->config_.max_active_wake_words = 0;
+#ifdef USE_MICRO_WAKE_WORD
   }
+#endif
 
   return this->config_;
 };
