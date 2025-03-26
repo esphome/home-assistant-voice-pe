@@ -372,7 +372,7 @@ void MicroWakeWord::start() {
   }
 
   if (this->is_running()) {
-    ESP_LOGW(TAG, "Wake word dection is already running");
+    ESP_LOGW(TAG, "Wake word detection is already running");
     return;
   }
 
