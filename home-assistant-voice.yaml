@@ -21,7 +21,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2025.3.2
+  min_version: 2025.3.3
   on_boot:
     priority: 375
     then:
