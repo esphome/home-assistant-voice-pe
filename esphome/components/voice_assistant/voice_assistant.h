@@ -272,6 +272,8 @@ class VoiceAssistant : public Component {
 #endif
 #ifdef USE_MEDIA_PLAYER
   media_player::MediaPlayer *media_player_{nullptr};
+  bool media_player_wait_for_announcement_start_{false};
+  bool media_player_wait_for_announcement_end_{false};
 #endif
 
   bool local_output_{false};

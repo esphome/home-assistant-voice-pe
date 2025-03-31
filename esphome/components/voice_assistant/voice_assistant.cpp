@@ -387,6 +387,25 @@ void VoiceAssistant::loop() {
 #ifdef USE_MEDIA_PLAYER
       if (this->media_player_ != nullptr) {
         playing = (this->media_player_->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING);
+
+        if (playing && this->media_player_wait_for_announcement_start_) {
+          // Announcement has started playing, wait for it to finish
+          this->media_player_wait_for_announcement_start_ = false;
+          this->media_player_wait_for_announcement_end_ = true;
+        }
+
+        if (!playing && this->media_player_wait_for_announcement_end_) {
+          // Announcement has finished playing
+          this->media_player_wait_for_announcement_end_ = false;
+          this->cancel_timeout("playing");
+          ESP_LOGD(TAG, "Announcement finished playing");
+          this->set_state_(State::RESPONSE_FINISHED, State::RESPONSE_FINISHED);
+
+          api::VoiceAssistantAnnounceFinished msg;
+          msg.success = true;
+          this->api_client_->send_voice_assistant_announce_finished(msg);
+          break;
+        }
       }
 #endif
       if (playing) {
@@ -632,7 +651,7 @@ void VoiceAssistant::signal_stop_() {
 }
 
 void VoiceAssistant::start_playback_timeout_() {
-  this->set_timeout("playing", 100, [this]() {
+  this->set_timeout("playing", 2000, [this]() {
     this->cancel_timeout("speaker-timeout");
     this->set_state_(State::RESPONSE_FINISHED, State::RESPONSE_FINISHED);
 
@@ -728,6 +747,9 @@ void VoiceAssistant::on_event(const api::VoiceAssistantEventResponse &msg) {
 #ifdef USE_MEDIA_PLAYER
         if (this->media_player_ != nullptr) {
           this->media_player_->make_call().set_media_url(url).set_announcement(true).perform();
+
+          this->media_player_wait_for_announcement_start_ = true;
+          this->media_player_wait_for_announcement_end_ = false;
           // Start the playback timeout, as the media player state isn't immediately updated
           this->start_playback_timeout_();
         }
@@ -898,8 +920,18 @@ void VoiceAssistant::on_announce(const api::VoiceAssistantAnnounceRequest &msg) 
       this->media_player_->make_call().set_media_url(msg.preannounce_media_id).set_announcement(true).perform();
     }
     // Enqueueing a URL with an empty playlist will still play the file immediately
-    this->media_player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_ENQUEUE).set_media_url(msg.media_id).set_announcement(true).perform();
+    this->media_player_->make_call()
+        .set_command(media_player::MEDIA_PLAYER_COMMAND_ENQUEUE)
+        .set_media_url(msg.media_id)
+        .set_announcement(true)
+        .perform();
     this->continue_conversation_ = msg.start_conversation;
+
+    this->media_player_wait_for_announcement_start_ = true;
+    this->media_player_wait_for_announcement_end_ = false;
+    // Start the playback timeout, as the media player state isn't immediately updated
+    this->start_playback_timeout_();
+
     this->set_state_(State::STREAMING_RESPONSE, State::STREAMING_RESPONSE);
     this->tts_end_trigger_->trigger(msg.media_id);
     this->end_trigger_->trigger();
