@@ -1558,26 +1558,34 @@ micro_wake_word:
                 switch.is_on: timer_ringing
               then:
                 - switch.turn_off: timer_ringing
-              # Start voice assistant, stop current announcement.
+              # Stop voice assistant if running
               else:
                 - if:
                     condition:
-                      media_player.is_announcing:
+                      voice_assistant.is_running:
                     then:
-                      media_player.stop:
-                        announcement: true
+                      voice_assistant.stop:
+                    # Stop any other media player announcement
                     else:
                       - if:
                           condition:
-                            switch.is_on: wake_sound
+                            media_player.is_announcing:
                           then:
-                            - script.execute:
-                                id: play_sound
-                                priority: true
-                                sound_file: !lambda return id(wake_word_triggered_sound);
-                            - delay: 300ms
-                      - voice_assistant.start:
-                          wake_word: !lambda return wake_word;
+                            - media_player.stop:
+                                announcement: true
+                          # Start the voice assistant and play the wake sound, if enabled
+                          else:
+                            - if:
+                                condition:
+                                  switch.is_on: wake_sound
+                                then:
+                                  - script.execute:
+                                      id: play_sound
+                                      priority: true
+                                      sound_file: !lambda return id(wake_word_triggered_sound);
+                                  - delay: 300ms
+                            - voice_assistant.start:
+                                wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
