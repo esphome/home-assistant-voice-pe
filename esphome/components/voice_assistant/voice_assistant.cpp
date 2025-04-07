@@ -610,6 +610,7 @@ void VoiceAssistant::request_start(bool continuous, bool silence_detection) {
 
 void VoiceAssistant::request_stop() {
   this->continuous_ = false;
+  this->continue_conversation_ = false;
 
   switch (this->state_) {
     case State::IDLE:
