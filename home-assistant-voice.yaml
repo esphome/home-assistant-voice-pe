@@ -1354,11 +1354,24 @@ script:
   # Why is this wrapped on a script?
   #   Becasue we want to stop the sequence if the TTS step is faster than that.
   #   This allows us to prevent having the deactivation of the stop word before its own activation.
-  - id: activate_stop_word_if_tts_step_is_long
+  - id: activate_stop_word_once
     then:
       - delay: 1s
       # Enable stop wake word
-      - lambda: id(stop).enable();
+      - if:
+          condition:
+            switch.is_off: timer_ringing
+          then:
+            - lambda: id(stop).enable();
+            - wait_until:
+                not:
+                  media_player.is_announcing:
+            - if:
+                condition:
+                  switch.is_off: timer_ringing
+                then:
+                  - lambda: id(stop).disable();
+
 
 i2s_audio:
   - id: i2s_output
@@ -1645,7 +1658,7 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: control_leds
     # Start a script that would potentially enable the stop word if the response is longer than a second
-    - script.execute: activate_stop_word_if_tts_step_is_long
+    - script.execute: activate_stop_word_once
   # When the voice assistant ends ...
   on_end:
     - wait_until:
@@ -1656,14 +1669,6 @@ voice_assistant:
         id: media_mixing_input
         decibel_reduction: 0
         duration: 1.0s
-    # Stop the script that would potentially enable the stop word if the response is longer than a second
-    - script.stop: activate_stop_word_if_tts_step_is_long
-    # Disable the stop word (If the timer is not ringing)
-    - if:
-        condition:
-          switch.is_off: timer_ringing
-        then:
-          - lambda: id(stop).disable();
     # If the end happened because of an error, let the error phase on for a second
     - if:
         condition:
