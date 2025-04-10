@@ -1372,7 +1372,6 @@ script:
                 then:
                   - lambda: id(stop).disable();
 
-
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
