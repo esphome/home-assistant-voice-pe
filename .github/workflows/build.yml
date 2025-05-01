@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build-firmware:
     name: Build Firmware
-    uses: esphome/workflows/.github/workflows/build.yml@2025.4.0
+    uses: esphome/workflows/.github/workflows/build.yml@2025.5.0
     with:
       files: |
         home-assistant-voice.factory.yaml
