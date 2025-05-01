@@ -29,14 +29,6 @@ esphome:
       - script.execute: control_leds
       - delay: 1s
       - switch.turn_on: internal_speaker_amp
-      # If the hardware switch is ON, force the software switch to be ON too. This covers the case where the Mute hardware switch is operated when the device is turned off
-      - if:
-          condition:
-            binary_sensor.is_on: hardware_mute_switch
-          then:
-            - switch.template.publish:
-                id: master_mute_switch
-                state: ON
       # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
       - delay: 10min
       - if:
@@ -163,22 +155,25 @@ switch:
     icon: "mdi:microphone-off"
     name: Mute
     entity_category: config
+    lambda: |-
+      // Muted either if the hardware mute switch is on or the microphone's software mute switch is enabled
+      if (id(hardware_mute_switch).state || id(i2s_mics).get_mute_state()) {
+        return true;
+      } else {
+        return false;
+      }
     turn_on_action:
       - if:
           condition:
             binary_sensor.is_off: hardware_mute_switch
           then:
-            - switch.template.publish:
-                id: master_mute_switch
-                state: ON
+            - microphone.mute:
     turn_off_action:
       - if:
           condition:
             binary_sensor.is_off: hardware_mute_switch
           then:
-            - switch.template.publish:
-                id: master_mute_switch
-                state: OFF
+            - microphone.unmute:
     on_turn_on:
       - script.execute: control_leds
     on_turn_off:
@@ -464,21 +459,21 @@ binary_sensor:
     internal: true
     pin: GPIO3
     on_press:
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(mute_switch_on_sound);
-      - switch.template.publish:
-          id: master_mute_switch
-          state: ON
+      # Play mute on sound only if software mute isn't enabled
+      - if:
+          condition:
+            - switch.is_off: master_mute_switch
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: !lambda return id(mute_switch_on_sound);
     on_release:
       - script.execute:
           id: play_sound
           priority: false
           sound_file: !lambda return id(mute_switch_off_sound);
-      - switch.template.publish:
-          id: master_mute_switch
-          state: OFF
+      - microphone.unmute:
   # Audio Jack Plugged sensor
   - platform: gpio
     id: jack_plugged
@@ -1530,7 +1525,8 @@ external_components:
     components:
       - voice_kit
     refresh: 0s
-
+  - source: github://pr#8667
+    components: [microphone]
 audio_dac:
   - platform: aic3204
     id: aic3204_dac
