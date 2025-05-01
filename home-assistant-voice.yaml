@@ -21,7 +21,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2025.3.3
+  min_version: 2025.5.0
   on_boot:
     priority: 375
     then:
@@ -48,13 +48,13 @@ esphome:
 
 esp32:
   board: esp32-s3-devkitc-1
+  cpu_frequency: 240MHz
   variant: esp32s3
   flash_size: 16MB
   framework:
     type: esp-idf
     version: recommended
     sdkconfig_options:
-      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
@@ -199,7 +199,7 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_off:
       # Disable stop wake word
-      - lambda: id(stop).disable();
+      - micro_wake_word.disable_model: stop
       - script.execute: disable_repeat
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
@@ -222,7 +222,7 @@ switch:
           decibel_reduction: 20
           duration: 0.0s
       # Enable stop wake word
-      - lambda: id(stop).enable();
+      - micro_wake_word.enable_model: stop
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED
@@ -1362,7 +1362,7 @@ script:
           condition:
             switch.is_off: timer_ringing
           then:
-            - lambda: id(stop).enable();
+            - micro_wake_word.enable_model: stop
             - wait_until:
                 not:
                   media_player.is_announcing:
@@ -1370,7 +1370,7 @@ script:
                 condition:
                   switch.is_off: timer_ringing
                 then:
-                  - lambda: id(stop).disable();
+                  - micro_wake_word.disable_model: stop
 
 i2s_audio:
   - id: i2s_output
@@ -1388,7 +1388,8 @@ i2s_audio:
       number: GPIO13
 
 microphone:
-  - platform: nabu_microphone
+  - platform: i2s_audio
+    id: i2s_mics
     i2s_din_pin: GPIO15
     adc_type: external
     pdm: false
@@ -1396,12 +1397,7 @@ microphone:
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
-    channel_0:
-      id: asr_mic
-      amplify_shift: 0
-    channel_1:
-      id: comm_mic
-      amplify_shift: 2
+    channel: stereo
 
 speaker:
   # Hardware speaker output
@@ -1532,10 +1528,6 @@ external_components:
       url: https://github.com/esphome/home-assistant-voice-pe
       ref: dev
     components:
-      - micro_wake_word
-      - microphone
-      - nabu_microphone
-      - voice_assistant
       - voice_kit
     refresh: 0s
 
@@ -1546,6 +1538,11 @@ audio_dac:
 
 micro_wake_word:
   id: mww
+  microphone:
+    microphone: i2s_mics
+    channels: 1
+    gain_factor: 4
+  stop_after_detection: false
   models:
     - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
       id: okay_nabu
@@ -1557,7 +1554,6 @@ micro_wake_word:
       id: stop
       internal: true
   vad:
-  microphone: comm_mic
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
@@ -1601,7 +1597,9 @@ micro_wake_word:
 
 voice_assistant:
   id: va
-  microphone: asr_mic
+  microphone:
+    microphone: i2s_mics
+    channels: 0
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
