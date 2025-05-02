@@ -1525,8 +1525,7 @@ external_components:
     components:
       - voice_kit
     refresh: 0s
-  - source: github://pr#8667
-    components: [microphone]
+
 audio_dac:
   - platform: aic3204
     id: aic3204_dac
