@@ -74,6 +74,9 @@ wifi:
   on_disconnect:
     - script.execute: control_leds
 
+network:
+  enable_ipv6: true
+
 logger:
   level: DEBUG
   logs:
