@@ -1630,7 +1630,6 @@ select:
           id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
         }
 
-
 voice_assistant:
   id: va
   microphone: asr_mic
