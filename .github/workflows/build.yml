@@ -21,13 +21,13 @@ jobs:
       files: |
         home-assistant-voice.factory.yaml
         home-assistant-voice.8mb.yaml
-      esphome-version: 2025.4.0
+      esphome-version: 2025.5.0
       release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
       release-url: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
       release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
   comment:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'esphome/home-assistant-voice-pe'
     name: Comment on PR
     runs-on: ubuntu-latest
     needs:
