@@ -555,7 +555,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i == id(global_led_animation_index) % 12) {
                 it[i] = color;
               } else if (i == (id(global_led_animation_index) + 11) % 12) {
@@ -580,7 +580,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i == id(global_led_animation_index) % 12) {
                 it[i] = color;
               } else if (i == (id(global_led_animation_index) + 11) % 12) {
@@ -612,7 +612,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i == id(global_led_animation_index) % 12) {
                 it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
               } else if (i == (id(global_led_animation_index) + 6) % 12) {
@@ -637,7 +637,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i == (id(global_led_animation_index)) % 12) {
                 it[i] = color;
               } else if (i == ( id(global_led_animation_index) + 1) % 12) {
@@ -663,7 +663,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if ( light_color.get_state() ) {
                 it[i] = color;
               } else {
@@ -684,6 +684,19 @@ light:
               it[7] = Color::BLACK;
             }
       - addressable_lambda:
+          name: "Voice kit startup failed"
+          # update_interval: 16ms
+          lambda: |-
+            static int8_t index = 0;
+            Color fail_color(255, 0, 0);
+            for (uint8_t i = 0; i < 12; i++) {
+              if (i % 3) {
+                it[i] = Color::BLACK;
+              } else {
+                it[i] = fail_color;
+              }
+            }
+      - addressable_lambda:
           name: "Volume Display"
           update_interval: 50ms
           lambda: |-
@@ -692,7 +705,7 @@ light:
                   light_color.get_blue() * 255);
             Color silenced_color(255, 0, 0);
             auto volume_ratio = 12.0f * id(external_media_player).volume;
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i <= volume_ratio) {
                 it[(6+i)%12] = color * min( 255.0f * (volume_ratio - i) , 255.0f ) ;
               } else {
@@ -718,7 +731,7 @@ light:
             auto light_color = id(voice_assistant_leds).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               it[i] = color;
             }
       - addressable_twinkle:
@@ -736,7 +749,7 @@ light:
               brightness_decreasing = true;
             }
             Color error_color(255, 0, 0);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               it[i] = error_color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
             }
             if (brightness_decreasing) {
@@ -762,7 +775,7 @@ light:
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             Color muted_color(255, 0, 0);
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
             }
             if ( id(master_mute_switch).state ) {
@@ -787,7 +800,7 @@ light:
             Color muted_color(255, 0, 0);
             auto timer_ratio = 12.0f * id(first_active_timer).seconds_left / max(id(first_active_timer).total_seconds , static_cast<uint32_t>(1));
             uint8_t last_led_on = static_cast<uint8_t>(ceil(timer_ratio)) - 1;
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               float brightness_dip = ( i == id(global_led_animation_index) % 12 && i != last_led_on ) ? 0.9f : 1.0f ;
               if (i <= timer_ratio) {
                 it[i] = color * min(255.0f * brightness_dip * (timer_ratio - i) , 255.0f * brightness_dip) ;
@@ -816,7 +829,7 @@ light:
             if (initial_run) {
               index = 0;
             }
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i <= index ) {
                 it[i] = Color::BLACK;
               } else {
@@ -833,7 +846,7 @@ light:
             if (initial_run) {
               index = 0;
             }
-            for (int i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12; i++) {
               if (i <= index ) {
                 it[i] = color;
               } else {
@@ -853,7 +866,7 @@ light:
               Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                     light_color.get_blue() * 255);
               if (index <= 6) {
-                for (int i = 0; i < 12; i++) {
+                for (uint8_t i = 0; i < 12; i++) {
                   if (i == index) {
                     it[i] = color;
                   } else if (i == (12 - index) % 12) {
@@ -876,7 +889,7 @@ light:
               Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                     light_color.get_blue() * 255);
               if (index <= 6) {
-                for (int i = 0; i < 12; i++) {
+                for (uint8_t i = 0; i < 12; i++) {
                   if (i == 6 - index) {
                     it[i] = color;
                   } else if (i == (6 + index) % 12) {
@@ -970,6 +983,10 @@ script:
   - id: control_leds
     then:
       - lambda: |
+          if (id(voice_kit_component).is_failed()) {
+            id(control_leds_voice_kit_startup_failed).execute();
+            return;
+          }
           id(check_if_timers_active).execute();
           if (id(is_timer_active)){
             id(fetch_first_active_timer).execute();
@@ -1011,6 +1028,18 @@ script:
           } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
             id(control_leds_voice_assistant_idle_phase).execute();
           }
+
+  # Script executed if voice_kit startup failed
+  # Static red "X"
+  - id: control_leds_voice_kit_startup_failed
+    then:
+      - light.turn_on:
+          brightness: 40%
+          red: 0%
+          green: 0%
+          blue: 0%
+          id: voice_assistant_leds
+          effect: "Voice kit startup failed"
 
   # Script executed during Improv BLE
   # Warm White Twinkle
@@ -1519,6 +1548,7 @@ media_player:
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
 
 voice_kit:
+  id: voice_kit_component
   i2c_id: internal_i2c
   reset_pin: GPIO4
   firmware:
