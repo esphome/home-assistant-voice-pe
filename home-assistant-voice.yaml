@@ -1534,6 +1534,13 @@ external_components:
     components:
       - voice_kit
     refresh: 0s
+  # The following are experimental (but fixed) PRs to support streaming TTS
+  - source: github://pr#9221
+    components: [audio]
+  - source: github://pr#9222
+    components: [speaker]
+  - source: github://pr#9224
+    components: [voice_assistant]
 
 audio_dac:
   - platform: aic3204
