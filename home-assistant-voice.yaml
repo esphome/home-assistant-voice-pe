@@ -1686,11 +1686,26 @@ voice_assistant:
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+  on_intent_progress:
+    - if:
+        condition:
+          # A nonempty x variable means a streaming TTS url was sent to the media player
+          lambda: 'return !x.empty();'
+        then:
+          - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+          - script.execute: control_leds
+          # Start a script that would potentially enable the stop word if the response is longer than a second
+          - script.execute: activate_stop_word_once
   on_tts_start:
-    - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
-    - script.execute: control_leds
-    # Start a script that would potentially enable the stop word if the response is longer than a second
-    - script.execute: activate_stop_word_once
+    - if:
+        condition:
+          # The intent_progress trigger didn't start the TTS Reponse
+          lambda: 'return id(voice_assistant_phase) != ${voice_assist_replying_phase_id};'
+        then:
+          - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+          - script.execute: control_leds
+          # Start a script that would potentially enable the stop word if the response is longer than a second
+          - script.execute: activate_stop_word_once
   # When the voice assistant ends ...
   on_end:
     - wait_until:
