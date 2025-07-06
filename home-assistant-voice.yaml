@@ -259,23 +259,23 @@ binary_sensor:
       number: GPIO0
       inverted: true
     on_press:
-    - if:
-        condition:
-          switch.is_off: lock_buttons
-        then:
-          - script.execute: control_leds
+      - if:
+          condition:
+            switch.is_off: lock_buttons
+          then:
+            - script.execute: control_leds
     on_release:
-    - if:
-        condition:
-          switch.is_off: lock_buttons
-        then:
-          - script.execute: control_leds
-          # If a factory reset is requested, factory reset on release
-          - if:
-              condition:
-                lambda: return id(factory_reset_requested);
-              then:
-                - button.press: factory_reset_button
+      - if:
+          condition:
+            switch.is_off: lock_buttons
+          then:
+            - script.execute: control_leds
+            # If a factory reset is requested, factory reset on release
+            - if:
+                condition:
+                  lambda: return id(factory_reset_requested);
+                then:
+                  - button.press: factory_reset_button
     on_multi_click:
       # Simple Click:
       #   - Abort "things" in order
