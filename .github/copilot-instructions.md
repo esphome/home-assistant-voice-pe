@@ -88,7 +88,7 @@ Always use `test-elevenlabs.bat` script to ensure proper workflow for testing th
 
 ## Common Pitfalls
 - Always compile before upload - recent changes won't apply without compilation
-- SSL certificate validation failures common in development - use bypass options
 - Component dependencies: microphone/speaker optional but must be handled in code
 - WebSocket connection timeout: ensure proper error handling for network issues
 - ElevenLabs API authentication: requires proper signed URL flow, not direct WebSocket connection
+- You are on Windows, so don't try to use Linux or Unix commands. Use Powershell.

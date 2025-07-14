@@ -7,6 +7,7 @@
 #include <esp_websocket_client.h>
 #include <esp_http_client.h>
 #include <esp_tls.h>
+#include <esp_crt_bundle.h>
 #include <mbedtls/base64.h>
 
 namespace esphome {
@@ -148,7 +149,7 @@ bool ElevenLabsStream::get_signed_url() {
   
   ESP_LOGD(TAG, "Getting signed URL from: %s", url.c_str());
   
-  // Configure HTTP client with SSL certificate verification disabled (INSECURE)
+  // Configure HTTP client with ESP32 built-in certificate bundle
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.timeout_ms = 10000;
@@ -156,18 +157,13 @@ bool ElevenLabsStream::get_signed_url() {
   config.transport_type = HTTP_TRANSPORT_OVER_SSL;
   config.is_async = false;
   
-  // INSECURE: Skip all SSL certificate verification for personal use only
-  config.use_global_ca_store = true;  // Don't use global CA store
-  config.skip_cert_common_name_check = true;  // Skip CN validation
-  config.cert_pem = nullptr;  // No certificate for server verification
-  config.disable_auto_redirect = true;  // Disable redirects
+  // Use ESP32 built-in certificate bundle (recommended for production)
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+  config.use_global_ca_store = false;
+  config.skip_cert_common_name_check = false;
+  config.disable_auto_redirect = true;
   
-  // Additional SSL bypass options for ESP-IDF
-  config.crt_bundle_attach = nullptr;  // Disable certificate bundle
-  config.client_cert_pem = nullptr;  // No client certificate
-  config.client_key_pem = nullptr;   // No client key
-  
-  ESP_LOGD(TAG, "Initializing HTTP client with embedded CA certificate");
+  ESP_LOGD(TAG, "Initializing HTTP client with ESP32 certificate bundle");
   
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) {
@@ -251,7 +247,7 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   
   ESP_LOGI(TAG, "Connecting to WebSocket URL: %s", this->signed_url_.c_str());
   
-  // Configure WebSocket client with SSL certificate verification disabled (INSECURE)
+  // Configure WebSocket client with ESP32 built-in certificate bundle
   esp_websocket_client_config_t ws_cfg = {};
   ws_cfg.uri = this->signed_url_.c_str();
   ws_cfg.buffer_size = 4096;
@@ -260,6 +256,11 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ws_cfg.disable_auto_reconnect = true;
   ws_cfg.user_context = this;  // Pass this instance as context
   ws_cfg.transport = WEBSOCKET_TRANSPORT_OVER_SSL;
+  
+  // Use ESP32 built-in certificate bundle for WebSocket connection
+  ws_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  ws_cfg.use_global_ca_store = false;
+  ws_cfg.skip_cert_common_name_check = false;
   
   // Initialize WebSocket client
   this->websocket_client_ = esp_websocket_client_init(&ws_cfg);
