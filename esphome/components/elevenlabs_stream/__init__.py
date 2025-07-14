@@ -65,8 +65,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(ElevenLabsStream),
         cv.Required(CONF_AGENT_ID): cv.templatable(cv.string),
         cv.Optional(CONF_API_KEY): cv.templatable(cv.string),
-        cv.Required(CONF_MICROPHONE): cv.use_id(cg.Parented),
-        cv.Required(CONF_SPEAKER): cv.use_id(cg.Parented),
+        cv.Optional(CONF_MICROPHONE): cv.use_id(cg.Parented),  # Made optional for testing
+        cv.Optional(CONF_SPEAKER): cv.use_id(cg.Parented),    # Made optional for testing
         cv.Optional(CONF_ON_START): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamStartTrigger),
@@ -119,13 +119,15 @@ async def to_code(config):
         template_ = await cg.templatable(config[CONF_API_KEY], [], cg.std_string)
         cg.add(var.set_api_key(template_))
 
-    # Set microphone
-    mic = await cg.get_variable(config[CONF_MICROPHONE])
-    cg.add(var.set_microphone(mic))
+    # Set microphone (if provided)
+    if CONF_MICROPHONE in config:
+        mic = await cg.get_variable(config[CONF_MICROPHONE])
+        cg.add(var.set_microphone(mic))
 
-    # Set speaker
-    speaker = await cg.get_variable(config[CONF_SPEAKER])
-    cg.add(var.set_speaker(speaker))
+    # Set speaker (if provided)
+    if CONF_SPEAKER in config:
+        speaker = await cg.get_variable(config[CONF_SPEAKER])
+        cg.add(var.set_speaker(speaker))
 
     # Register triggers
     for conf in config.get(CONF_ON_START, []):

@@ -3,19 +3,27 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/helpers.h"
-#include "esphome/components/microphone/microphone.h"
-#include "esphome/components/speaker/speaker.h"
 #include "esphome/components/network/ip_address.h"
 #include "esphome/components/json/json_util.h"
 
 #ifdef USE_ESP32
 #include <WiFi.h>
-#include <WiFiClient.h>
+#include <esp_websocket_client.h>
+#include <esp_http_client.h>
 #include <mbedtls/base64.h>
 #endif
 
 namespace esphome {
+
+// Forward declarations for optional components
+namespace microphone { class Microphone; }
+namespace speaker { class Speaker; }
+
 namespace elevenlabs_stream {
+
+// Forward declarations
+class ElevenLabsStream;
+void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 enum class StreamState {
   IDLE,
@@ -54,6 +62,9 @@ class ElevenLabsStream : public Component {
   void add_on_error_trigger(Trigger<std::string> *trigger) { this->on_error_triggers_.push_back(trigger); }
 
  protected:
+  friend void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+  
+  bool get_signed_url();
   void connect_to_elevenlabs();
   void disconnect_from_elevenlabs();
   void send_websocket_message(const std::string &message);
@@ -77,10 +88,10 @@ class ElevenLabsStream : public Component {
   StreamState state_{StreamState::IDLE};
 
 #ifdef USE_ESP32
-  WiFiClient wifi_client_;
+  esp_websocket_client_handle_t websocket_client_{nullptr};
   bool websocket_connected_{false};
-  std::string websocket_key_;
   std::string conversation_id_;
+  std::string signed_url_;
 #endif
 
   // Triggers
