@@ -1,6 +1,7 @@
 #include "elevenlabs_stream.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
 #include "esphome/components/json/json_util.h"
 
 #ifdef USE_ESP32

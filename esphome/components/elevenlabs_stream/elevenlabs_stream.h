@@ -7,9 +7,9 @@
 #include "esphome/components/json/json_util.h"
 
 #ifdef USE_ESP32
-#include <WiFi.h>
 #include <esp_websocket_client.h>
 #include <esp_http_client.h>
+#include <esp_timer.h>
 #include <mbedtls/base64.h>
 #endif
 
