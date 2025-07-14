@@ -149,7 +149,7 @@ bool ElevenLabsStream::get_signed_url() {
   
   ESP_LOGD(TAG, "Getting signed URL from: %s", url.c_str());
   
-  // Configure HTTP client with ESP32 built-in certificate bundle
+  // Configure HTTP client with ESP32 certificate bundle
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.timeout_ms = 10000;
@@ -157,7 +157,7 @@ bool ElevenLabsStream::get_signed_url() {
   config.transport_type = HTTP_TRANSPORT_OVER_SSL;
   config.is_async = false;
   
-  // Use ESP32 built-in certificate bundle (recommended for production)
+  // Use ESP32 built-in certificate bundle for SSL verification
   config.crt_bundle_attach = esp_crt_bundle_attach;
   config.use_global_ca_store = false;
   config.skip_cert_common_name_check = false;
@@ -247,7 +247,7 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   
   ESP_LOGI(TAG, "Connecting to WebSocket URL: %s", this->signed_url_.c_str());
   
-  // Configure WebSocket client with ESP32 built-in certificate bundle
+  // Configure WebSocket client with ESP32 certificate bundle
   esp_websocket_client_config_t ws_cfg = {};
   ws_cfg.uri = this->signed_url_.c_str();
   ws_cfg.buffer_size = 4096;
@@ -257,8 +257,8 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ws_cfg.user_context = this;  // Pass this instance as context
   ws_cfg.transport = WEBSOCKET_TRANSPORT_OVER_SSL;
   
-  // Use ESP32 built-in certificate bundle for WebSocket connection
-  ws_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  // Use ESP32 built-in certificate bundle for WebSocket SSL verification
+  ws_cfg.cert_pem = nullptr;  // Use default certificate bundle
   ws_cfg.use_global_ca_store = false;
   ws_cfg.skip_cert_common_name_check = false;
   

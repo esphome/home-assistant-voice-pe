@@ -1,1 +1,1 @@
-python3 -m esphome run --device COM4 test-elevenlabs.yaml
+python -m esphome run --device COM4 test-elevenlabs.yaml
