@@ -157,9 +157,15 @@ bool ElevenLabsStream::get_signed_url() {
   config.is_async = false;
   
   // INSECURE: Skip all SSL certificate verification for personal use only
-  config.use_global_ca_store = false;  // Don't use global CA store
+  config.use_global_ca_store = true;  // Don't use global CA store
   config.skip_cert_common_name_check = true;  // Skip CN validation
   config.cert_pem = nullptr;  // No certificate for server verification
+  config.disable_auto_redirect = true;  // Disable redirects
+  
+  // Additional SSL bypass options for ESP-IDF
+  config.crt_bundle_attach = nullptr;  // Disable certificate bundle
+  config.client_cert_pem = nullptr;  // No client certificate
+  config.client_key_pem = nullptr;   // No client key
   
   ESP_LOGD(TAG, "Initializing HTTP client with embedded CA certificate");
   

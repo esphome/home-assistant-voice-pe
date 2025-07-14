@@ -23,9 +23,15 @@ This is a fork of the Home Assistant Voice Preview Edition firmware that integra
 - Implements ElevenLabs signed URL authentication flow (HTTPS → WSS)
 
 ## Critical Development Workflows
+**CRITICAL:** Always use web search as much as you can for *any* request, before asking Copilot. This is a complex project with many moving parts, and web search can provide the most up-to-date information.
 
 ### Build & Deploy Process
-Always use `test-elevenlabs.sh` script to ensure proper workflow for testing.
+Always use `test-elevenlabs.bat` script to ensure proper workflow for testing the application, including compilation and upload to the ESP32-S3 device. This script handles:
+- Compiling the ESPHome configuration
+- Uploading the firmware to the device
+- Running the test configuration
+- Ensuring the correct COM port is used for the ESP32-S3 device
+- Logging output for debugging
 
 ### Component Development Pattern
 1. Modify C++ component files (`elevenlabs_stream.cpp/.h`)
@@ -75,11 +81,6 @@ Always use `test-elevenlabs.sh` script to ensure proper workflow for testing.
 - Component tag: `"elevenlabs_stream"`
 - Monitor logs during development for connection issues and SSL errors
 
-### SSL/Certificate Management
-- Development: Use certificate bypass options for testing
-- Production: Include proper SSL certificate validation
-- Common issue: SSL handshake failures require certificate chain verification
-
 ### Audio Handling
 - I2S audio configuration in YAML, C++ handles streaming
 - Audio frames sent as binary WebSocket messages
@@ -91,4 +92,3 @@ Always use `test-elevenlabs.sh` script to ensure proper workflow for testing.
 - Component dependencies: microphone/speaker optional but must be handled in code
 - WebSocket connection timeout: ensure proper error handling for network issues
 - ElevenLabs API authentication: requires proper signed URL flow, not direct WebSocket connection
-- You cannot use the web search too much. Use it as much as possible before making decisions / changes or plans.
