@@ -51,6 +51,7 @@ class ElevenLabsStream : public Component {
   bool is_running() const { return this->state_ != StreamState::IDLE; }
   bool is_connected() const { return this->websocket_connected_; }
   StreamState get_state() const { return this->state_; }
+  void handle_microphone_data(const std::vector<uint8_t> &data);
 
   // Triggers
   void add_on_start_trigger(Trigger<> *trigger) { this->on_start_triggers_.push_back(trigger); }
@@ -64,21 +65,22 @@ class ElevenLabsStream : public Component {
  protected:
   friend void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
   
+  // Internal methods
   bool get_signed_url();
   void connect_to_elevenlabs();
   void disconnect_from_elevenlabs();
   void send_websocket_message(const std::string &message);
   void handle_websocket_message(const char *message);
   void handle_websocket_binary(const uint8_t *data, size_t length);
-  void send_audio_chunk(const std::vector<int16_t> &audio_data);
   void handle_audio_response(const uint8_t *data, size_t length);
-  void set_state(StreamState new_state);
   void handle_error(const std::string &error_message);
   void websocket_task();
   void send_conversation_init();
-  void process_websocket_data();
   void capture_and_send_audio();
   void send_ping();
+  void send_audio_chunk(const std::vector<int16_t> &audio_data);
+  void set_state(StreamState new_state);
+  std::vector<uint8_t> decode_base64_audio(const char* base64_data);
 
   std::string agent_id_;
   std::string api_key_;
@@ -92,6 +94,8 @@ class ElevenLabsStream : public Component {
   bool websocket_connected_{false};
   std::string conversation_id_;
   std::string signed_url_;
+  std::string agent_output_audio_format_;
+  std::string user_input_audio_format_;
 #endif
 
   // Triggers
