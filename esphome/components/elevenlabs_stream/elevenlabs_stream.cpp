@@ -155,23 +155,19 @@ bool ElevenLabsStream::get_signed_url() {
     
     ESP_LOGD(TAG, "HTTP response code: %d, content length: %d", status_code, content_length);
     
-    if (status_code == 200) {
-      // Read response data - use different approach for ESP-IDF
-      std::string response_data;
-      char buffer[512];
-      int read_len;
+    if (status_code == 200 && content_length > 0) {
+      // Allocate buffer for response data
+      std::vector<char> buffer(content_length + 1);
       
-      // Read the response in chunks
-      while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer) - 1)) > 0) {
-        buffer[read_len] = '\0';
-        response_data += std::string(buffer);
-      }
+      // Read the response data using esp_http_client_read_response
+      int data_read = esp_http_client_read_response(client, buffer.data(), content_length);
       
-      if (!response_data.empty()) {
-        response = response_data;
+      if (data_read > 0) {
+        buffer[data_read] = '\0';
+        response = std::string(buffer.data(), data_read);
         ESP_LOGI(TAG, "Response: %s", response.c_str());
       } else {
-        ESP_LOGE(TAG, "Failed to read response data");
+        ESP_LOGE(TAG, "Failed to read response data, read: %d", data_read);
       }
     } else {
       ESP_LOGE(TAG, "HTTP request failed with status code: %d", status_code);
