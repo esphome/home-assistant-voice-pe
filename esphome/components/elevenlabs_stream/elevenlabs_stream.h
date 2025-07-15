@@ -74,7 +74,6 @@ class ElevenLabsStream : public Component {
   void handle_websocket_binary(const uint8_t *data, size_t length);
   void handle_audio_response(const uint8_t *data, size_t length);
   void handle_error(const std::string &error_message);
-  void websocket_task();
   void send_conversation_init();
   void capture_and_send_audio();
   void send_ping();
@@ -111,11 +110,16 @@ class ElevenLabsStream : public Component {
   std::vector<int16_t> audio_buffer_;
   std::vector<uint8_t> response_audio_buffer_;
   
-  // Timing
+  // Timing and configuration constants
   uint32_t last_audio_time_{0};
-  uint32_t connection_timeout_{10000};  // 10 seconds
+  uint32_t last_audio_response_time_{0};  // Track when we last received audio from agent
+  uint32_t connection_timeout_{15000};  // Increased to 15 seconds
   uint32_t connection_start_time_{0};
   uint32_t last_heartbeat_{0};
+  
+  // Buffer size limits
+  static constexpr size_t MAX_MESSAGE_BUFFER_SIZE = 100000;  // 100KB
+  static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB
 };
 
 // Actions

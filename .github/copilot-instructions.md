@@ -25,6 +25,8 @@ This is a fork of the Home Assistant Voice Preview Edition firmware that integra
 ## Critical Development Workflows
 **CRITICAL:** Always use web search as much as you can for *any* request, before making any changes. This is to ensure you are using the latest information and best practices. For instance, if asked to solve an SSL error for ESPHome, research the web about that error first. This is just an example - be creative about web research in general.
 
+Never write new documentation (`.md` files or similar) unless explicitly asked to.
+
 ### Build & Deploy Process
 Always use `test-elevenlabs.bat` script to ensure proper workflow for testing the application, including compilation and upload to the ESP32-S3 device. This script handles:
 - Compiling the ESPHome configuration

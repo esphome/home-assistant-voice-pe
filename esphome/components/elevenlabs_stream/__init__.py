@@ -114,7 +114,7 @@ async def to_code(config):
     template_ = await cg.templatable(config[CONF_AGENT_ID], [], cg.std_string)
     cg.add(var.set_agent_id(template_))
 
-    # Set API key if provided
+    # Set API key if provided (mark as secret)
     if CONF_API_KEY in config:
         template_ = await cg.templatable(config[CONF_API_KEY], [], cg.std_string)
         cg.add(var.set_api_key(template_))

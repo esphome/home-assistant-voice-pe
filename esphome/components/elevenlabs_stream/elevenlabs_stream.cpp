@@ -21,13 +21,18 @@ using namespace esphome::json;
 
 static const char* TAG = "elevenlabs_stream";
 
-// Base64 encoding function
+// Base64 encoding function with better error handling
 std::string base64_encode(const uint8_t* data, size_t len) {
+  if (!data || len == 0) {
+    return "";
+  }
+  
   size_t output_len = 0;
   
   // Calculate required buffer size
   int ret = mbedtls_base64_encode(nullptr, 0, &output_len, data, len);
   if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
+    ESP_LOGE(TAG, "Failed to calculate base64 encode buffer size: %d", ret);
     return "";
   }
   
@@ -35,6 +40,7 @@ std::string base64_encode(const uint8_t* data, size_t len) {
   std::string result(output_len, '\0');
   ret = mbedtls_base64_encode(reinterpret_cast<unsigned char*>(&result[0]), output_len, &output_len, data, len);
   if (ret != 0) {
+    ESP_LOGE(TAG, "Failed to encode base64: %d", ret);
     return "";
   }
   
@@ -126,8 +132,18 @@ void ElevenLabsStream::loop() {
     }
   }
   
-  // Send periodic heartbeat
-  if (this->websocket_connected_ && millis() - this->last_heartbeat_ > 30000) {
+  // Handle state transition from SPEAKING back to LISTENING
+  // If we're in SPEAKING state and haven't received audio for a while, go back to LISTENING
+  if (this->state_ == StreamState::SPEAKING && millis() - this->last_audio_response_time_ > 2000) {
+    ESP_LOGD(TAG, "No audio received for 2 seconds, returning to LISTENING state");
+    this->set_state(StreamState::LISTENING);
+    for (auto *trigger : this->on_listening_triggers_) {
+      trigger->trigger();
+    }
+  }
+  
+  // Send periodic heartbeat (increase frequency for better connection reliability)
+  if (this->websocket_connected_ && millis() - this->last_heartbeat_ > 20000) {  // 20 seconds instead of 30
     this->send_ping();
     this->last_heartbeat_ = millis();
   }
@@ -175,8 +191,8 @@ void ElevenLabsStream::stop_stream() {
 bool ElevenLabsStream::get_signed_url() {
   ESP_LOGI(TAG, "Getting signed URL from ElevenLabs...");
   
-  if (this->api_key_.empty() || this->agent_id_.empty()) {
-    ESP_LOGE(TAG, "API key or Agent ID not configured");
+  if (this->agent_id_.empty()) {
+    ESP_LOGE(TAG, "Agent ID not configured");
     return false;
   }
   
@@ -246,8 +262,10 @@ bool ElevenLabsStream::get_signed_url() {
     return false;
   }
   
-  // Set headers
-  esp_http_client_set_header(client, "xi-api-key", this->api_key_.c_str());
+  // Set headers only if API key is provided
+  if (!this->api_key_.empty()) {
+    esp_http_client_set_header(client, "xi-api-key", this->api_key_.c_str());
+  }
   
   ESP_LOGD(TAG, "Sending GET request to signed URL endpoint");
   
@@ -325,6 +343,8 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ws_cfg.disable_auto_reconnect = true;
   ws_cfg.user_context = this;  // Pass this instance as context
   ws_cfg.transport = WEBSOCKET_TRANSPORT_OVER_SSL;
+  ws_cfg.network_timeout_ms = 10000;  // 10 second timeout
+  ws_cfg.reconnect_timeout_ms = 5000;  // 5 second reconnect timeout
   
   // Use ESP32 built-in certificate bundle for WebSocket SSL verification
   ws_cfg.cert_pem = nullptr;  // Use default certificate bundle
@@ -401,16 +421,17 @@ void ElevenLabsStream::set_state(StreamState new_state) {
 }
 
 void ElevenLabsStream::send_websocket_message(const std::string &message) {
-  if (!this->websocket_connected_ || !this->websocket_client_) {
-    ESP_LOGW(TAG, "Cannot send message - WebSocket not connected");
+  if (!this->websocket_connected_ || !this->websocket_client_ || message.empty()) {
+    ESP_LOGW(TAG, "Cannot send message - WebSocket not connected or message empty");
     return;
   }
   
   int sent = esp_websocket_client_send_text(this->websocket_client_, message.c_str(), message.length(), portMAX_DELAY);
   if (sent < 0) {
-    ESP_LOGE(TAG, "Failed to send WebSocket message");
+    ESP_LOGE(TAG, "Failed to send WebSocket message: %d", sent);
   } else {
-    ESP_LOGD(TAG, "Sent WebSocket message: %s", message.c_str());
+    ESP_LOGV(TAG, "Sent WebSocket message (%d bytes): %s", sent, 
+             message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
   }
 }
 
@@ -524,17 +545,24 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
           JsonObject audio = root["audio_event"];
           if (audio) {
             const char* audio_base64 = audio["audio_base_64"];
-            int event_id = audio["event_id"] | 0;
-            
-            if (audio_base64) {
-              ESP_LOGD(TAG, "Received audio data (base64 length: %d, event_id: %d)", strlen(audio_base64), event_id);
-              
-              // Decode base64 audio data and play it
-              std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
-              if (!audio_data.empty()) {
-                this->handle_audio_response(audio_data.data(), audio_data.size());
+            uint32_t event_id = audio["event_id"] | 0;              if (audio_base64) {
+                ESP_LOGD(TAG, "Received audio data (base64 length: %d, event_id: %d)", strlen(audio_base64), event_id);
+                
+                // Update timing for state management
+                this->last_audio_response_time_ = millis();
+                
+                // Decode base64 audio data and play it
+                std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
+                if (!audio_data.empty()) {
+                  // Agent is speaking - change state
+                  this->set_state(StreamState::SPEAKING);
+                  for (auto *trigger : this->on_speaking_triggers_) {
+                    trigger->trigger();
+                  }
+                  
+                  this->handle_audio_response(audio_data.data(), audio_data.size());
+                }
               }
-            }
           }
           return true;
         }
@@ -601,15 +629,6 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
           return true;
         }
         
-        // Handle conversation_interruption_event
-        if (strcmp(type, "conversation_interruption_event") == 0) {
-          ESP_LOGD(TAG, "Conversation interruption event received");
-          if (this->speaker_) {
-            this->speaker_->stop();
-          }
-          return true;
-        }
-        
         // Handle agent_response_correction
         if (strcmp(type, "agent_response_correction") == 0) {
           JsonObject correction = root["agent_response_correction_event"];
@@ -622,28 +641,12 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
           return true;
         }
         
-        // Handle session_started
-        if (strcmp(type, "session_started") == 0) {
-          ESP_LOGD(TAG, "Session started");
-          return true;
-        }
-        
-        // Handle session_ended
-        if (strcmp(type, "session_ended") == 0) {
-          ESP_LOGD(TAG, "Session ended");
-          this->set_state(StreamState::IDLE);
-          for (auto *trigger : this->on_end_triggers_) {
-            trigger->trigger();
-          }
-          return true;
-        }
-        
         // Handle ping with proper response
         if (strcmp(type, "ping") == 0) {
           JsonObject ping = root["ping_event"];
           if (ping) {
-            int event_id = ping["event_id"] | 0;
-            int ping_ms = ping["ping_ms"] | 0;
+            uint32_t event_id = ping["event_id"] | 0;
+            uint32_t ping_ms = ping["ping_ms"] | 0;
             
             ESP_LOGD(TAG, "Ping received: event_id=%d, ping_ms=%d", event_id, ping_ms);
             
@@ -653,49 +656,6 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
               root["event_id"] = event_id;
             });
             this->send_websocket_message(pong_message);
-          }
-          return true;
-        }
-        
-        // Handle conversation state changes
-        if (strcmp(type, "conversation_initiation_client_data_received") == 0) {
-          ESP_LOGD(TAG, "Conversation initiation data received");
-          return true;
-        }
-        
-        if (strcmp(type, "user_turn_started") == 0) {
-          ESP_LOGD(TAG, "User turn started");
-          this->set_state(StreamState::SPEAKING);
-          for (auto *trigger : this->on_speaking_triggers_) {
-            trigger->trigger();
-          }
-          return true;
-        }
-        
-        if (strcmp(type, "user_turn_ended") == 0) {
-          ESP_LOGD(TAG, "User turn ended");
-          this->set_state(StreamState::LISTENING);
-          for (auto *trigger : this->on_listening_triggers_) {
-            trigger->trigger();
-          }
-          return true;
-        }
-        
-        if (strcmp(type, "agent_turn_started") == 0) {
-          ESP_LOGD(TAG, "Agent turn started");
-          return true;
-        }
-        
-        if (strcmp(type, "agent_turn_ended") == 0) {
-          ESP_LOGD(TAG, "Agent turn ended");
-          return true;
-        }
-        
-        if (strcmp(type, "conversation_ended") == 0) {
-          ESP_LOGD(TAG, "Conversation ended");
-          this->set_state(StreamState::IDLE);
-          for (auto *trigger : this->on_end_triggers_) {
-            trigger->trigger();
           }
           return true;
         }
@@ -725,14 +685,7 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
           return true;
         }
         
-        // Handle error
-        if (strcmp(type, "error") == 0) {
-          const char* error_msg = root["message"];
-          this->handle_error(error_msg ? error_msg : "Unknown ElevenLabs error");
-          return true;
-        }
-        
-        // Log unknown message types
+        // Log unknown message types for debugging
         ESP_LOGW(TAG, "Unknown message type: %s", type);
         return true;
       });
@@ -753,39 +706,47 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
     message_buffer = message_buffer.substr(start);
   }
   
-  // Prevent buffer from growing too large
-  if (message_buffer.length() > 1000000) {
+  // Prevent buffer from growing too large (reduce memory usage)
+  if (message_buffer.length() > 100000) {  // Reduced from 1MB to 100KB
     ESP_LOGW(TAG, "Message buffer too large, clearing");
     message_buffer.clear();
   }
 }
 
 void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t length) {
-  ESP_LOGD(TAG, "Received binary audio data: %d bytes", length);
-  // Placeholder - would handle audio data
+  ESP_LOGD(TAG, "Received binary data: %d bytes", length);
+  // ElevenLabs API uses JSON with base64 encoded audio, not binary frames
+  // This method is kept for completeness but may not be used by ElevenLabs
+  ESP_LOGW(TAG, "Binary WebSocket frames not expected in ElevenLabs protocol");
 }
 
 void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length) {
   ESP_LOGD(TAG, "Playing audio response: %d bytes", length);
   
-  if (this->speaker_ && length > 0) {
-    // Start speaker if not running
-    if (!this->speaker_->is_running()) {
-      ESP_LOGD(TAG, "Starting speaker");
-      this->speaker_->start();
-    }
-    
-    // Play audio through speaker - make a copy to ensure data lifetime
-    std::vector<uint8_t> audio_copy(data, data + length);
-    this->speaker_->play(audio_copy.data(), audio_copy.size());
-    ESP_LOGD(TAG, "Audio sent to speaker");
-  } else {
-    if (!this->speaker_) {
-      ESP_LOGD(TAG, "No speaker configured");
-    } else {
-      ESP_LOGD(TAG, "No audio data to play");
-    }
+  if (!data || length == 0) {
+    ESP_LOGD(TAG, "No audio data to play");
+    return;
   }
+  
+  if (!this->speaker_) {
+    ESP_LOGD(TAG, "No speaker configured");
+    return;
+  }
+  
+  // Start speaker if not running
+  if (!this->speaker_->is_running()) {
+    ESP_LOGD(TAG, "Starting speaker");
+    this->speaker_->start();
+  }
+  
+  // Play audio through speaker - make a copy to ensure data lifetime
+  std::vector<uint8_t> audio_copy(data, data + length);
+  this->speaker_->play(audio_copy.data(), audio_copy.size());
+  ESP_LOGD(TAG, "Audio sent to speaker");
+  
+  // Note: We don't immediately return to LISTENING state here since
+  // there might be more audio chunks coming. The state will be managed
+  // by the timing of audio events and VAD scores.
 }
 
 void ElevenLabsStream::handle_error(const std::string &error_message) {
@@ -808,14 +769,25 @@ void ElevenLabsStream::send_conversation_init() {
     
     // Add conversation_config_override as specified in the documentation
     JsonObject conversation_config = root["conversation_config_override"].to<JsonObject>();
-    conversation_config["agent_id"] = this->agent_id_;
+    
+    // Agent configuration
+    JsonObject agent = conversation_config["agent"].to<JsonObject>();
+    
+    // TTS configuration
+    JsonObject tts = conversation_config["tts"].to<JsonObject>();
+    
+    // Audio interface configuration
     conversation_config["audio_interface"] = "pcm_16000";
     
-    // Optional: Add other conversation config parameters
-    // conversation_config["turn_detection"]["type"] = "server_vad";
-    // conversation_config["language"] = "en";
+    // Turn detection configuration
+    JsonObject turn_detection = conversation_config["turn_detection"].to<JsonObject>();
+    turn_detection["type"] = "server_vad";
+    
+    // Language configuration
+    conversation_config["language"] = "en";
   });
   
+  ESP_LOGD(TAG, "Sending conversation init: %s", message.c_str());
   this->send_websocket_message(message);
 }
 
@@ -837,10 +809,10 @@ void ElevenLabsStream::capture_and_send_audio() {
 
 void ElevenLabsStream::send_ping() {
   // Send WebSocket ping frame using ESPHome's JSON builder with proper event_id and timing
-  static int ping_event_id = 1;
+  static uint32_t ping_event_id = 1;
   uint32_t ping_ms = millis();
   
-  int current_event_id = ping_event_id++;
+  uint32_t current_event_id = ping_event_id++;
   
   std::string message = json::build_json([current_event_id, ping_ms](JsonObject root) {
     root["type"] = "ping";
@@ -865,6 +837,11 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
   // Encode audio as base64 for WebSocket transmission
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
   
+  if (audio_base64.empty()) {
+    ESP_LOGE(TAG, "Failed to encode audio data to base64");
+    return;
+  }
+  
   // Send as user_audio_chunk according to protocol
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
@@ -877,7 +854,13 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
-  if (this->state_ != StreamState::LISTENING || !this->websocket_connected_) {
+  if (this->state_ != StreamState::LISTENING || !this->websocket_connected_ || data.empty()) {
+    return;
+  }
+  
+  // Ensure data size is even (each sample is 2 bytes)
+  if (data.size() % 2 != 0) {
+    ESP_LOGW(TAG, "Received odd number of bytes for int16_t samples: %d", data.size());
     return;
   }
   
@@ -925,12 +908,18 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       
     case WEBSOCKET_EVENT_DATA:
       if (data->op_code == 0x01) { // Text frame
-        std::string message(data->data_ptr, data->data_len);
-        ESP_LOGD(TAG, "WebSocket text message: %s", message.c_str());
-        stream->handle_websocket_message(message.c_str());
+        // Ensure null-terminated string
+        if (data->data_len > 0) {
+          std::string message(data->data_ptr, data->data_len);
+          ESP_LOGV(TAG, "WebSocket text message: %s", 
+                   message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
+          stream->handle_websocket_message(message.c_str());
+        }
       } else if (data->op_code == 0x02) { // Binary frame
         ESP_LOGD(TAG, "WebSocket binary data: %d bytes", data->data_len);
-        stream->handle_websocket_binary((const uint8_t*)data->data_ptr, data->data_len);
+        if (data->data_len > 0) {
+          stream->handle_websocket_binary((const uint8_t*)data->data_ptr, data->data_len);
+        }
       }
       break;
       
