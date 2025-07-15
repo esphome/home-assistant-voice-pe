@@ -155,21 +155,23 @@ bool ElevenLabsStream::get_signed_url() {
     
     ESP_LOGD(TAG, "HTTP response code: %d, content length: %d", status_code, content_length);
     
-    if (status_code == 200 && content_length > 0) {
-      // Read response data
-      char *buffer = (char*)malloc(content_length + 1);
-      if (buffer) {
-        int read_len = esp_http_client_read_response(client, buffer, content_length);
-        if (read_len > 0) {
-          buffer[read_len] = '\0';
-          response = std::string(buffer);
-          ESP_LOGI(TAG, "Response: %s", response.c_str());
-        } else {
-          ESP_LOGE(TAG, "Failed to read response data");
-        }
-        free(buffer);
+    if (status_code == 200) {
+      // Read response data - use different approach for ESP-IDF
+      std::string response_data;
+      char buffer[512];
+      int read_len;
+      
+      // Read the response in chunks
+      while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[read_len] = '\0';
+        response_data += std::string(buffer);
+      }
+      
+      if (!response_data.empty()) {
+        response = response_data;
+        ESP_LOGI(TAG, "Response: %s", response.c_str());
       } else {
-        ESP_LOGE(TAG, "Failed to allocate buffer for response");
+        ESP_LOGE(TAG, "Failed to read response data");
       }
     } else {
       ESP_LOGE(TAG, "HTTP request failed with status code: %d", status_code);
@@ -182,25 +184,26 @@ bool ElevenLabsStream::get_signed_url() {
   
   if (!response.empty()) {
     ESP_LOGD(TAG, "Parsing JSON response...");
-    // Parse JSON response to get signed_url
-    // Simple parsing - look for "signed_url":"..." pattern
-    size_t start = response.find("\"signed_url\":\"");
-    if (start != std::string::npos) {
-      start += 14; // Length of "signed_url":"
-      size_t end = response.find("\"", start);
-      if (end != std::string::npos) {
-        std::string signed_url = response.substr(start, end - start);
-        ESP_LOGI(TAG, "Extracted signed URL: %s", signed_url.c_str());
-        this->signed_url_ = signed_url;
-        ESP_LOGI(TAG, "Got signed URL successfully");
+    
+    // Parse JSON response using ESPHome's JSON utility
+    bool parse_success = json::parse_json(response, [this](JsonObject root) -> bool {
+      const char* signed_url = root["signed_url"];
+      if (signed_url) {
+        this->signed_url_ = std::string(signed_url);
+        ESP_LOGI(TAG, "Extracted signed URL: %s", this->signed_url_.c_str());
         return true;
       } else {
-        ESP_LOGE(TAG, "Could not find end quote for signed_url");
+        ESP_LOGE(TAG, "signed_url field not found in response");
+        return false;
       }
+    });
+    
+    if (parse_success && !this->signed_url_.empty()) {
+      ESP_LOGI(TAG, "Got signed URL successfully");
+      return true;
     } else {
-      ESP_LOGE(TAG, "Could not find signed_url field in response");
+      ESP_LOGE(TAG, "Failed to parse JSON response or extract signed_url");
     }
-    ESP_LOGE(TAG, "Failed to extract signed_url from response");
   } else {
     ESP_LOGE(TAG, "Response is empty");
   }
