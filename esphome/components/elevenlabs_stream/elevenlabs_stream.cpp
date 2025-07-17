@@ -1,4 +1,5 @@
 #include "elevenlabs_stream.h"
+#include "ws_big_reassembler.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
@@ -121,14 +122,6 @@ void ElevenLabsStream::loop() {
     if (millis() - this->connection_start_time_ > this->connection_timeout_) {
       this->handle_error("Connection timeout");
       return;
-    }
-  }
-  
-  // Handle microphone audio when listening
-  if (this->state_ == StreamState::LISTENING && this->microphone_) {
-    if (millis() - this->last_audio_time_ > 100) { // Send audio every 100ms
-      this->capture_and_send_audio();
-      this->last_audio_time_ = millis();
     }
   }
   
@@ -436,60 +429,21 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
 }
 
 void ElevenLabsStream::handle_websocket_message(const char *message) {
-  ESP_LOGD(TAG, "Received WebSocket message: %s", message);
+  if (!message || strlen(message) == 0) {
+    ESP_LOGW(TAG, "Received empty WebSocket message");
+    return;
+  }
   
-  // Buffer incomplete messages
-  static std::string message_buffer;
-  message_buffer += message;
+  size_t message_len = strlen(message);
+  ESP_LOGD(TAG, "Received WebSocket message (%zu bytes): %s", message_len,
+           message_len > 200 ? (std::string(message, 200) + "...").c_str() : message);
   
-  // Try to parse complete JSON objects
-  size_t start = 0;
-  while (start < message_buffer.length()) {
-    // Find the end of a JSON object
-    size_t brace_count = 0;
-    size_t end = start;
-    bool in_string = false;
-    bool escaped = false;
-    
-    for (size_t i = start; i < message_buffer.length(); i++) {
-      char c = message_buffer[i];
-      
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      
-      if (c == '\\' && in_string) {
-        escaped = true;
-        continue;
-      }
-      
-      if (c == '"') {
-        in_string = !in_string;
-        continue;
-      }
-      
-      if (!in_string) {
-        if (c == '{') {
-          brace_count++;
-        } else if (c == '}') {
-          brace_count--;
-          if (brace_count == 0) {
-            end = i + 1;
-            break;
-          }
-        }
-      }
-    }
-    
-    // If we found a complete JSON object
-    if (brace_count == 0 && end > start) {
-      std::string json_message = message_buffer.substr(start, end - start);
-      ESP_LOGD(TAG, "Processing complete JSON: %s", json_message.length() > 200 ? 
-               (json_message.substr(0, 200) + "...").c_str() : json_message.c_str());
-      
-      // Parse JSON message using ESPHome's JSON utility
-      bool parse_success = json::parse_json(json_message, [this](JsonObject root) -> bool {
+  // The ESP WebSocket client provides complete messages, so process directly
+  this->parse_json_message(message);
+}
+
+void ElevenLabsStream::parse_json_message(const char *message) {
+  bool parse_success = json::parse_json(message, [this](JsonObject root) -> bool {
         const char* type = root["type"];
         if (!type) {
           ESP_LOGW(TAG, "Message missing type field");
@@ -545,13 +499,19 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
           JsonObject audio = root["audio_event"];
           if (audio) {
             const char* audio_base64 = audio["audio_base_64"];
-            uint32_t event_id = audio["event_id"] | 0;              if (audio_base64) {
-                ESP_LOGD(TAG, "Received audio data (base64 length: %d, event_id: %d)", strlen(audio_base64), event_id);
-                
-                // Update timing for state management
-                this->last_audio_response_time_ = millis();
-                
-                // Decode base64 audio data and play it
+            uint32_t event_id = audio["event_id"] | 0;
+            
+            if (audio_base64) {
+              size_t base64_len = strlen(audio_base64);
+              ESP_LOGD(TAG, "Received audio data (base64 length: %zu, event_id: %d)", base64_len, event_id);
+              
+              // Update timing for state management
+              this->last_audio_response_time_ = millis();
+              
+              // Process audio chunks immediately for better real-time performance
+              // Skip empty or very small chunks
+              if (base64_len > 4) {
+                // Decode base64 audio data and play it immediately
                 std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
                 if (!audio_data.empty()) {
                   // Agent is speaking - change state
@@ -560,9 +520,11 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
                     trigger->trigger();
                   }
                   
+                  // Play audio immediately to reduce latency
                   this->handle_audio_response(audio_data.data(), audio_data.size());
                 }
               }
+            }
           }
           return true;
         }
@@ -691,26 +653,8 @@ void ElevenLabsStream::handle_websocket_message(const char *message) {
       });
       
       if (!parse_success) {
-        ESP_LOGE(TAG, "Failed to parse JSON message: %s", json_message.c_str());
+        ESP_LOGE(TAG, "Failed to parse JSON message: %s", message);
       }
-      
-      start = end;
-    } else {
-      // Incomplete message, keep it in buffer
-      break;
-    }
-  }
-  
-  // Remove processed messages from buffer
-  if (start > 0) {
-    message_buffer = message_buffer.substr(start);
-  }
-  
-  // Prevent buffer from growing too large (reduce memory usage)
-  if (message_buffer.length() > 100000) {  // Reduced from 1MB to 100KB
-    ESP_LOGW(TAG, "Message buffer too large, clearing");
-    message_buffer.clear();
-  }
 }
 
 void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t length) {
@@ -758,10 +702,6 @@ void ElevenLabsStream::handle_error(const std::string &error_message) {
   }
 }
 
-void ElevenLabsStream::websocket_task() {
-  // This method is called from the loop to handle WebSocket communication
-}
-
 void ElevenLabsStream::send_conversation_init() {
   // Send initial conversation setup message using ESPHome's JSON builder
   std::string message = json::build_json([this](JsonObject root) {
@@ -789,22 +729,6 @@ void ElevenLabsStream::send_conversation_init() {
   
   ESP_LOGD(TAG, "Sending conversation init: %s", message.c_str());
   this->send_websocket_message(message);
-}
-
-void ElevenLabsStream::capture_and_send_audio() {
-  if (!this->microphone_) {
-    return;
-  }
-  
-  // Check if microphone is capturing
-  if (!this->microphone_->is_running()) {
-    ESP_LOGD(TAG, "Starting microphone capture");
-    this->microphone_->start();
-    return;
-  }
-  
-  // Note: Audio data will be sent via the on_data callback
-  // This method is called periodically to ensure microphone is running
 }
 
 void ElevenLabsStream::send_ping() {
@@ -907,19 +831,55 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       break;
       
     case WEBSOCKET_EVENT_DATA:
+      ESP_LOGD(TAG, "WebSocket data: opcode=%d, payload_len=%d, data_len=%d, payload_offset=%d", 
+               data->op_code, data->payload_len, data->data_len, data->payload_offset);
+      
+      if (data->op_code == 0x08) { // Close frame
+        if (data->data_len >= 2) {
+          uint16_t close_code = (data->data_ptr[0] << 8) | data->data_ptr[1];
+          ESP_LOGW(TAG, "WebSocket close frame received with code=%d", close_code);
+        } else {
+          ESP_LOGW(TAG, "WebSocket close frame received");
+        }
+        // Handle close frame - this will trigger WEBSOCKET_EVENT_DISCONNECTED
+        break;
+      }
+      
       if (data->op_code == 0x01) { // Text frame
-        // Ensure null-terminated string
+        // Handle text messages with robust fragmentation support using reassembler
         if (data->data_len > 0) {
-          std::string message(data->data_ptr, data->data_len);
-          ESP_LOGV(TAG, "WebSocket text message: %s", 
-                   message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
-          stream->handle_websocket_message(message.c_str());
+          // Use the reassembler to handle fragmentation
+          bool complete = stream->reassembler_.add(data);
+          
+          ESP_LOGD(TAG, "Message fragment: offset=%d, len=%d, total=%d, fin=%d, complete=%d", 
+                   data->payload_offset, data->data_len, data->payload_len, data->fin, complete);
+          
+          if (complete) {
+            // Get the complete message - avoid large memory allocation by processing as C-string
+            std::vector<uint8_t> message_bytes = stream->reassembler_.take();
+            
+            if (!message_bytes.empty()) {
+              // Add null terminator to make it a valid C-string
+              message_bytes.push_back('\0');
+              
+              // Convert to string and process
+              std::string message(reinterpret_cast<const char*>(message_bytes.data()));
+              ESP_LOGD(TAG, "Complete message assembled (%zu bytes): %s", 
+                       message.length(), 
+                       message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
+              
+              // Process complete message
+              stream->handle_websocket_message(message.c_str());
+            }
+          }
         }
       } else if (data->op_code == 0x02) { // Binary frame
         ESP_LOGD(TAG, "WebSocket binary data: %d bytes", data->data_len);
         if (data->data_len > 0) {
           stream->handle_websocket_binary((const uint8_t*)data->data_ptr, data->data_len);
         }
+      } else {
+        ESP_LOGW(TAG, "Unsupported WebSocket opcode: 0x%02x", data->op_code);
       }
       break;
       
