@@ -120,7 +120,7 @@ class ElevenLabsStream : public Component {
   // Timing and configuration constants
   uint32_t last_audio_time_{0};
   uint32_t last_audio_response_time_{0};  // Track when we last received audio from agent
-  uint32_t connection_timeout_{15000};  // Increased to 15 seconds
+  uint32_t connection_timeout_{10000};  // Reduced to 10 seconds
   uint32_t connection_start_time_{0};
   uint32_t last_heartbeat_{0};
   static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB

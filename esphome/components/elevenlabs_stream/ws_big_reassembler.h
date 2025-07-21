@@ -10,11 +10,11 @@
 class WsBigReassembler {
     static constexpr size_t npos = SIZE_MAX;
 public:
-    explicit WsBigReassembler(size_t maxBytes = 1*1024*1024)
+    explicit WsBigReassembler(size_t maxBytes = 256*1024)  // Reduced from 1MB to 256KB
         : kMax(maxBytes)
     {
         buf_ = static_cast<uint8_t*>(
-            heap_caps_malloc(kMax, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+            heap_caps_malloc(kMax, MALLOC_CAP_SPIRAM));
         assert(buf_ && "PSRAM alloc failed");
     }
     ~WsBigReassembler() { if (buf_) free(buf_); }
@@ -34,25 +34,28 @@ public:
         
         ESP_LOGD("ws_big_reassembler", "Taking complete message of size %zu", total_);
         
-        // Allocate result buffer from PSRAM
-        uint8_t* resultBuffer = static_cast<uint8_t*>(heap_caps_malloc(total_, MALLOC_CAP_SPIRAM));
-        if (!resultBuffer) {
-            ESP_LOGE("ws_big_reassembler", "Failed to allocate result buffer of size %zu", total_);
+        // For very large messages, skip creating a vector copy to avoid OOM
+        if (total_ > 32768) {  // 32KB threshold
+            ESP_LOGW("ws_big_reassembler", "Message too large (%zu bytes), returning empty", total_);
+            reset();
             return out;
         }
         
-        // Copy the complete message to result buffer
-        memcpy(resultBuffer, buf_, total_);
+        // Reserve capacity to avoid multiple allocations
+        out.reserve(total_);
         
-        // Create vector from the buffer
-        out.assign(resultBuffer, resultBuffer + total_);
-        
-        // Free the temporary buffer
-        heap_caps_free(resultBuffer);
+        // Copy data directly without intermediate buffer allocation
+        out.assign(buf_, buf_ + total_);
         
         reset();
         return out;
     }
+
+    // Helper methods for direct buffer access
+    bool isReady() const { return finSeen_ && isContiguous(); }
+    const uint8_t* getBuffer() const { return isReady() ? buf_ : nullptr; }
+    size_t getSize() const { return isReady() ? total_ : 0; }
+    void reset() { ranges_.clear(); total_ = npos; finSeen_ = false; }
 
 private:
     bool isContiguous() const {
@@ -64,7 +67,6 @@ private:
         return total_ != npos && next == total_;
     }
     bool abort() { reset(); return false; }
-    void reset() { ranges_.clear(); total_ = npos; finSeen_ = false; }
 
     const size_t kMax;
     uint8_t* buf_;

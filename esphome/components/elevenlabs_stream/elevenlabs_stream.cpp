@@ -116,6 +116,13 @@ void ElevenLabsStream::dump_config() {
 }
 
 void ElevenLabsStream::loop() {
+  // Feed watchdog regularly during operation
+  static uint32_t last_watchdog_feed = 0;
+  if (millis() - last_watchdog_feed > 1000) { // Feed every second
+    esp_task_wdt_reset();
+    last_watchdog_feed = millis();
+  }
+  
   // Handle connection state
   if (this->state_ == StreamState::CONNECTING) {
     // Check for connection timeout
@@ -203,7 +210,7 @@ bool ElevenLabsStream::get_signed_url() {
   // Configure HTTP client with ESP32 certificate bundle
   esp_http_client_config_t config = {};
   config.url = url.c_str();
-  config.timeout_ms = 5000;  // Reduce timeout to avoid watchdog
+  config.timeout_ms = 3000;  // Reduced from 5000 to 3000ms
   config.method = HTTP_METHOD_GET;
   config.transport_type = HTTP_TRANSPORT_OVER_SSL;
   config.is_async = false;
@@ -221,6 +228,10 @@ bool ElevenLabsStream::get_signed_url() {
     ElevenLabsStream *stream = static_cast<ElevenLabsStream*>(evt->user_data);
     
     switch (evt->event_id) {
+      case HTTP_EVENT_ON_CONNECTED:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+        esp_task_wdt_reset();
+        break;
       case HTTP_EVENT_ON_DATA:
         ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
         if (evt->data_len > 0) {
@@ -233,12 +244,15 @@ bool ElevenLabsStream::get_signed_url() {
         break;
       case HTTP_EVENT_ON_FINISH:
         ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
+        esp_task_wdt_reset();
         break;
       case HTTP_EVENT_ERROR:
         ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
+        esp_task_wdt_reset();
         break;
       case HTTP_EVENT_DISCONNECTED:
         ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
+        esp_task_wdt_reset();
         break;
       default:
         break;
@@ -262,11 +276,14 @@ bool ElevenLabsStream::get_signed_url() {
   
   ESP_LOGD(TAG, "Sending GET request to signed URL endpoint");
   
-  // Feed watchdog before making HTTP request
+  // Feed watchdog before and during HTTP request
   esp_task_wdt_reset();
   
-  // Perform the request
+  // Perform the request with timeout handling
   esp_err_t err = esp_http_client_perform(client);
+  
+  // Feed watchdog after request completion
+  esp_task_wdt_reset();
   
   std::string response = "";
   
@@ -855,7 +872,7 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                    data->payload_offset, data->data_len, data->payload_len, data->fin, complete);
           
           if (complete) {
-            // Get the complete message - avoid large memory allocation by processing as C-string
+            // Get the complete message - handle large messages more efficiently
             std::vector<uint8_t> message_bytes = stream->reassembler_.take();
             
             if (!message_bytes.empty()) {
@@ -870,6 +887,43 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               
               // Process complete message
               stream->handle_websocket_message(message.c_str());
+            } else {
+              // Message was too large or failed to allocate - process directly from reassembler buffer
+              if (stream->reassembler_.isReady()) {
+                ESP_LOGW(TAG, "Processing large message directly from buffer");
+                
+                // Get pointer to complete message in reassembler buffer
+                const uint8_t* buffer_ptr = stream->reassembler_.getBuffer();
+                size_t buffer_size = stream->reassembler_.getSize();
+                
+                if (buffer_ptr && buffer_size > 0 && buffer_size < 200000) { // Safety limit
+                  // Create a temporary null-terminated string for processing
+                  char* temp_buffer = (char*)malloc(buffer_size + 1);
+                  if (temp_buffer) {
+                    memcpy(temp_buffer, buffer_ptr, buffer_size);
+                    temp_buffer[buffer_size] = '\0';
+                    
+                    ESP_LOGD(TAG, "Large message processed (%zu bytes): %s", 
+                             buffer_size, 
+                             buffer_size > 200 ? (std::string(temp_buffer, 200) + "...").c_str() : temp_buffer);
+                    
+                    // Process the message
+                    stream->handle_websocket_message(temp_buffer);
+                    
+                    // Free the temporary buffer
+                    free(temp_buffer);
+                  } else {
+                    ESP_LOGE(TAG, "Failed to allocate temporary buffer for large message");
+                  }
+                } else {
+                  ESP_LOGE(TAG, "Large message buffer invalid or too large: ptr=%p, size=%zu", buffer_ptr, buffer_size);
+                }
+                
+                // Reset the reassembler after processing
+                stream->reassembler_.reset();
+              } else {
+                ESP_LOGW(TAG, "Reassembler not ready despite complete flag");
+              }
             }
           }
         }
