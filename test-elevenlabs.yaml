@@ -210,7 +210,7 @@ elevenlabs_stream:
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics
-  speaker: elevenlabs_resampling_speaker
+  speaker: i2s_audio_speaker
   on_connected:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = 1;
