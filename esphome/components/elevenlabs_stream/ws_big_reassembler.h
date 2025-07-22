@@ -26,29 +26,7 @@ public:
 
         if (total_ == npos && e->payload_len) total_ = e->payload_len;
         if (e->fin) finSeen_ = true;
-        return finSeen_ && isContiguous();
-    }
-    std::vector<uint8_t> take() {
-        std::vector<uint8_t> out;
-        if (!isContiguous()) return out;
-        
-        ESP_LOGD("ws_big_reassembler", "Taking complete message of size %zu", total_);
-        
-        // For very large messages, skip creating a vector copy to avoid OOM
-        if (total_ > 32768) {  // 32KB threshold
-            ESP_LOGW("ws_big_reassembler", "Message too large (%zu bytes), returning empty", total_);
-            reset();
-            return out;
-        }
-        
-        // Reserve capacity to avoid multiple allocations
-        out.reserve(total_);
-        
-        // Copy data directly without intermediate buffer allocation
-        out.assign(buf_, buf_ + total_);
-        
-        reset();
-        return out;
+        return this->isReady();
     }
 
     // Helper methods for direct buffer access

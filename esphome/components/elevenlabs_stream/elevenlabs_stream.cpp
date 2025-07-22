@@ -693,7 +693,7 @@ void ElevenLabsStream::parse_json_message(const char *message) {
             ESP_LOGD(TAG, "PARSE_JSON: agent_output_format=%s", agent_output_format ? agent_output_format : "NULL");
             ESP_LOGD(TAG, "PARSE_JSON: user_input_format=%s", user_input_format ? user_input_format : "NULL");
             
-            if (conversation_id) {
+            if (conversation_id && false) {
               this->conversation_id_ = conversation_id;
               ESP_LOGI(TAG, "PARSE_JSON: Conversation initiated: %s", conversation_id);
               
@@ -1250,71 +1250,43 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
           if (complete) {
             ESP_LOGD(TAG, "WS_EVENT: Complete message assembled, processing...");
             
-            // Get the complete message - handle large messages more efficiently
-            std::vector<uint8_t> message_bytes = stream->reassembler_.take();
+            ESP_LOGW(TAG, "WS_EVENT: Processing large message directly from buffer");
             
-            if (!message_bytes.empty()) {
-              ESP_LOGD(TAG, "WS_EVENT: Message bytes received, size=%zu", message_bytes.size());
-              
-              // Add null terminator to make it a valid C-string
-              message_bytes.push_back('\0');
-              
-              // Convert to string and process
-              std::string message(reinterpret_cast<const char*>(message_bytes.data()));
-              ESP_LOGD(TAG, "WS_EVENT: Complete message assembled (%zu bytes): %s", 
-                       message.length(), 
-                       message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
-              
-              // Process complete message
-              ESP_LOGD(TAG, "WS_EVENT: Processing complete message...");
-              stream->handle_websocket_message(message.c_str());
-              ESP_LOGD(TAG, "WS_EVENT: Message processing complete");
-            } else {
-              ESP_LOGW(TAG, "WS_EVENT: Message too large or failed to allocate - processing directly from buffer");
-              
-              // Message was too large or failed to allocate - process directly from reassembler buffer
-              if (stream->reassembler_.isReady()) {
-                ESP_LOGW(TAG, "WS_EVENT: Processing large message directly from buffer");
+            // Get pointer to complete message in reassembler buffer
+            const uint8_t* buffer_ptr = stream->reassembler_.getBuffer();
+            size_t buffer_size = stream->reassembler_.getSize();
+            
+            ESP_LOGD(TAG, "WS_EVENT: Buffer pointer=%p, size=%zu", buffer_ptr, buffer_size);
+            
+            if (buffer_ptr && buffer_size > 0 && buffer_size < 200000) { // Safety limit
+              // Create a temporary null-terminated string for processing
+              char* temp_buffer = (char*)malloc(buffer_size + 1);
+              if (temp_buffer) {
+                ESP_LOGD(TAG, "WS_EVENT: Allocated temporary buffer of %zu bytes", buffer_size + 1);
                 
-                // Get pointer to complete message in reassembler buffer
-                const uint8_t* buffer_ptr = stream->reassembler_.getBuffer();
-                size_t buffer_size = stream->reassembler_.getSize();
+                memcpy(temp_buffer, buffer_ptr, buffer_size);
+                temp_buffer[buffer_size] = '\0';
                 
-                ESP_LOGD(TAG, "WS_EVENT: Buffer pointer=%p, size=%zu", buffer_ptr, buffer_size);
+                ESP_LOGD(TAG, "WS_EVENT: Large message processed (%zu bytes): %s", 
+                          buffer_size, 
+                          buffer_size > 200 ? (std::string(temp_buffer, 200) + "...").c_str() : temp_buffer);
                 
-                if (buffer_ptr && buffer_size > 0 && buffer_size < 200000) { // Safety limit
-                  // Create a temporary null-terminated string for processing
-                  char* temp_buffer = (char*)malloc(buffer_size + 1);
-                  if (temp_buffer) {
-                    ESP_LOGD(TAG, "WS_EVENT: Allocated temporary buffer of %zu bytes", buffer_size + 1);
-                    
-                    memcpy(temp_buffer, buffer_ptr, buffer_size);
-                    temp_buffer[buffer_size] = '\0';
-                    
-                    ESP_LOGD(TAG, "WS_EVENT: Large message processed (%zu bytes): %s", 
-                             buffer_size, 
-                             buffer_size > 200 ? (std::string(temp_buffer, 200) + "...").c_str() : temp_buffer);
-                    
-                    // Process the message
-                    ESP_LOGD(TAG, "WS_EVENT: Processing large message...");
-                    stream->handle_websocket_message(temp_buffer);
-                    
-                    // Free the temporary buffer
-                    free(temp_buffer);
-                    ESP_LOGD(TAG, "WS_EVENT: Temporary buffer freed");
-                  } else {
-                    ESP_LOGE(TAG, "WS_EVENT: Failed to allocate temporary buffer for large message");
-                  }
-                } else {
-                  ESP_LOGE(TAG, "WS_EVENT: Large message buffer invalid or too large: ptr=%p, size=%zu", buffer_ptr, buffer_size);
-                }
+                // Process the message
+                ESP_LOGD(TAG, "WS_EVENT: Processing large message...");
+                stream->handle_websocket_message(temp_buffer);
                 
-                // Reset the reassembler after processing
-                ESP_LOGD(TAG, "WS_EVENT: Resetting reassembler");
-                stream->reassembler_.reset();
+                // Free the temporary buffer
+                free(temp_buffer);
+                ESP_LOGD(TAG, "WS_EVENT: Temporary buffer freed");
               } else {
-                ESP_LOGW(TAG, "WS_EVENT: Reassembler not ready despite complete flag");
+                ESP_LOGE(TAG, "WS_EVENT: Failed to allocate temporary buffer for large message");
               }
+              
+              // Reset the reassembler after processing
+              ESP_LOGD(TAG, "WS_EVENT: Resetting reassembler");
+              stream->reassembler_.reset();
+            } else {
+              ESP_LOGW(TAG, "WS_EVENT: Reassembler not ready despite complete flag");
             }
           } else {
             ESP_LOGV(TAG, "WS_EVENT: Message fragment stored, waiting for more data");
