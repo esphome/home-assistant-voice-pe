@@ -1,27 +1,5 @@
 {
     "configurations": [
-        {
-            "name": "ESPHome",
-            "includePath": [
-                "${workspaceFolder}/**",
-                "${workspaceFolder}/esphome/components/**"
-            ],
-            "defines": [
-                "USE_ESP32",
-                "ESP32", 
-                "__INTELLISENSE__"
-            ],
-            "compilerPath": "gcc",
-            "cStandard": "c11",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "gcc-x64",
-            "browse": {
-                "path": [
-                    "${workspaceFolder}/**"
-                ],
-                "limitSymbolsToIncludedHeaders": true
-            }
-        }
     ],
     "version": 4
 }
