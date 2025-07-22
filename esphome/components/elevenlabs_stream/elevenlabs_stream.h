@@ -71,8 +71,8 @@ class ElevenLabsStream : public Component {
   void connect_to_elevenlabs();
   void disconnect_from_elevenlabs();
   void send_websocket_message(const std::string &message);
-  void handle_websocket_message(const char *message);
-  void parse_json_message(const char *message);
+  void handle_websocket_message(const uint8_t *buffer, size_t length);
+  void parse_json_message_from_buffer(const uint8_t *buffer, size_t length);
   void handle_websocket_binary(const uint8_t *data, size_t length);
   void handle_audio_response(const uint8_t *data, size_t length);
   void handle_error(const std::string &error_message);

@@ -13,6 +13,7 @@
 #include <esp_tls.h>
 #include <esp_crt_bundle.h>
 #include <esp_task_wdt.h>
+#include <esp_heap_caps.h>
 #include <mbedtls/base64.h>
 
 namespace esphome {
@@ -641,335 +642,361 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
   }
 }
 
-void ElevenLabsStream::handle_websocket_message(const char *message) {
+void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t length) {
   ESP_LOGD(TAG, "HANDLE_WS_MSG: Processing WebSocket message");
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Message pointer=%p", message);
+  ESP_LOGD(TAG, "HANDLE_WS_MSG: Buffer pointer=%p, length=%zu", buffer, length);
   
-  if (!message || strlen(message) == 0) {
+  if (!buffer || length == 0) {
     ESP_LOGW(TAG, "HANDLE_WS_MSG: Received empty WebSocket message");
     return;
   }
   
-  size_t message_len = strlen(message);
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Received WebSocket message (%zu bytes): %s", message_len,
-           message_len > 200 ? (std::string(message, 200) + "...").c_str() : message);
+  ESP_LOGD(TAG, "HANDLE_WS_MSG: Received WebSocket message (%zu bytes): %.*s", length,
+           length > 200 ? 200 : (int)length, (const char*)buffer);
   
-  // The ESP WebSocket client provides complete messages, so process directly
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Parsing JSON message...");
-  this->parse_json_message(message);
+  // Parse JSON directly from buffer using ArduinoJson without creating std::string
+  ESP_LOGD(TAG, "HANDLE_WS_MSG: Parsing JSON message directly from buffer...");
+  this->parse_json_message_from_buffer(buffer, length);
   ESP_LOGD(TAG, "HANDLE_WS_MSG: Message processing complete");
 }
 
-void ElevenLabsStream::parse_json_message(const char *message) {
-  ESP_LOGD(TAG, "PARSE_JSON: Starting JSON message parsing");
-  ESP_LOGV(TAG, "PARSE_JSON: Full message: %s", message);
+void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
+  ESP_LOGD(TAG, "PARSE_JSON_BUF: Starting JSON message parsing from buffer");
+  ESP_LOGD(TAG, "PARSE_JSON_BUF: Buffer=%p, length=%zu", buffer, length);
   
-  bool parse_success = json::parse_json(message, [this](JsonObject root) -> bool {
-        ESP_LOGD(TAG, "PARSE_JSON: JSON parsing callback entered");
-        
-        const char* type = root["type"];
-        if (!type) {
-          ESP_LOGW(TAG, "PARSE_JSON: Message missing type field");
-          ESP_LOGD(TAG, "PARSE_JSON: Available root fields:");
-          for (JsonPair kv : root) {
-            ESP_LOGD(TAG, "PARSE_JSON:   - %s", kv.key().c_str());
-          }
-          return false;
-        }
-        
-        ESP_LOGI(TAG, "PARSE_JSON: Message type: '%s'", type);
-        
-        // Handle conversation_initiation_metadata
-        if (strcmp(type, "conversation_initiation_metadata") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing conversation_initiation_metadata");
-          JsonObject metadata = root["conversation_initiation_metadata_event"];
-          if (metadata) {
-            ESP_LOGD(TAG, "PARSE_JSON: Found conversation_initiation_metadata_event");
-            const char* conversation_id = metadata["conversation_id"];
-            const char* agent_output_format = metadata["agent_output_audio_format"];
-            const char* user_input_format = metadata["user_input_audio_format"];
-            
-            ESP_LOGD(TAG, "PARSE_JSON: conversation_id=%s", conversation_id ? conversation_id : "NULL");
-            ESP_LOGD(TAG, "PARSE_JSON: agent_output_format=%s", agent_output_format ? agent_output_format : "NULL");
-            ESP_LOGD(TAG, "PARSE_JSON: user_input_format=%s", user_input_format ? user_input_format : "NULL");
-            
-            if (conversation_id && false) {
-              this->conversation_id_ = conversation_id;
-              ESP_LOGI(TAG, "PARSE_JSON: Conversation initiated: %s", conversation_id);
-              
-              // Store audio formats
-              if (agent_output_format) {
-                this->agent_output_audio_format_ = agent_output_format;
-                ESP_LOGD(TAG, "PARSE_JSON: Agent output format: %s", agent_output_format);
-              }
-              if (user_input_format) {
-                this->user_input_audio_format_ = user_input_format;
-                ESP_LOGD(TAG, "PARSE_JSON: User input format: %s", user_input_format);
-              }
-              
-              // Start listening
-              ESP_LOGD(TAG, "PARSE_JSON: Setting state to LISTENING");
-              this->set_state(StreamState::LISTENING);
-              
-              // Start microphone if available
-              if (this->microphone_ && !this->microphone_->is_running()) {
-                ESP_LOGD(TAG, "PARSE_JSON: Starting microphone capture for listening");
-                this->microphone_->start();
-                ESP_LOGD(TAG, "PARSE_JSON: Microphone started");
-              } else {
-                ESP_LOGD(TAG, "PARSE_JSON: Microphone not available or already running (mic=%p, running=%s)", 
-                         this->microphone_, 
-                         this->microphone_ && this->microphone_->is_running() ? "YES" : "NO");
-              }
-              
-              ESP_LOGD(TAG, "PARSE_JSON: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
-              for (auto *trigger : this->on_start_triggers_) {
-                ESP_LOGD(TAG, "PARSE_JSON: Triggering start event at %p", trigger);
-                trigger->trigger();
-              }
-              ESP_LOGD(TAG, "PARSE_JSON: Triggering listening events (%zu triggers)", this->on_listening_triggers_.size());
-              for (auto *trigger : this->on_listening_triggers_) {
-                ESP_LOGD(TAG, "PARSE_JSON: Triggering listening event at %p", trigger);
-                trigger->trigger();
-              }
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No conversation_id in metadata");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No conversation_initiation_metadata_event found");
-          }
-          return true;
-        }
-        
-        // Handle audio events (corrected type name)
-        if (strcmp(type, "audio") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing audio event");
-          JsonObject audio = root["audio_event"];
-          if (audio) {
-            ESP_LOGD(TAG, "PARSE_JSON: Found audio_event");
-            const char* audio_base64 = audio["audio_base_64"];
-            uint32_t event_id = audio["event_id"] | 0;
-            
-            ESP_LOGD(TAG, "PARSE_JSON: audio_base64=%s, event_id=%d", 
-                     audio_base64 ? "PRESENT" : "NULL", event_id);
-            
-            if (audio_base64) {
-              size_t base64_len = strlen(audio_base64);
-              ESP_LOGD(TAG, "PARSE_JSON: Received audio data (base64 length: %zu, event_id: %d)", base64_len, event_id);
-              
-              // Update timing for state management
-              this->last_audio_response_time_ = millis();
-              ESP_LOGD(TAG, "PARSE_JSON: Updated last_audio_response_time to %d", this->last_audio_response_time_);
-              
-              // Process audio chunks immediately for better real-time performance
-              // Skip empty or very small chunks
-              if (base64_len > 4) {
-                ESP_LOGD(TAG, "PARSE_JSON: Decoding base64 audio data...");
-                // Decode base64 audio data and play it immediately
-                std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
-                if (!audio_data.empty()) {
-                  ESP_LOGD(TAG, "PARSE_JSON: Decoded %zu bytes of audio data", audio_data.size());
-                  
-                  // Agent is speaking - change state
-                  ESP_LOGD(TAG, "PARSE_JSON: Setting state to SPEAKING");
-                  this->set_state(StreamState::SPEAKING);
-                  
-                  ESP_LOGD(TAG, "PARSE_JSON: Triggering speaking events (%zu triggers)", this->on_speaking_triggers_.size());
-                  for (auto *trigger : this->on_speaking_triggers_) {
-                    ESP_LOGD(TAG, "PARSE_JSON: Triggering speaking event at %p", trigger);
-                    trigger->trigger();
-                  }
-                  
-                  // Play audio immediately to reduce latency
-                  ESP_LOGD(TAG, "PARSE_JSON: Playing audio response...");
-                  this->handle_audio_response(audio_data.data(), audio_data.size());
-                } else {
-                  ESP_LOGW(TAG, "PARSE_JSON: Failed to decode audio data");
-                }
-              } else {
-                ESP_LOGD(TAG, "PARSE_JSON: Skipping small audio chunk (length=%zu)", base64_len);
-              }
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No audio_base_64 in audio event");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No audio_event found in audio message");
-          }
-          return true;
-        }
-        
-        // Handle user transcript
-        if (strcmp(type, "user_transcript") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing user_transcript");
-          JsonObject transcript = root["user_transcription_event"];
-          if (transcript) {
-            const char* user_transcript = transcript["user_transcript"];
-            if (user_transcript) {
-              ESP_LOGI(TAG, "PARSE_JSON: User transcript: '%s'", user_transcript);
-              // Could trigger an event here for transcript handling
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No user_transcript in user_transcription_event");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No user_transcription_event found");
-          }
-          return true;
-        }
-        
-        // Handle agent response
-        if (strcmp(type, "agent_response") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing agent_response");
-          JsonObject response = root["agent_response_event"];
-          if (response) {
-            const char* agent_response = response["agent_response"];
-            if (agent_response) {
-              ESP_LOGI(TAG, "PARSE_JSON: Agent response: '%s'", agent_response);
-              // Could trigger an event here for response handling
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No agent_response in agent_response_event");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No agent_response_event found");
-          }
-          return true;
-        }
-        
-        // Handle internal tentative agent response
-        if (strcmp(type, "internal_tentative_agent_response") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing internal_tentative_agent_response");
-          JsonObject tentative = root["tentative_agent_response_internal_event"];
-          if (tentative) {
-            const char* tentative_response = tentative["tentative_agent_response"];
-            if (tentative_response) {
-              ESP_LOGD(TAG, "PARSE_JSON: Tentative agent response: '%s'", tentative_response);
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No tentative_agent_response in event");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No tentative_agent_response_internal_event found");
-          }
-          return true;
-        }
-        
-        // Handle VAD score
-        if (strcmp(type, "vad_score") == 0) {
-          ESP_LOGV(TAG, "PARSE_JSON: Processing vad_score");
-          JsonObject vad = root["vad_score_event"];
-          if (vad) {
-            float vad_score = vad["vad_score"] | 0.0f;
-            ESP_LOGV(TAG, "PARSE_JSON: VAD score: %.2f", vad_score);
-            // Could use this for voice activity detection
-          } else {
-            ESP_LOGV(TAG, "PARSE_JSON: No vad_score_event found");
-          }
-          return true;
-        }
-        
-        // Handle interruption
-        if (strcmp(type, "interruption") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing interruption event");
-          JsonObject interruption = root["interruption_event"];
-          if (interruption) {
-            ESP_LOGD(TAG, "PARSE_JSON: Interruption event received");
-            // Handle interruption logic - could stop current audio playback
-            if (this->speaker_) {
-              ESP_LOGD(TAG, "PARSE_JSON: Stopping speaker due to interruption");
-              this->speaker_->stop();
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No interruption_event found");
-          }
-          return true;
-        }
-        
-        // Handle agent_response_correction
-        if (strcmp(type, "agent_response_correction") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing agent_response_correction");
-          JsonObject correction = root["agent_response_correction_event"];
-          if (correction) {
-            const char* corrected_text = correction["corrected_text"];
-            if (corrected_text) {
-              ESP_LOGD(TAG, "PARSE_JSON: Agent response correction: '%s'", corrected_text);
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: No corrected_text in correction event");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No agent_response_correction_event found");
-          }
-          return true;
-        }
-        
-        // Handle ping with proper response
-        if (strcmp(type, "ping") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing ping");
-          JsonObject ping = root["ping_event"];
-          if (ping) {
-            uint32_t event_id = ping["event_id"] | 0;
-            uint32_t ping_ms = ping["ping_ms"] | 0;
-            
-            ESP_LOGD(TAG, "PARSE_JSON: Ping received: event_id=%d, ping_ms=%d", event_id, ping_ms);
-            
-            // Send pong response with event_id
-            ESP_LOGD(TAG, "PARSE_JSON: Sending pong response...");
-            std::string pong_message = json::build_json([event_id](JsonObject root) {
-              root["type"] = "pong";
-              root["event_id"] = event_id;
-            });
-            this->send_websocket_message(pong_message);
-            ESP_LOGD(TAG, "PARSE_JSON: Pong sent");
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No ping_event found");
-          }
-          return true;
-        }
-        
-        // Handle client tool call
-        if (strcmp(type, "client_tool_call") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing client_tool_call");
-          JsonObject tool_call = root["client_tool_call"];
-          if (tool_call) {
-            const char* tool_name = tool_call["tool_name"];
-            const char* tool_call_id = tool_call["tool_call_id"];
-            JsonObject parameters = tool_call["parameters"];
-            
-            if (tool_name && tool_call_id) {
-              ESP_LOGI(TAG, "PARSE_JSON: Client tool call: %s (id: %s)", tool_name, tool_call_id);
-              // Handle tool calls - would need to implement tool handling
-            } else {
-              ESP_LOGW(TAG, "PARSE_JSON: Missing tool_name or tool_call_id in client_tool_call");
-            }
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No client_tool_call object found");
-          }
-          return true;
-        }
-        
-        // Handle contextual update
-        if (strcmp(type, "contextual_update") == 0) {
-          ESP_LOGD(TAG, "PARSE_JSON: Processing contextual_update");
-          const char* text = root["text"];
-          if (text) {
-            ESP_LOGD(TAG, "PARSE_JSON: Contextual update: '%s'", text);
-          } else {
-            ESP_LOGW(TAG, "PARSE_JSON: No text in contextual_update");
-          }
-          return true;
-        }
-        
-        // Log unknown message types for debugging
-        ESP_LOGW(TAG, "PARSE_JSON: Unknown message type: '%s'", type);
-        ESP_LOGD(TAG, "PARSE_JSON: Available fields in unknown message:");
-        for (JsonPair kv : root) {
-          ESP_LOGD(TAG, "PARSE_JSON:   - %s", kv.key().c_str());
-        }
-        return true;
-      });
+  // Use ArduinoJson directly with PSRAM allocator
+  // Create a PSRAM allocator similar to ESPHome's implementation
+  struct PSRAMAllocator : ArduinoJson::Allocator {
+    void *allocate(size_t size) override {
+      return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    void deallocate(void *pointer) override {
+      heap_caps_free(pointer);
+    }
+    void *reallocate(void *ptr, size_t new_size) override {
+      return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+  };
+  
+  auto doc_allocator = PSRAMAllocator();
+  JsonDocument json_document(&doc_allocator);
+  if (json_document.overflowed()) {
+    ESP_LOGE(TAG, "PARSE_JSON_BUF: Could not allocate memory for JSON document!");
+    return;
+  }
+  
+  // Parse JSON directly from buffer
+  DeserializationError err = deserializeJson(json_document, (const char*)buffer, length);
+  
+  if (err != DeserializationError::Ok) {
+    if (err == DeserializationError::NoMemory) {
+      ESP_LOGE(TAG, "PARSE_JSON_BUF: Can not allocate more memory for deserialization. Consider making source string smaller");
+    } else {
+      ESP_LOGE(TAG, "PARSE_JSON_BUF: Parse error: %s", err.c_str());
+    }
+    return;
+  }
+  
+  JsonObject root = json_document.as<JsonObject>();
+  
+  // Call the same parsing logic as the original function
+  ESP_LOGD(TAG, "PARSE_JSON_BUF: JSON parsing callback entered");
+  
+  const char* type = root["type"];
+  if (!type) {
+    ESP_LOGW(TAG, "PARSE_JSON_BUF: Message missing type field");
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Available root fields:");
+    for (JsonPair kv : root) {
+      ESP_LOGD(TAG, "PARSE_JSON_BUF:   - %s", kv.key().c_str());
+    }
+    return;
+  }
+  
+  ESP_LOGI(TAG, "PARSE_JSON_BUF: Message type: '%s'", type);
+  
+  // Handle conversation_initiation_metadata
+  if (strcmp(type, "conversation_initiation_metadata") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing conversation_initiation_metadata");
+    JsonObject metadata = root["conversation_initiation_metadata_event"];
+    if (metadata) {
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Found conversation_initiation_metadata_event");
+      const char* conversation_id = metadata["conversation_id"];
+      const char* agent_output_format = metadata["agent_output_audio_format"];
+      const char* user_input_format = metadata["user_input_audio_format"];
       
-      if (!parse_success) {
-        ESP_LOGE(TAG, "PARSE_JSON: Failed to parse JSON message: %s", message);
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: conversation_id=%s", conversation_id ? conversation_id : "NULL");
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: agent_output_format=%s", agent_output_format ? agent_output_format : "NULL");
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: user_input_format=%s", user_input_format ? user_input_format : "NULL");
+      
+      if (conversation_id) {
+        this->conversation_id_ = conversation_id;
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: Conversation initiated: %s", conversation_id);
+        
+        // Store audio formats
+        if (agent_output_format) {
+          this->agent_output_audio_format_ = agent_output_format;
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Agent output format: %s", agent_output_format);
+        }
+        if (user_input_format) {
+          this->user_input_audio_format_ = user_input_format;
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: User input format: %s", user_input_format);
+        }
+        
+        // Start listening
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to LISTENING");
+        this->set_state(StreamState::LISTENING);
+        
+        // Start microphone if available
+        if (this->microphone_ && !this->microphone_->is_running()) {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Starting microphone capture for listening");
+          this->microphone_->start();
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Microphone started");
+        } else {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Microphone not available or already running (mic=%p, running=%s)", 
+                   this->microphone_, 
+                   this->microphone_ && this->microphone_->is_running() ? "YES" : "NO");
+        }
+        
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
+        for (auto *trigger : this->on_start_triggers_) {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering start event at %p", trigger);
+          trigger->trigger();
+        }
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering listening events (%zu triggers)", this->on_listening_triggers_.size());
+        for (auto *trigger : this->on_listening_triggers_) {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering listening event at %p", trigger);
+          trigger->trigger();
+        }
       } else {
-        ESP_LOGD(TAG, "PARSE_JSON: JSON message parsed successfully");
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_id in metadata");
       }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_initiation_metadata_event found");
+    }
+    return;
+  }
+  
+  // Handle audio events (corrected type name)
+  if (strcmp(type, "audio") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing audio event");
+    JsonObject audio = root["audio_event"];
+    if (audio) {
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Found audio_event");
+      const char* audio_base64 = audio["audio_base_64"];
+      uint32_t event_id = audio["event_id"] | 0;
+      
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: audio_base64=%s, event_id=%d", 
+               audio_base64 ? "PRESENT" : "NULL", event_id);
+      
+      if (audio_base64) {
+        size_t base64_len = strlen(audio_base64);
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Received audio data (base64 length: %zu, event_id: %d)", base64_len, event_id);
+        
+        // Update timing for state management
+        this->last_audio_response_time_ = millis();
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Updated last_audio_response_time to %d", this->last_audio_response_time_);
+        
+        // Process audio chunks immediately for better real-time performance
+        // Skip empty or very small chunks
+        if (base64_len > 4) {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Decoding base64 audio data...");
+          // Decode base64 audio data and play it immediately
+          std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
+          if (!audio_data.empty()) {
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Decoded %zu bytes of audio data", audio_data.size());
+            
+            // Agent is speaking - change state
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to SPEAKING");
+            this->set_state(StreamState::SPEAKING);
+            
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering speaking events (%zu triggers)", this->on_speaking_triggers_.size());
+            for (auto *trigger : this->on_speaking_triggers_) {
+              ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering speaking event at %p", trigger);
+              trigger->trigger();
+            }
+            
+            // Play audio immediately to reduce latency
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Playing audio response...");
+            this->handle_audio_response(audio_data.data(), audio_data.size());
+          } else {
+            ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
+          }
+        } else {
+          ESP_LOGD(TAG, "PARSE_JSON_BUF: Skipping small audio chunk (length=%zu)", base64_len);
+        }
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No audio_base_64 in audio event");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No audio_event found in audio message");
+    }
+    return;
+  }
+  
+  // Handle user transcript
+  if (strcmp(type, "user_transcript") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing user_transcript");
+    JsonObject transcript = root["user_transcription_event"];
+    if (transcript) {
+      const char* user_transcript = transcript["user_transcript"];
+      if (user_transcript) {
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: User transcript: '%s'", user_transcript);
+        // Could trigger an event here for transcript handling
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No user_transcript in user_transcription_event");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No user_transcription_event found");
+    }
+    return;
+  }
+  
+  // Handle agent response
+  if (strcmp(type, "agent_response") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing agent_response");
+    JsonObject response = root["agent_response_event"];
+    if (response) {
+      const char* agent_response = response["agent_response"];
+      if (agent_response) {
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: Agent response: '%s'", agent_response);
+        // Could trigger an event here for response handling
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No agent_response in agent_response_event");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No agent_response_event found");
+    }
+    return;
+  }
+  
+  // Handle internal tentative agent response
+  if (strcmp(type, "internal_tentative_agent_response") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing internal_tentative_agent_response");
+    JsonObject tentative = root["tentative_agent_response_internal_event"];
+    if (tentative) {
+      const char* tentative_response = tentative["tentative_agent_response"];
+      if (tentative_response) {
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Tentative agent response: '%s'", tentative_response);
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No tentative_agent_response in event");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No tentative_agent_response_internal_event found");
+    }
+    return;
+  }
+  
+  // Handle VAD score
+  if (strcmp(type, "vad_score") == 0) {
+    ESP_LOGV(TAG, "PARSE_JSON_BUF: Processing vad_score");
+    JsonObject vad = root["vad_score_event"];
+    if (vad) {
+      float vad_score = vad["vad_score"] | 0.0f;
+      ESP_LOGV(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);
+      // Could use this for voice activity detection
+    } else {
+      ESP_LOGV(TAG, "PARSE_JSON_BUF: No vad_score_event found");
+    }
+    return;
+  }
+  
+  // Handle interruption
+  if (strcmp(type, "interruption") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing interruption event");
+    JsonObject interruption = root["interruption_event"];
+    if (interruption) {
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Interruption event received");
+      // Handle interruption logic - could stop current audio playback
+      if (this->speaker_) {
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Stopping speaker due to interruption");
+        this->speaker_->stop();
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No interruption_event found");
+    }
+    return;
+  }
+  
+  // Handle agent_response_correction
+  if (strcmp(type, "agent_response_correction") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing agent_response_correction");
+    JsonObject correction = root["agent_response_correction_event"];
+    if (correction) {
+      const char* corrected_text = correction["corrected_text"];
+      if (corrected_text) {
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Agent response correction: '%s'", corrected_text);
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: No corrected_text in correction event");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No agent_response_correction_event found");
+    }
+    return;
+  }
+  
+  // Handle ping with proper response
+  if (strcmp(type, "ping") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing ping");
+    JsonObject ping = root["ping_event"];
+    if (ping) {
+      uint32_t event_id = ping["event_id"] | 0;
+      uint32_t ping_ms = ping["ping_ms"] | 0;
+      
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Ping received: event_id=%d, ping_ms=%d", event_id, ping_ms);
+      
+      // Send pong response with event_id
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Sending pong response...");
+      std::string pong_message = json::build_json([event_id](JsonObject root) {
+        root["type"] = "pong";
+        root["event_id"] = event_id;
+      });
+      this->send_websocket_message(pong_message);
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Pong sent");
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No ping_event found");
+    }
+    return;
+  }
+  
+  // Handle client tool call
+  if (strcmp(type, "client_tool_call") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing client_tool_call");
+    JsonObject tool_call = root["client_tool_call"];
+    if (tool_call) {
+      const char* tool_name = tool_call["tool_name"];
+      const char* tool_call_id = tool_call["tool_call_id"];
+      JsonObject parameters = tool_call["parameters"];
+      
+      if (tool_name && tool_call_id) {
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: Client tool call: %s (id: %s)", tool_name, tool_call_id);
+        // Handle tool calls - would need to implement tool handling
+      } else {
+        ESP_LOGW(TAG, "PARSE_JSON_BUF: Missing tool_name or tool_call_id in client_tool_call");
+      }
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No client_tool_call object found");
+    }
+    return;
+  }
+  
+  // Handle contextual update
+  if (strcmp(type, "contextual_update") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing contextual_update");
+    const char* text = root["text"];
+    if (text) {
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Contextual update: '%s'", text);
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No text in contextual_update");
+    }
+    return;
+  }
+  
+  // Log unknown message types for debugging
+  ESP_LOGW(TAG, "PARSE_JSON_BUF: Unknown message type: '%s'", type);
+  ESP_LOGD(TAG, "PARSE_JSON_BUF: Available fields in unknown message:");
+  for (JsonPair kv : root) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF:   - %s", kv.key().c_str());
+  }
 }
 
 void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t length) {
@@ -1258,35 +1285,18 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
             
             ESP_LOGD(TAG, "WS_EVENT: Buffer pointer=%p, size=%zu", buffer_ptr, buffer_size);
             
-            if (buffer_ptr && buffer_size > 0 && buffer_size < 200000) { // Safety limit
-              // Create a temporary null-terminated string for processing
-              char* temp_buffer = (char*)malloc(buffer_size + 1);
-              if (temp_buffer) {
-                ESP_LOGD(TAG, "WS_EVENT: Allocated temporary buffer of %zu bytes", buffer_size + 1);
-                
-                memcpy(temp_buffer, buffer_ptr, buffer_size);
-                temp_buffer[buffer_size] = '\0';
-                
-                ESP_LOGD(TAG, "WS_EVENT: Large message processed (%zu bytes): %s", 
-                          buffer_size, 
-                          buffer_size > 200 ? (std::string(temp_buffer, 200) + "...").c_str() : temp_buffer);
-                
-                // Process the message
-                ESP_LOGD(TAG, "WS_EVENT: Processing large message...");
-                stream->handle_websocket_message(temp_buffer);
-                
-                // Free the temporary buffer
-                free(temp_buffer);
-                ESP_LOGD(TAG, "WS_EVENT: Temporary buffer freed");
-              } else {
-                ESP_LOGE(TAG, "WS_EVENT: Failed to allocate temporary buffer for large message");
-              }
+            if (buffer_ptr && buffer_size > 0) {
+              ESP_LOGD(TAG, "WS_EVENT: Large message processed (%zu bytes): %.*s", 
+                        buffer_size, 
+                        buffer_size > 200 ? 200 : (int)buffer_size, (const char*)buffer_ptr);
+              
+              // Process the message using the buffer and length directly
+              ESP_LOGD(TAG, "WS_EVENT: Processing large message...");
+              stream->handle_websocket_message(buffer_ptr, buffer_size);
               
               // Reset the reassembler after processing
               ESP_LOGD(TAG, "WS_EVENT: Resetting reassembler");
               stream->reassembler_.reset();
-            } else {
-              ESP_LOGW(TAG, "WS_EVENT: Reassembler not ready despite complete flag");
             }
           } else {
             ESP_LOGV(TAG, "WS_EVENT: Message fragment stored, waiting for more data");
