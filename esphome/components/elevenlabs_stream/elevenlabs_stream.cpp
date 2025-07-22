@@ -665,21 +665,20 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   ESP_LOGD(TAG, "PARSE_JSON_BUF: Buffer=%p, length=%zu", buffer, length);
   
   // Use ArduinoJson directly with PSRAM allocator
-  // Create a PSRAM allocator similar to ESPHome's implementation
-  struct PSRAMAllocator : ArduinoJson::Allocator {
-    void *allocate(size_t size) override {
+  // Create a PSRAM allocator for BasicJsonDocument
+  struct PSRAMAllocator {
+    void *allocate(size_t size) {
       return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
-    void deallocate(void *pointer) override {
+    void deallocate(void *pointer) {
       heap_caps_free(pointer);
     }
-    void *reallocate(void *ptr, size_t new_size) override {
+    void *reallocate(void *ptr, size_t new_size) {
       return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
   };
   
-  auto doc_allocator = PSRAMAllocator();
-  JsonDocument json_document(&doc_allocator);
+  BasicJsonDocument<PSRAMAllocator> json_document(length + 1024); // Extra space for parsing overhead
   if (json_document.overflowed()) {
     ESP_LOGE(TAG, "PARSE_JSON_BUF: Could not allocate memory for JSON document!");
     return;
@@ -728,7 +727,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
       ESP_LOGD(TAG, "PARSE_JSON_BUF: agent_output_format=%s", agent_output_format ? agent_output_format : "NULL");
       ESP_LOGD(TAG, "PARSE_JSON_BUF: user_input_format=%s", user_input_format ? user_input_format : "NULL");
       
-      if (conversation_id) {
+      if (conversation_id && false) { //we don't listen right now temporarily - this has always been disabled, since we are only testing playback for the initial message right now.
         this->conversation_id_ = conversation_id;
         ESP_LOGI(TAG, "PARSE_JSON_BUF: Conversation initiated: %s", conversation_id);
         
