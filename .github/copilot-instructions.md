@@ -36,7 +36,7 @@ Always use `test-elevenlabs.bat` script to ensure proper workflow for testing th
 - Logging output for debugging
 
 ### Component Development Pattern
-1. Modify C++ component files (`elevenlabs_stream.cpp/.h`)
+1. Modify C++ component files (`elevenlabs_stream.cpp/.h` and other files in `esphome/components/elevenlabs_stream/`)
 2. Update ESPHome schema if needed (`__init__.py`)
 3. Test with minimal config (`test-elevenlabs.yaml`) before full config
 4. Use optional microphone/speaker for testing without hardware dependencies
