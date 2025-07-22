@@ -1,0 +1,263 @@
+substitutions:
+  # Voice Assistant phases (simplified for testing)
+  voice_assist_idle_phase_id: '1'
+  voice_assist_listening_for_command_phase_id: '3'
+  voice_assist_replying_phase_id: '5'
+  voice_assist_not_ready_phase_id: '10'
+  voice_assist_error_phase_id: '11'
+  hidden_ssid: "false"
+  
+  # ElevenLabs Configuration - set via environment variables
+  elevenlabs_agent_id: !env_var ELEVENLABS_AGENT_ID
+  elevenlabs_api_key: !env_var ELEVENLABS_API_KEY
+  
+  # WiFi Configuration - set via environment variables  
+  wifi_ssid: !env_var WIFI_SSID
+  wifi_password: !env_var WIFI_PASSWORD
+
+esphome:
+  name: test-elevenlabs
+  friendly_name: Test ElevenLabs
+  name_add_mac_suffix: true
+  min_version: 2025.5.1
+  on_boot:
+    priority: 375
+    then:
+      - delay: 1s
+      - switch.turn_on: internal_speaker_amp
+      - delay: 5s
+      - lambda: id(init_in_progress) = false;
+
+esp32:
+  board: esp32-s3-devkitc-1
+  cpu_frequency: 240MHz
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+
+      # Moves instructions and read only data from flash into PSRAM on boot.
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+
+      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE: "y"
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL: "y"
+    components:
+      - name: esp_websocket_client
+        source: github://espressif/esp-protocols
+        path: components/esp_websocket_client
+        refresh: 5min
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/esphome/home-assistant-voice-pe
+      ref: dev
+    components:
+      - voice_kit
+    refresh: 0s
+  - source:
+      type: local
+      path: esphome/components
+    components: 
+      - elevenlabs_stream
+
+wifi:
+  ssid: ${wifi_ssid}
+  password: ${wifi_password}
+
+logger:
+  level: INFO
+
+api:
+  id: api_id
+
+json:
+
+ota:
+  - platform: esphome
+
+i2c:
+  - id: internal_i2c
+    sda: GPIO1
+    scl: GPIO2
+    frequency: 400kHz
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+voice_kit:
+  id: voice_kit_component
+  i2c_id: internal_i2c
+  reset_pin: GPIO4
+  firmware:
+    url: https://github.com/esphome/voice-kit-xmos-firmware/releases/download/v1.3.1/ffva_v1.3.1_upgrade.bin
+    version: "1.3.1"
+    md5: 964635c5bf125529dab14a2472a15401
+
+audio_dac:
+  - platform: aic3204
+    id: aic3204_dac
+    i2c_id: internal_i2c
+
+i2s_audio:
+  - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO7
+    i2s_bclk_pin:
+      number: GPIO8
+
+  - id: i2s_input
+    i2s_lrclk_pin:
+      number: GPIO14
+    i2s_bclk_pin:
+      number: GPIO13
+
+microphone:
+  - platform: i2s_audio
+    id: i2s_mics
+    i2s_din_pin: GPIO15
+    adc_type: external
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 32bit
+    i2s_mode: secondary
+    i2s_audio_id: i2s_input
+    channel: stereo
+    on_data:
+      - lambda: |-
+          if (id(elevenlabs_conv_ai).is_running()) {
+            id(elevenlabs_conv_ai).handle_microphone_data(x);
+          }
+
+speaker:
+  # Hardware speaker output
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    sample_rate: 48000
+    i2s_mode: secondary
+    i2s_dout_pin: GPIO10
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_output
+    dac_type: external
+    channel: stereo
+    timeout: never
+    buffer_duration: 100ms
+    audio_dac: aic3204_dac
+
+  # Virtual speakers to combine the announcement and media streams together into one output
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: i2s_audio_speaker
+    num_channels: 2
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+
+  # Virtual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+
+# Simple global variables for testing
+globals:
+  - id: init_in_progress
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: voice_assistant_phase
+    type: int
+    restore_value: false
+    initial_value: '10'
+
+# Speaker amplifier switch
+switch:
+  - platform: gpio
+    id: internal_speaker_amp
+    pin: GPIO46
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ElevenLabs Conversational AI Stream
+elevenlabs_stream:
+  id: elevenlabs_conv_ai
+  agent_id: ${elevenlabs_agent_id}
+  api_key: ${elevenlabs_api_key}
+  microphone: i2s_mics
+  speaker: i2s_audio_speaker
+  on_connected:
+    - lambda: id(init_in_progress) = false;
+    - lambda: id(voice_assistant_phase) = 1;
+    - logger.log: "ElevenLabs connected and ready"
+  on_disconnected:
+    - lambda: id(voice_assistant_phase) = 10;
+    - logger.log: "ElevenLabs disconnected"
+  on_start:
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 20
+        duration: 0.0s
+    - logger.log: "ElevenLabs conversation started"
+  on_listening:
+    - lambda: id(voice_assistant_phase) = 3;
+    - logger.log: "ElevenLabs listening"
+  on_speaking:
+    - lambda: id(voice_assistant_phase) = 5;
+    - logger.log: "ElevenLabs speaking"
+  on_end:
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 0
+        duration: 1.0s
+    - lambda: id(voice_assistant_phase) = 1;
+    - logger.log: "ElevenLabs conversation ended"
+  on_error:
+    - lambda: |
+        if (!id(init_in_progress)) {
+          id(voice_assistant_phase) = 11;
+        }
+    - logger.log: 
+        format: "ElevenLabs error: %s"
+        args: ['error_message']
+    - delay: 1s
+    - lambda: id(voice_assistant_phase) = 1;
+
+# Test button to trigger stream
+binary_sensor:
+  - platform: gpio
+    pin: 
+      number: GPIO0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Test Button"
+    on_press:
+      - if:
+          condition:
+            elevenlabs_stream.is_running: {}
+          then:
+            - elevenlabs_stream.stop: {}
+            - logger.log: "Stopping ElevenLabs stream via button"
+          else:
+            - elevenlabs_stream.start: {}
+            - logger.log: "Starting ElevenLabs stream via button"

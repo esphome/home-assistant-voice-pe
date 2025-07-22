@@ -135,7 +135,3 @@ sdkconfig.*
 !sdkconfig.defaults
 
 .tests/
-
-/components
-
-test-*.yaml

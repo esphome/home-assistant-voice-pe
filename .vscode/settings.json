@@ -11,10 +11,7 @@
     "C_Cpp.default.configurationProvider": "",
     "C_Cpp.default.cppStandard": "c++17",
     "C_Cpp.default.cStandard": "c11",
-    "C_Cpp.errorSquiggles": "disabled",
-    "C_Cpp.intelliSenseEngine": "disabled",
     "C_Cpp.intelliSenseEngineFallback": "enabled",
-    "C_Cpp.configurationWarnings": "disabled",
     "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": true,
     "files.exclude": {
         "**/.git": true,
@@ -29,5 +26,8 @@
     "search.exclude": {
         "**/.esphome": true,
         "**/build": true
+    },
+    "github.copilot.chat.agent.terminal.allowList": {
+        ".\\test-elevenlabs.bat": true
     }
 }

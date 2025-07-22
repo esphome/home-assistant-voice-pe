@@ -59,17 +59,15 @@ static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/g
 void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 // Helper function to decode base64 audio data
-std::vector<uint8_t> ElevenLabsStream::decode_base64_audio(const char* base64_data) {
-  ESP_LOGD(TAG, "DECODE_B64: Starting base64 audio decode");
+bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
+  ESP_LOGD(TAG, "DECODE_B64: Starting base64 audio decode and play");
   ESP_LOGD(TAG, "DECODE_B64: Input pointer=%p", base64_data);
-  
-  std::vector<uint8_t> decoded_data;
   
   if (!base64_data || strlen(base64_data) == 0) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
-    return decoded_data;
+    return false;
   }
-  
+
   size_t input_len = strlen(base64_data);
   ESP_LOGD(TAG, "DECODE_B64: Input length=%zu", input_len);
   
@@ -80,25 +78,42 @@ std::vector<uint8_t> ElevenLabsStream::decode_base64_audio(const char* base64_da
   int ret = mbedtls_base64_decode(nullptr, 0, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to calculate base64 decode length: %d", ret);
-    return decoded_data;
+    return false;
   }
   
   ESP_LOGD(TAG, "DECODE_B64: Required output length=%zu", output_len);
-  decoded_data.resize(output_len);
   
-  // Actually decode
-  ESP_LOGD(TAG, "DECODE_B64: Performing decode...");
-  ret = mbedtls_base64_decode(decoded_data.data(), output_len, &output_len, (const unsigned char*)base64_data, input_len);
-  if (ret != 0) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
-    decoded_data.clear();
-    return decoded_data;
+  // Use PSRAM allocation for large audio data to avoid regular heap exhaustion
+  uint8_t* psram_buffer = (uint8_t*)heap_caps_malloc(output_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!psram_buffer) {
+    ESP_LOGE(TAG, "DECODE_B64: Failed to allocate PSRAM buffer for decoded audio (%zu bytes)", output_len);
+    return false;
   }
   
-  decoded_data.resize(output_len);
+  ESP_LOGD(TAG, "DECODE_B64: Allocated PSRAM buffer at %p for %zu bytes", psram_buffer, output_len);
+  
+  // Actually decode directly to PSRAM buffer
+  ESP_LOGD(TAG, "DECODE_B64: Performing decode...");
+  ret = mbedtls_base64_decode(psram_buffer, output_len, &output_len, (const unsigned char*)base64_data, input_len);
+  if (ret != 0) {
+    ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
+    heap_caps_free(psram_buffer);
+    return false;
+  }
+  
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio data successfully", output_len);
   
-  return decoded_data;
+  // Play audio directly from PSRAM buffer - no std::vector needed!
+  ESP_LOGD(TAG, "DECODE_B64: Playing audio response directly from PSRAM buffer...");
+  this->handle_audio_response(psram_buffer, output_len);
+  
+  // Give speaker time to copy data if needed (most ESPHome speakers buffer internally)
+  delay(10);
+  
+  // Free PSRAM buffer after playing
+  heap_caps_free(psram_buffer);
+  
+  return true;
 }
 
 void ElevenLabsStream::setup() {
@@ -800,9 +815,9 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         if (base64_len > 4) {
           ESP_LOGD(TAG, "PARSE_JSON_BUF: Decoding base64 audio data...");
           // Decode base64 audio data and play it immediately
-          std::vector<uint8_t> audio_data = this->decode_base64_audio(audio_base64);
-          if (!audio_data.empty()) {
-            ESP_LOGD(TAG, "PARSE_JSON_BUF: Decoded %zu bytes of audio data", audio_data.size());
+          bool decode_success = this->decode_and_play_base64_audio(audio_base64);
+          if (decode_success) {
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Successfully decoded and played audio data");
             
             // Agent is speaking - change state
             ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to SPEAKING");
@@ -813,10 +828,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
               ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering speaking event at %p", trigger);
               trigger->trigger();
             }
-            
-            // Play audio immediately to reduce latency
-            ESP_LOGD(TAG, "PARSE_JSON_BUF: Playing audio response...");
-            this->handle_audio_response(audio_data.data(), audio_data.size());
           } else {
             ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
           }
@@ -1034,13 +1045,9 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
     ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker started, running=%s", this->speaker_->is_running() ? "YES" : "NO");
   }
   
-  // Play audio through speaker - make a copy to ensure data lifetime
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Creating audio data copy...");
-  std::vector<uint8_t> audio_copy(data, data + length);
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Audio copy created, size=%zu", audio_copy.size());
-  
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Sending audio to speaker...");
-  this->speaker_->play(audio_copy.data(), audio_copy.size());
+  // Play audio directly from PSRAM buffer - speaker should copy internally if needed
+  ESP_LOGD(TAG, "HANDLE_AUDIO: Sending audio directly to speaker (no copy)...");
+  this->speaker_->play(data, length);
   ESP_LOGD(TAG, "HANDLE_AUDIO: Audio sent to speaker successfully");
   
   // Note: We don't immediately return to LISTENING state here since
