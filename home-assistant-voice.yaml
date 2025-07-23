@@ -16,6 +16,8 @@ substitutions:
   voice_assist_error_phase_id: '11'
   # Change this to true in case you ahve a hidden SSID at home.
   hidden_ssid: "false"
+  # Default gain factor for mWW audio
+  default_gain_factor: '4'
 
 esphome:
   name: home-assistant-voice
@@ -155,6 +157,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Gain factor for audio fed into microWakeWord
+  - id: mww_gain
+    type: int
+    restore_value: yes
+    initial_value: ${default_gain_factor}
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -241,6 +248,17 @@ switch:
     entity_category: config
     restore_mode: ALWAYS_OFF
     internal: true
+  - platform: template
+    name: Experimental microWakeWord gain adjustment
+    id: mww_gain_adjustment_setting
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    icon: mdi:tune
+    on_turn_off:
+      # Reset gain factor global to default value
+      - lambda: id(mww_gain) = ${default_gain_factor};
+      - script.execute: set_gain_factor
 
 binary_sensor:
   # Center Button. Used for many things (See on_multi_click)
@@ -961,6 +979,69 @@ sensor:
             - script.execute:
                 id: control_hue
                 increase_hue: false
+  - platform: sound_level
+    microphone:
+      microphone: i2s_mics
+      channels: 1
+      gain_factor: ${default_gain_factor}
+      id: sound_level_mic_source
+    passive: true
+    measurement_duration: 30s
+    peak:
+      id: mww_mic_peak
+      name: mWW Mic Peak
+      entity_category: diagnostic
+    rms:
+      id: mww_mic_rms
+      name: mWW Mic RMS
+      entity_category: diagnostic
+      on_value:
+        then:
+          - if:
+              condition:
+                and:
+                  - switch.is_on: mww_gain_adjustment_setting
+                  # RMS value is roughly the noise floor since there weren't any sounds much louder
+                  - lambda: return (abs(id(mww_mic_rms).state - id(mww_mic_peak).state) < 40.0f);
+                  # RMS is far away from the target
+                  - lambda: return (abs(id(mww_mic_rms).state - id(target_rms).state) > 6.0f);
+              then:
+                - logger.log:
+                    format: "Long period of stable sound levels, assuming the noise floor is %.0f dB."
+                    args: ['id(mww_mic_rms).state']
+                # Increase gain with a factor of 3/2 or decrease gain with a factor of 2/3
+                # This uses integer division, so the actual value used is the floor)
+                - lambda: |-
+                    if (id(mww_mic_rms).state < id(target_rms).state) {
+                      // Too quiet, increase gain factor
+                      if (id(mww_gain) < 2) {
+                        id(mww_gain) = 2;
+                      } else {
+                        id(mww_gain) = (id(mww_gain)*3)/2;
+                      }
+                    } else {
+                      // Too loud, decrease gain factor
+                      id(mww_gain) = (id(mww_gain)*2)/3;
+                    }
+                - script.execute: set_gain_factor
+  - platform: template
+    name: mWW Gain Factor
+    lambda: return id(mww_gain);
+    entity_category: diagnostic
+    update_interval: 15s
+    state_class: measurement
+
+number:
+  - platform: template
+    name: Target RMS
+    id: target_rms
+    optimistic: true
+    min_value: -93
+    max_value: -60
+    initial_value: -75
+    step: 1
+    restore_value: true
+    entity_category: config
 
 event:
   # Event entity exposed to the user to automate on complex center button presses.
@@ -1405,6 +1486,17 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
+  # Script to set the gain level for mWW and the sound level sensor to the global value
+  - id: set_gain_factor
+    then:
+      - lambda: id(sound_level_mic_source).set_gain_factor(id(mww_gain));
+      - lambda: id(mww_mic_source).set_gain_factor(id(mww_gain));
+      # Gain factor may have been clamped by the mic source, so use the clamped value
+      - lambda: id(mww_gain) = id(mww_mic_source).get_gain_factor();
+      - logger.log:
+          format: "Setting the gain factor for microWakeWord audio to %d"
+          args: ['id(mww_gain)']
+
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1575,7 +1667,8 @@ micro_wake_word:
   microphone:
     microphone: i2s_mics
     channels: 1
-    gain_factor: 4
+    gain_factor: ${default_gain_factor}
+    id: mww_mic_source
   stop_after_detection: false
   models:
     - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
@@ -1676,6 +1769,7 @@ voice_assistant:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    - script.execute: set_gain_factor
   on_client_disconnected:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
