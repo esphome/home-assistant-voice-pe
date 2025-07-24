@@ -20,8 +20,6 @@
         "**/CVS": true,
         "**/.DS_Store": true,
         "**/Thumbs.db": true,
-        "**/.esphome": true,
-        "**/build": true
     },
     "search.exclude": {
         "**/.esphome": true,

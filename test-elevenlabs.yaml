@@ -52,11 +52,13 @@ esp32:
       CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"
       CONFIG_MBEDTLS_CERTIFICATE_BUNDLE: "y"
       CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL: "y"
+      
+      # Enable WebSocket transport for esp_websocket_client component
+      CONFIG_WS_TRANSPORT: "y"
     components:
       - name: esp_websocket_client
-        source: github://espressif/esp-protocols
+        source: github://espressif/esp-protocols@websocket-v1.5.0
         path: components/esp_websocket_client
-        refresh: 5min
 
 external_components:
   - source:
@@ -210,7 +212,7 @@ elevenlabs_stream:
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics
-  speaker: i2s_audio_speaker
+  speaker: i2s_audio_speaker  # Using 48kHz speaker since ElevenLabs expects 16kHz and we'll handle resampling
   on_connected:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = 1;
@@ -219,10 +221,6 @@ elevenlabs_stream:
     - lambda: id(voice_assistant_phase) = 10;
     - logger.log: "ElevenLabs disconnected"
   on_start:
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 20
-        duration: 0.0s
     - logger.log: "ElevenLabs conversation started"
   on_listening:
     - lambda: id(voice_assistant_phase) = 3;
@@ -231,10 +229,6 @@ elevenlabs_stream:
     - lambda: id(voice_assistant_phase) = 5;
     - logger.log: "ElevenLabs speaking"
   on_end:
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 0
-        duration: 1.0s
     - lambda: id(voice_assistant_phase) = 1;
     - logger.log: "ElevenLabs conversation ended"
   on_error:
