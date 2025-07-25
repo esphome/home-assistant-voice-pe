@@ -202,6 +202,9 @@ void ElevenLabsStream::loop() {
     }
   }
   
+  // Update speaker activity tracking
+  this->update_speaker_activity();
+  
   // Renew signed URL periodically for fast connections
   this->renew_signed_url_if_needed();
 }
@@ -267,6 +270,12 @@ void ElevenLabsStream::stop_stream() {
   } else {
     ESP_LOGD(TAG, "STOP_STREAM: Speaker not running or not configured");
   }
+  
+  // Reset speaker activity tracking
+  this->speaker_is_active_ = false;
+  this->speaker_start_time_ = 0;
+  this->speaker_end_time_ = 0;
+  ESP_LOGD(TAG, "STOP_STREAM: Speaker activity tracking reset");
   
   ESP_LOGD(TAG, "STOP_STREAM: Disconnecting from ElevenLabs...");
   this->disconnect_from_elevenlabs();
@@ -639,9 +648,14 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
   this->agent_output_audio_format_.clear();
   this->user_input_audio_format_.clear();
   
+  // Reset speaker activity tracking
+  this->speaker_is_active_ = false;
+  this->speaker_start_time_ = 0;
+  this->speaker_end_time_ = 0;
+  
   ESP_LOGD(TAG, "DISCONNECT: Cleared audio_buffer (%zu bytes), response_audio_buffer (%zu bytes)", 
            audio_buffer_size, response_audio_buffer_size);
-  ESP_LOGD(TAG, "DISCONNECT: Cleared conversation_id, audio formats");
+  ESP_LOGD(TAG, "DISCONNECT: Cleared conversation_id, audio formats, speaker activity");
   
   ESP_LOGD(TAG, "=== DISCONNECT_FROM_ELEVENLABS COMPLETE ===");
 }
@@ -1058,6 +1072,19 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
   ESP_LOGI(TAG, "HANDLE_AUDIO: Estimated audio duration: %.1f ms (%zu samples at %d Hz)", duration_ms, samples, sample_rate);
   
+  // Track speaker activity to prevent microphone echo/feedback
+  uint32_t current_time = millis();
+  this->speaker_is_active_ = true;
+  this->speaker_start_time_ = current_time;
+  // Calculate when this audio chunk should finish playing (add pipeline buffer)
+  uint32_t pipeline_delay_ms = 500; // Conservative estimate for resampler/mixer delay
+  this->speaker_end_time_ = current_time + (uint32_t)duration_ms + pipeline_delay_ms;
+  
+  ESP_LOGI(TAG, "HANDLE_AUDIO: *** SPEAKER ACTIVATED *** - Blocking microphone for %.1f ms + %u ms buffer", 
+           duration_ms, pipeline_delay_ms);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Speaker activity tracked - start=%u, end=%u", 
+           this->speaker_start_time_, this->speaker_end_time_);
+  
   // Send audio data to resampler - now with correct input format set
   ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to resampler with input format %d Hz -> output 48 kHz", sample_rate);
   
@@ -1172,28 +1199,9 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
     return;
   }
   
-  ESP_LOGD(TAG, "SEND_AUDIO: Sending %zu audio samples (%zu bytes)", audio_data.size(), audio_data.size() * sizeof(int16_t));
-  
   // Convert audio data to bytes
   const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
   size_t audio_size = audio_data.size() * sizeof(int16_t);
-  
-  // Log first few samples for debugging
-  if (audio_data.size() >= 4) {
-    ESP_LOGD(TAG, "SEND_AUDIO: First 4 samples: %d, %d, %d, %d", 
-             audio_data[0], audio_data[1], audio_data[2], audio_data[3]);
-  }
-  
-  // Check if audio has any significant amplitude
-  int16_t max_amplitude = 0;
-  for (const auto& sample : audio_data) {
-    int16_t abs_sample = abs(sample);
-    if (abs_sample > max_amplitude) {
-      max_amplitude = abs_sample;
-    }
-  }
-  ESP_LOGD(TAG, "SEND_AUDIO: Max amplitude in chunk: %d (%.1f%% of full scale)", 
-           max_amplitude, (max_amplitude / 32768.0) * 100.0);
   
   // Encode audio as base64 for WebSocket transmission
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
@@ -1203,15 +1211,12 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
     return;
   }
   
-  ESP_LOGD(TAG, "SEND_AUDIO: Encoded %zu bytes to %zu base64 chars", audio_size, audio_base64.length());
-  
   // Send as user_audio_chunk according to protocol
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
   
   this->send_websocket_message(message);
-  ESP_LOGD(TAG, "SEND_AUDIO: Audio chunk sent successfully");
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
@@ -1223,8 +1228,14 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     return;
   }
   
-  ESP_LOGD(TAG, "HANDLE_MIC: Processing %zu bytes of microphone data", data.size());
+  // Update speaker activity status and check if we should mute microphone
+  this->update_speaker_activity();
   
+  if (this->is_speaker_active()) {
+    ESP_LOGD(TAG, "HANDLE_MIC: Blocking microphone input - agent is speaking (speaker active)");
+    return;
+  }
+
   // Microphone is configured for 32-bit samples, need to convert to 16-bit
   if (data.size() % 4 != 0) {
     ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 32-bit samples: %zu bytes", data.size());
@@ -1359,6 +1370,40 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
     default:
       ESP_LOGD(TAG, "WS_EVENT: Unknown WebSocket event: %d", event_id);
       break;
+  }
+}
+
+// Speaker activity tracking methods
+bool ElevenLabsStream::is_speaker_active() const {
+  if (!this->speaker_is_active_) {
+    return false;
+  }
+  
+  uint32_t current_time = millis();
+  
+  // Check if audio should still be playing (with silence buffer)
+  bool still_playing = current_time < (this->speaker_end_time_ + this->speaker_silence_buffer_ms_);
+  
+  return still_playing;
+}
+
+void ElevenLabsStream::update_speaker_activity() {
+  if (!this->speaker_is_active_) {
+    return; // Nothing to update
+  }
+  
+  uint32_t current_time = millis();
+  
+  // Check if audio playback has finished (including silence buffer)
+  if (current_time >= (this->speaker_end_time_ + this->speaker_silence_buffer_ms_)) {
+    ESP_LOGD(TAG, "SPEAKER_ACTIVITY: Audio playback finished, enabling microphone (was blocked for %u ms)",
+             current_time - this->speaker_start_time_);
+    this->speaker_is_active_ = false;
+    this->speaker_start_time_ = 0;
+    this->speaker_end_time_ = 0;
+  } else {
+    ESP_LOGV(TAG, "SPEAKER_ACTIVITY: Still playing - current=%u, end=%u (+%u buffer)",
+             current_time, this->speaker_end_time_, this->speaker_silence_buffer_ms_);
   }
 }
 

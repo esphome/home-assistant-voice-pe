@@ -49,6 +49,10 @@ class ElevenLabsStream : public Component {
   bool is_connected() const { return this->websocket_connected_; }
   StreamState get_state() const { return this->state_; }
   void handle_microphone_data(const std::vector<uint8_t> &data);
+  
+  // Speaker activity tracking
+  bool is_speaker_active() const;
+  void update_speaker_activity();
 
   // Triggers - simplified to just on/off and error
   void add_on_start_trigger(Trigger<> *trigger) { this->on_start_triggers_.push_back(trigger); }
@@ -115,6 +119,12 @@ class ElevenLabsStream : public Component {
   uint32_t last_signed_url_renewal_{0};  // Track when we last renewed the signed URL
   uint32_t signed_url_renewal_interval_{600000};  // 10 minutes in milliseconds
   bool signed_url_valid_{false};  // Track if we have a valid signed URL
+  
+  // Speaker activity tracking to prevent microphone echo/feedback
+  bool speaker_is_active_{false};  // Track if agent is currently speaking
+  uint32_t speaker_start_time_{0};  // When current audio playback started
+  uint32_t speaker_end_time_{0};   // When current audio playback should end
+  uint32_t speaker_silence_buffer_ms_{500};  // Wait time after speaker stops before enabling mic
   static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB
 };
 
