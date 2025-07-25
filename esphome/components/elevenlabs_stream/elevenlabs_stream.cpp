@@ -1044,9 +1044,6 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   if (bytes_written != length) {
     ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, length);
   }
-  this->set_timeout("check_speaker_finished", 100, [this]() {
-    this->check_speaker_finished();
-  });
 }
 
 void ElevenLabsStream::check_speaker_finished() {
@@ -1056,21 +1053,11 @@ void ElevenLabsStream::check_speaker_finished() {
   
   // Check if the speaker is still playing audio by looking at buffered data
   // When has_buffered_data() returns false, the speaker has finished playing
-  if (this->speaker_->has_buffered_data()) {
-    // Still playing, schedule another check
-    this->set_timeout("check_speaker_finished", 100, [this]() {
-      this->check_speaker_finished();
-    });
-  } else {
+  if (!this->speaker_->has_buffered_data() && !this->speaker_->is_running()) {
     // Speaker has finished, add silence buffer before enabling microphone
-    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing, adding silence buffer");
+    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing");
     this->speaker_end_time_ = millis();
-    
-    // Add a small silence buffer to prevent immediate microphone activation
-    this->set_timeout("enable_microphone", this->speaker_silence_buffer_ms_, [this]() {
-      this->speaker_is_active_ = false;
-      ESP_LOGD(TAG, "SPEAKER_FINISHED: Microphone re-enabled after silence buffer");
-    });
+    this->speaker_is_active_ = false;
   }
 }
 
@@ -1182,6 +1169,7 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
+  // Only process microphone data if stream is ON, websocket is connected, and data is present
   if (this->state_ != StreamState::ON || !this->websocket_connected_ || data.empty()) {
     ESP_LOGV(TAG, "HANDLE_MIC: Skipping - state=%s, connected=%s, data_empty=%s",
              this->state_ == StreamState::ON ? "ON" : "OFF",
@@ -1189,18 +1177,13 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
              data.empty() ? "YES" : "NO");
     return;
   }
-  
+
+  // Block microphone input if speaker is active or agent audio is playing
   if (this->is_speaker_active()) {
-    ESP_LOGV(TAG, "HANDLE_MIC: Blocking microphone input - agent is speaking (speaker active)");
+    ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
     return;
   }
 
-  // Microphone is now configured for 16-bit samples directly, no conversion needed
-  if (data.size() % 2 != 0) {
-    ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 16-bit samples: %zu bytes", data.size());
-    return;
-  }
-  
   // Microphone is configured for 32-bit samples, convert to 16-bit PCM
   if (data.size() % 4 != 0) {
     ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 32-bit samples: %zu bytes", data.size());
