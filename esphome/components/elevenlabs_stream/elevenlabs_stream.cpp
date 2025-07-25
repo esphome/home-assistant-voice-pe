@@ -6,6 +6,7 @@
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/microphone/microphone.h"
+#include "esphome/components/audio/audio.h"
 
 #ifdef USE_ESP32
 #include <esp_websocket_client.h>
@@ -107,11 +108,22 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   ESP_LOGD(TAG, "DECODE_B64: Playing audio response directly from PSRAM buffer...");
   this->handle_audio_response(psram_buffer, output_len);
   
-  // Give speaker time to copy data if needed (most ESPHome speakers buffer internally)
-  delay(10);
+  // CRITICAL: Don't free the buffer until audio is finished playing!
+  // Calculate estimated duration and schedule buffer cleanup
+  size_t samples = output_len / 2; // 16-bit samples = 2 bytes each
+  uint32_t sample_rate = 44100; // ElevenLabs default
+  float duration_ms = (float)samples / (sample_rate / 1000.0f);
+  uint32_t wait_time_ms = (uint32_t)(duration_ms + 1000); // Add 1000ms buffer for safety
   
-  // Free PSRAM buffer after playing
-  heap_caps_free(psram_buffer);
+  ESP_LOGI(TAG, "DECODE_B64: Scheduling buffer cleanup for audio duration: %.1f ms + 1000ms buffer = %u ms", 
+           duration_ms, wait_time_ms);
+  
+  // Schedule buffer cleanup without blocking the WebSocket task
+  this->set_timeout("cleanup_audio_buffer", wait_time_ms, [psram_buffer]() {
+    ESP_LOGI("elevenlabs_stream", "CLEANUP: Audio playback completed, freeing PSRAM buffer");
+    heap_caps_free(psram_buffer);
+    ESP_LOGD("elevenlabs_stream", "CLEANUP: PSRAM buffer freed after audio completion");
+  });
   
   return true;
 }
@@ -645,9 +657,6 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
   int sent = esp_websocket_client_send_text(this->websocket_client_, message.c_str(), message.length(), portMAX_DELAY);
   if (sent < 0) {
     ESP_LOGE(TAG, "SEND_WS_MSG: Failed to send WebSocket message: %d", sent);
-  } else {
-    ESP_LOGD(TAG, "SEND_WS_MSG: Sent WebSocket message (%d bytes): %s", sent, 
-             message.length() > 200 ? (message.substr(0, 200) + "...").c_str() : message.c_str());
   }
 }
 
@@ -1017,16 +1026,36 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker available at %p", this->speaker_);
   ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker running=%s", this->speaker_->is_running() ? "YES" : "NO");
   
-  // Start speaker if not running
-  if (!this->speaker_->is_running()) {
-    ESP_LOGD(TAG, "HANDLE_AUDIO: Starting speaker");
-    this->speaker_->start();
-    ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker started, running=%s", this->speaker_->is_running() ? "YES" : "NO");
+  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
+  uint32_t sample_rate = 44100; // Default to 44.1kHz
+  if (!this->agent_output_audio_format_.empty()) {
+    // Extract sample rate from format string like "pcm_44100"
+    size_t underscore_pos = this->agent_output_audio_format_.find('_');
+    if (underscore_pos != std::string::npos) {
+      std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
+      sample_rate = std::stoul(rate_str);
+      ESP_LOGI(TAG, "HANDLE_AUDIO: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
+    }
   }
   
-  // Send raw audio data directly to the resampler speaker
-  // ElevenLabs sends 16-bit little-endian mono PCM audio
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending raw audio data to resampler: %zu bytes", length);
+  // Set the input audio stream info for the resampler based on ElevenLabs format
+  // ElevenLabs sends 16-bit mono PCM audio
+  esphome::audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
+           16, 1, sample_rate);
+  
+  // Configure the speaker with the correct input format BEFORE playing any audio
+  this->speaker_->set_audio_stream_info(input_stream_info);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Input audio stream info set on speaker - letting speaker start naturally with play()");
+  
+  // Ensure the speaker is started before sending audio data
+  if (!this->speaker_->is_running()) {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: Starting resampler speaker before sending audio data");
+    this->speaker_->start();
+    // Give the speaker time to start up properly
+    vTaskDelay(pdMS_TO_TICKS(50)); // Reduced to 50ms since we now keep buffer alive longer
+  }
+  
   ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
   
   // Let's examine the first few bytes to understand the audio format
@@ -1035,37 +1064,24 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
              data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
   }
   
-  // Calculate audio duration for proper timing based on actual format
-  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
-  float sample_rate = 44100.0f; // Default to 44.1kHz
-  if (!this->agent_output_audio_format_.empty()) {
-    // Extract sample rate from format string like "pcm_44100"
-    size_t underscore_pos = this->agent_output_audio_format_.find('_');
-    if (underscore_pos != std::string::npos) {
-      std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
-      sample_rate = std::stof(rate_str);
-      ESP_LOGD(TAG, "HANDLE_AUDIO: Parsed sample rate: %.1f Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
-    }
-  }
-  
   size_t samples = length / 2; // 16-bit samples = 2 bytes each
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Estimated audio duration: %.1f ms (%zu samples at %.1f Hz)", duration_ms, samples, sample_rate);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Estimated audio duration: %.1f ms (%zu samples at %d Hz)", duration_ms, samples, sample_rate);
   
-  // Ensure speaker is running before sending audio
-  if (!this->speaker_->is_running()) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: Starting speaker before sending audio");
-    this->speaker_->start();
-    delay(50); // Give speaker time to start
-  }
-  
-  // Send audio in one piece - the resampler will handle buffering
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending all audio data at once to resampler");
+  // Send audio data to resampler - now with correct input format set
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to resampler with input format %d Hz -> output 48 kHz", sample_rate);
   this->speaker_->play(data, length);
   
   // Don't block here - let the audio play naturally
-  // The resampler and mixer will handle the timing
+  // The resampler and mixer will handle the timing and conversion
   ESP_LOGI(TAG, "HANDLE_AUDIO: Audio data sent to resampler, continuing...");
+  
+  // Add debug info about speaker state after sending audio
+  if (this->speaker_ && this->speaker_->is_running()) {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: Resampler speaker is running successfully");
+  } else if (this->speaker_) {
+    ESP_LOGW(TAG, "HANDLE_AUDIO: Resampler speaker NOT running - audio may not play");
+  }
   
   ESP_LOGI(TAG, "HANDLE_AUDIO: Audio response handling complete (%zu total bytes)", length);
 }
@@ -1226,9 +1242,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
   ElevenLabsStream *stream = static_cast<ElevenLabsStream*>(handler_args);
   esp_websocket_event_data_t *data = static_cast<esp_websocket_event_data_t*>(event_data);
   
-  ESP_LOGD(TAG, "WS_EVENT: Received WebSocket event %d", event_id);
-  ESP_LOGD(TAG, "WS_EVENT: Stream pointer=%p, data pointer=%p", stream, data);
-  
   switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_CONNECTED");
@@ -1266,10 +1279,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       break;
       
     case WEBSOCKET_EVENT_DATA:
-      ESP_LOGD(TAG, "WS_EVENT: WEBSOCKET_EVENT_DATA");
-      ESP_LOGD(TAG, "WS_EVENT: Data details - opcode=0x%02x, payload_len=%d, data_len=%d, payload_offset=%d, fin=%d", 
-               data->op_code, data->payload_len, data->data_len, data->payload_offset, data->fin);
-      
       if (data->op_code == 0x08) { // Close frame
         ESP_LOGW(TAG, "WS_EVENT: WebSocket close frame received");
         if (data->data_len >= 2) {
@@ -1283,43 +1292,25 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       }
       
       if (data->op_code == 0x01) { // Text frame
-        ESP_LOGD(TAG, "WS_EVENT: Text frame received");
         // Handle text messages with robust fragmentation support using reassembler
         if (data->data_len > 0) {
-          ESP_LOGD(TAG, "WS_EVENT: Processing text frame fragment...");
           
           // Use the reassembler to handle fragmentation
           bool complete = stream->reassembler_.add(data);
           
-          ESP_LOGD(TAG, "WS_EVENT: Message fragment: offset=%d, len=%d, total=%d, fin=%d, complete=%s", 
-                   data->payload_offset, data->data_len, data->payload_len, data->fin, complete ? "YES" : "NO");
-          
           if (complete) {
             ESP_LOGD(TAG, "WS_EVENT: Complete message assembled, processing...");
-            
-            ESP_LOGW(TAG, "WS_EVENT: Processing large message directly from buffer");
             
             // Get pointer to complete message in reassembler buffer
             const uint8_t* buffer_ptr = stream->reassembler_.getBuffer();
             size_t buffer_size = stream->reassembler_.getSize();
             
-            ESP_LOGD(TAG, "WS_EVENT: Buffer pointer=%p, size=%zu", buffer_ptr, buffer_size);
-            
             if (buffer_ptr && buffer_size > 0) {
-              ESP_LOGD(TAG, "WS_EVENT: Large message processed (%zu bytes): %.*s", 
-                        buffer_size, 
-                        buffer_size > 200 ? 200 : (int)buffer_size, (const char*)buffer_ptr);
-              
-              // Process the message using the buffer and length directly
-              ESP_LOGD(TAG, "WS_EVENT: Processing large message...");
               stream->handle_websocket_message(buffer_ptr, buffer_size);
               
               // Reset the reassembler after processing
-              ESP_LOGD(TAG, "WS_EVENT: Resetting reassembler");
               stream->reassembler_.reset();
             }
-          } else {
-            ESP_LOGV(TAG, "WS_EVENT: Message fragment stored, waiting for more data");
           }
         } else {
           ESP_LOGW(TAG, "WS_EVENT: Text frame with no data");
