@@ -79,7 +79,7 @@ wifi:
   password: ${wifi_password}
 
 logger:
-  level: INFO
+  level: DEBUG
 
 api:
   id: api_id
@@ -175,12 +175,78 @@ speaker:
     output_speaker: announcement_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
+    num_channels: 1  # ElevenLabs sends mono audio
+    # Input will be 16kHz mono from ElevenLabs, output will be 48kHz mono for mixer
   - platform: resampler
     id: media_resampling_speaker
     output_speaker: media_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
     taps: 32  # Higher quality resampling (more CPU intensive)
+
+# Media player with sound files for testing speaker functionality
+media_player:
+  - platform: speaker
+    id: test_media_player
+    name: Test Media Player
+    internal: true
+    volume_increment: 0.05
+    volume_min: 0.4
+    volume_max: 0.85
+    announcement_pipeline:
+      speaker: announcement_resampling_speaker
+      format: FLAC
+      num_channels: 1
+      sample_rate: 48000
+    media_pipeline:
+      speaker: media_resampling_speaker
+      format: FLAC
+      num_channels: 2
+      sample_rate: 48000
+    files:
+      - id: center_button_press_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_press.flac
+      - id: wake_word_triggered_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+      - id: easter_egg_tick_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
+
+# Volume control for debugging
+number:
+  - platform: template
+    id: master_volume
+    name: "Master Volume"
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    initial_value: 90
+    step: 5
+    on_value:
+      then:
+        - lambda: |-
+            float volume = x / 100.0;
+            id(i2s_audio_speaker)->set_volume(volume);
+            ESP_LOGI("volume", "Set master volume to %.2f%%", x);
+
+# Script to play sound files (from the original voice kit implementation)
+script:
+  - id: play_sound
+    parameters:
+      priority: bool
+      sound_file: "audio::AudioFile*"
+    then:
+      - lambda: |-
+          if (priority) {
+            id(test_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
+              .set_announcement(true)
+              .perform();
+          }
+          if ( (id(test_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
+            id(test_media_player)
+              ->play_file(sound_file, true, false);
+          }
 
 # Simple global variables for testing
 globals:
@@ -236,7 +302,7 @@ elevenlabs_stream:
     - delay: 1s
     - lambda: id(voice_assistant_phase) = 1;
 
-# Test button to trigger stream
+# Test button to trigger stream and test speaker
 binary_sensor:
   - platform: gpio
     pin: 
@@ -247,6 +313,23 @@ binary_sensor:
         pullup: true
     name: "Test Button"
     on_press:
+      - logger.log: "Button pressed - playing test sound first"
+      # Set volume to a reasonable level
+      - lambda: |-
+          id(i2s_audio_speaker)->set_volume(0.7);
+          ESP_LOGI("speaker_test", "Set speaker volume to 70%%");
+      # Check speaker status
+      - lambda: |-
+          ESP_LOGI("speaker_test", "Speaker mute state: %s", id(i2s_audio_speaker)->get_mute_state() ? "MUTED" : "UNMUTED");
+          ESP_LOGI("speaker_test", "Speaker volume: %.2f", id(i2s_audio_speaker)->get_volume());
+          ESP_LOGI("speaker_test", "Speaker amplifier pin state: %s", id(internal_speaker_amp)->state ? "ON" : "OFF");
+      # Play test sound using script (same as voice_kit component does)
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: center_button_press_sound
+      - delay: 2s  # Wait for test sound to finish
+      - logger.log: "Test sound finished, now testing ElevenLabs"
       - if:
           condition:
             elevenlabs_stream.is_running: {}

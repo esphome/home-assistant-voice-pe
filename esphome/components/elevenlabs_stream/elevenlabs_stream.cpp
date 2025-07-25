@@ -60,8 +60,8 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
 // Helper function to decode base64 audio data
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
-  ESP_LOGD(TAG, "DECODE_B64: Starting base64 audio decode and play");
-  ESP_LOGD(TAG, "DECODE_B64: Input pointer=%p", base64_data);
+  ESP_LOGI(TAG, "DECODE_B64: Starting base64 audio decode and play");
+  ESP_LOGI(TAG, "DECODE_B64: Input pointer=%p", base64_data);
   
   if (!base64_data || strlen(base64_data) == 0) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
@@ -633,11 +633,6 @@ void ElevenLabsStream::set_state(StreamState new_state) {
 }
 
 void ElevenLabsStream::send_websocket_message(const std::string &message) {
-  ESP_LOGD(TAG, "SEND_WS_MSG: Attempting to send message (length=%zu)", message.length());
-  ESP_LOGD(TAG, "SEND_WS_MSG: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGD(TAG, "SEND_WS_MSG: WebSocket client=%p", this->websocket_client_);
-  ESP_LOGD(TAG, "SEND_WS_MSG: Message empty=%s", message.empty() ? "YES" : "NO");
-  
   if (!this->websocket_connected_ || !this->websocket_client_ || message.empty()) {
     ESP_LOGW(TAG, "SEND_WS_MSG: Cannot send message - WebSocket not connected or message empty");
     ESP_LOGW(TAG, "SEND_WS_MSG:   connected=%s, client=%p, empty=%s", 
@@ -647,7 +642,6 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
     return;
   }
   
-  ESP_LOGD(TAG, "SEND_WS_MSG: Sending text message...");
   int sent = esp_websocket_client_send_text(this->websocket_client_, message.c_str(), message.length(), portMAX_DELAY);
   if (sent < 0) {
     ESP_LOGE(TAG, "SEND_WS_MSG: Failed to send WebSocket message: %d", sent);
@@ -658,27 +652,16 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
 }
 
 void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t length) {
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Processing WebSocket message");
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Buffer pointer=%p, length=%zu", buffer, length);
-  
   if (!buffer || length == 0) {
     ESP_LOGW(TAG, "HANDLE_WS_MSG: Received empty WebSocket message");
     return;
   }
   
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Received WebSocket message (%zu bytes): %.*s", length,
-           length > 200 ? 200 : (int)length, (const char*)buffer);
-  
-  // Parse JSON directly from buffer using ArduinoJson without creating std::string
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Parsing JSON message directly from buffer...");
   this->parse_json_message_from_buffer(buffer, length);
   ESP_LOGD(TAG, "HANDLE_WS_MSG: Message processing complete");
 }
 
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
-  ESP_LOGD(TAG, "PARSE_JSON_BUF: Starting JSON message parsing from buffer");
-  ESP_LOGD(TAG, "PARSE_JSON_BUF: Buffer=%p, length=%zu", buffer, length);
-  
   // Use ArduinoJson directly with PSRAM allocator
   // Create a PSRAM allocator for BasicJsonDocument
   struct PSRAMAllocator {
@@ -712,10 +695,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   }
   
   JsonObject root = json_document.as<JsonObject>();
-  
-  // Call the same parsing logic as the original function
-  ESP_LOGD(TAG, "PARSE_JSON_BUF: JSON parsing callback entered");
-  
   const char* type = root["type"];
   if (!type) {
     ESP_LOGW(TAG, "PARSE_JSON_BUF: Message missing type field");
@@ -742,7 +721,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
       ESP_LOGD(TAG, "PARSE_JSON_BUF: agent_output_format=%s", agent_output_format ? agent_output_format : "NULL");
       ESP_LOGD(TAG, "PARSE_JSON_BUF: user_input_format=%s", user_input_format ? user_input_format : "NULL");
       
-      if (conversation_id && false) { //we don't listen right now temporarily - this has always been disabled, since we are only testing playback for the initial message right now.
+      if (conversation_id) { //we don't listen right now temporarily - this has always been disabled, since we are only testing playback for the initial message right now.
         this->conversation_id_ = conversation_id;
         ESP_LOGI(TAG, "PARSE_JSON_BUF: Conversation initiated: %s", conversation_id);
         
@@ -792,14 +771,14 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   
   // Handle audio events (corrected type name)
   if (strcmp(type, "audio") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing audio event");
+    ESP_LOGI(TAG, "PARSE_JSON_BUF: Processing audio event");
     JsonObject audio = root["audio_event"];
     if (audio) {
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: Found audio_event");
+      ESP_LOGI(TAG, "PARSE_JSON_BUF: Found audio_event");
       const char* audio_base64 = audio["audio_base_64"];
       uint32_t event_id = audio["event_id"] | 0;
       
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: audio_base64=%s, event_id=%d", 
+      ESP_LOGI(TAG, "PARSE_JSON_BUF: audio_base64=%s, event_id=%d", 
                audio_base64 ? "PRESENT" : "NULL", event_id);
       
       if (audio_base64) {
@@ -813,11 +792,11 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         // Process audio chunks immediately for better real-time performance
         // Skip empty or very small chunks
         if (base64_len > 4) {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Decoding base64 audio data...");
+          ESP_LOGI(TAG, "PARSE_JSON_BUF: About to decode base64 audio data (length=%zu)...", base64_len);
           // Decode base64 audio data and play it immediately
           bool decode_success = this->decode_and_play_base64_audio(audio_base64);
           if (decode_success) {
-            ESP_LOGD(TAG, "PARSE_JSON_BUF: Successfully decoded and played audio data");
+            ESP_LOGI(TAG, "PARSE_JSON_BUF: Successfully decoded and played audio data");
             
             // Agent is speaking - change state
             ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to SPEAKING");
@@ -1021,9 +1000,9 @@ void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t lengt
 }
 
 void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length) {
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Processing audio response");
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Data pointer=%p, length=%zu", data, length);
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Playing audio response: %d bytes", length);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Processing audio response");
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Data pointer=%p, length=%zu", data, length);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Playing audio response: %d bytes", length);
   
   if (!data || length == 0) {
     ESP_LOGD(TAG, "HANDLE_AUDIO: No audio data to play (data=%p, length=%zu)", data, length);
@@ -1046,12 +1025,49 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   }
   
   // Send raw audio data directly to the resampler speaker
-  // The resampler will handle conversion from ElevenLabs format (16kHz mono 16-bit) 
-  // to the target format (48kHz, 16-bit for the mixer)
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Sending raw audio data to resampler: %zu bytes", length);
+  // ElevenLabs sends 16-bit little-endian mono PCM audio
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending raw audio data to resampler: %zu bytes", length);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
+  
+  // Let's examine the first few bytes to understand the audio format
+  if (length >= 8) {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: First 8 bytes: %02x %02x %02x %02x %02x %02x %02x %02x", 
+             data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+  }
+  
+  // Calculate audio duration for proper timing based on actual format
+  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
+  float sample_rate = 44100.0f; // Default to 44.1kHz
+  if (!this->agent_output_audio_format_.empty()) {
+    // Extract sample rate from format string like "pcm_44100"
+    size_t underscore_pos = this->agent_output_audio_format_.find('_');
+    if (underscore_pos != std::string::npos) {
+      std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
+      sample_rate = std::stof(rate_str);
+      ESP_LOGD(TAG, "HANDLE_AUDIO: Parsed sample rate: %.1f Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
+    }
+  }
+  
+  size_t samples = length / 2; // 16-bit samples = 2 bytes each
+  float duration_ms = (float)samples / (sample_rate / 1000.0f);
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Estimated audio duration: %.1f ms (%zu samples at %.1f Hz)", duration_ms, samples, sample_rate);
+  
+  // Ensure speaker is running before sending audio
+  if (!this->speaker_->is_running()) {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: Starting speaker before sending audio");
+    this->speaker_->start();
+    delay(50); // Give speaker time to start
+  }
+  
+  // Send audio in one piece - the resampler will handle buffering
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending all audio data at once to resampler");
   this->speaker_->play(data, length);
   
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Audio response handling complete");
+  // Don't block here - let the audio play naturally
+  // The resampler and mixer will handle the timing
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio data sent to resampler, continuing...");
+  
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio response handling complete (%zu total bytes)", length);
 }
 
 void ElevenLabsStream::handle_error(const std::string &error_message) {
