@@ -27,5 +27,5 @@
     },
     "github.copilot.chat.agent.terminal.allowList": {
         ".\\test-elevenlabs.bat": true
-    }
+    },
 }

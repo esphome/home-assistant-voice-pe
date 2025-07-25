@@ -1,5 +1,16 @@
 {
     "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/submodules/esphome/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ]
+        }
     ],
     "version": 4
 }

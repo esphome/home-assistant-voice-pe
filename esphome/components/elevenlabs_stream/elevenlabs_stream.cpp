@@ -1045,14 +1045,12 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
     ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker started, running=%s", this->speaker_->is_running() ? "YES" : "NO");
   }
   
-  // Play audio directly from PSRAM buffer - speaker should copy internally if needed
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Sending audio directly to speaker (no copy)...");
+  // Send raw audio data directly to the resampler speaker
+  // The resampler will handle conversion from ElevenLabs format (16kHz mono 16-bit) 
+  // to the target format (48kHz, 16-bit for the mixer)
+  ESP_LOGD(TAG, "HANDLE_AUDIO: Sending raw audio data to resampler: %zu bytes", length);
   this->speaker_->play(data, length);
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Audio sent to speaker successfully");
   
-  // Note: We don't immediately return to LISTENING state here since
-  // there might be more audio chunks coming. The state will be managed
-  // by the timing of audio events and VAD scores.
   ESP_LOGD(TAG, "HANDLE_AUDIO: Audio response handling complete");
 }
 

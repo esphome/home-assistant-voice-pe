@@ -1,0 +1,3 @@
+[submodule "submodules/esphome"]
+	path = submodules/esphome
+	url = https://github.com/esphome/esphome.git

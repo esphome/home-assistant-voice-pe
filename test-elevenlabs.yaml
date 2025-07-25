@@ -91,8 +91,8 @@ ota:
 
 i2c:
   - id: internal_i2c
-    sda: GPIO1
-    scl: GPIO2
+    sda: GPIO5
+    scl: GPIO6
     frequency: 400kHz
 
 psram:
@@ -180,13 +180,7 @@ speaker:
     output_speaker: media_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
-  
-  # ElevenLabs resampler - converts 16kHz mono to 48kHz stereo for hardware compatibility
-  - platform: resampler
-    id: elevenlabs_resampling_speaker
-    output_speaker: i2s_audio_speaker
-    sample_rate: 48000
-    bits_per_sample: 32
+    taps: 32  # Higher quality resampling (more CPU intensive)
 
 # Simple global variables for testing
 globals:
@@ -203,7 +197,7 @@ globals:
 switch:
   - platform: gpio
     id: internal_speaker_amp
-    pin: GPIO46
+    pin: GPIO47
     restore_mode: RESTORE_DEFAULT_ON
 
 # ElevenLabs Conversational AI Stream
@@ -212,7 +206,7 @@ elevenlabs_stream:
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics
-  speaker: i2s_audio_speaker  # Using 48kHz speaker since ElevenLabs expects 16kHz and we'll handle resampling
+  speaker: announcement_resampling_speaker  # Use announcement resampler for proper audio format conversion
   on_connected:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = 1;
