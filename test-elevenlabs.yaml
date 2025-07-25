@@ -194,7 +194,7 @@ media_player:
     internal: true
     volume_increment: 0.05
     volume_min: 0.4
-    volume_max: 0.85
+    volume_max: 0.9
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC
@@ -275,24 +275,13 @@ elevenlabs_stream:
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics
   speaker: announcement_resampling_speaker  # Use announcement resampler for proper audio format conversion
-  on_connected:
+  on_start:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = 1;
-    - logger.log: "ElevenLabs connected and ready"
-  on_disconnected:
-    - lambda: id(voice_assistant_phase) = 10;
-    - logger.log: "ElevenLabs disconnected"
-  on_start:
-    - logger.log: "ElevenLabs conversation started"
-  on_listening:
-    - lambda: id(voice_assistant_phase) = 3;
-    - logger.log: "ElevenLabs listening"
-  on_speaking:
-    - lambda: id(voice_assistant_phase) = 5;
-    - logger.log: "ElevenLabs speaking"
+    - logger.log: "ElevenLabs stream started - audio streaming ON"
   on_end:
-    - lambda: id(voice_assistant_phase) = 1;
-    - logger.log: "ElevenLabs conversation ended"
+    - lambda: id(voice_assistant_phase) = 10;
+    - logger.log: "ElevenLabs stream ended - audio streaming OFF"
   on_error:
     - lambda: |
         if (!id(init_in_progress)) {
@@ -318,8 +307,7 @@ binary_sensor:
       - logger.log: "Button pressed - playing test sound first"
       # Set volume to a reasonable level
       - lambda: |-
-          id(i2s_audio_speaker)->set_volume(0.7);
-          ESP_LOGI("speaker_test", "Set speaker volume to 70%%");
+          id(i2s_audio_speaker)->set_volume(0.9);
       # Check speaker status
       - lambda: |-
           ESP_LOGI("speaker_test", "Speaker mute state: %s", id(i2s_audio_speaker)->get_mute_state() ? "MUTED" : "UNMUTED");

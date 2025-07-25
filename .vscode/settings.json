@@ -26,7 +26,8 @@
         "**/build": true
     },
     "github.copilot.chat.agent.terminal.allowList": {
-        ".\\test-elevenlabs.bat": true
+        ".\\test-elevenlabs.bat": true,
+        "test-elevenlabs.bat": true
     },
     "chat.agent.maxRequests": 1000,
     "C_Cpp.errorSquiggles": "disabled",

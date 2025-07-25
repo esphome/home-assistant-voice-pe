@@ -27,12 +27,8 @@ class ElevenLabsStream;
 void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 enum class StreamState {
-  IDLE,
-  CONNECTING,
-  CONNECTED,
-  LISTENING,
-  SPEAKING,
-  ERROR
+  OFF,    // Connection closed, not listening
+  ON      // Connected and streaming audio both ways
 };
 
 class ElevenLabsStream : public Component {
@@ -49,18 +45,14 @@ class ElevenLabsStream : public Component {
 
   bool start_stream();
   void stop_stream();
-  bool is_running() const { return this->state_ != StreamState::IDLE; }
+  bool is_running() const { return this->state_ == StreamState::ON; }
   bool is_connected() const { return this->websocket_connected_; }
   StreamState get_state() const { return this->state_; }
   void handle_microphone_data(const std::vector<uint8_t> &data);
 
-  // Triggers
+  // Triggers - simplified to just on/off and error
   void add_on_start_trigger(Trigger<> *trigger) { this->on_start_triggers_.push_back(trigger); }
   void add_on_end_trigger(Trigger<> *trigger) { this->on_end_triggers_.push_back(trigger); }
-  void add_on_listening_trigger(Trigger<> *trigger) { this->on_listening_triggers_.push_back(trigger); }
-  void add_on_speaking_trigger(Trigger<> *trigger) { this->on_speaking_triggers_.push_back(trigger); }
-  void add_on_connected_trigger(Trigger<> *trigger) { this->on_connected_triggers_.push_back(trigger); }
-  void add_on_disconnected_trigger(Trigger<> *trigger) { this->on_disconnected_triggers_.push_back(trigger); }
   void add_on_error_trigger(Trigger<std::string> *trigger) { this->on_error_triggers_.push_back(trigger); }
 
  protected:
@@ -89,7 +81,7 @@ class ElevenLabsStream : public Component {
   microphone::Microphone *microphone_{nullptr};
   speaker::Speaker *speaker_{nullptr};
 
-  StreamState state_{StreamState::IDLE};
+  StreamState state_{StreamState::OFF};
 
 #ifdef USE_ESP32
   esp_websocket_client_handle_t websocket_client_{nullptr};
@@ -100,13 +92,9 @@ class ElevenLabsStream : public Component {
   std::string user_input_audio_format_;
 #endif
 
-  // Triggers
+  // Triggers - simplified
   std::vector<Trigger<> *> on_start_triggers_;
   std::vector<Trigger<> *> on_end_triggers_;
-  std::vector<Trigger<> *> on_listening_triggers_;
-  std::vector<Trigger<> *> on_speaking_triggers_;
-  std::vector<Trigger<> *> on_connected_triggers_;
-  std::vector<Trigger<> *> on_disconnected_triggers_;
   std::vector<Trigger<std::string> *> on_error_triggers_;
 
   // Audio buffering
@@ -141,13 +129,9 @@ template<typename... Ts> class ElevenLabsStreamStopAction : public Action<Ts...>
   void play(Ts... x) override { this->parent_->stop_stream(); }
 };
 
-// Triggers
+// Triggers - simplified
 class ElevenLabsStreamStartTrigger : public Trigger<> {};
 class ElevenLabsStreamEndTrigger : public Trigger<> {};
-class ElevenLabsStreamListeningTrigger : public Trigger<> {};
-class ElevenLabsStreamSpeakingTrigger : public Trigger<> {};
-class ElevenLabsStreamConnectedTrigger : public Trigger<> {};
-class ElevenLabsStreamDisconnectedTrigger : public Trigger<> {};
 class ElevenLabsStreamErrorTrigger : public Trigger<std::string> {};
 
 // Condition

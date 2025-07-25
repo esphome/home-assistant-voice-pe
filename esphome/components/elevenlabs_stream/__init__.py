@@ -17,10 +17,6 @@ CONF_AGENT_ID = "agent_id"
 CONF_API_KEY = "api_key"
 CONF_ON_START = "on_start"
 CONF_ON_END = "on_end"
-CONF_ON_LISTENING = "on_listening"
-CONF_ON_SPEAKING = "on_speaking"
-CONF_ON_CONNECTED = "on_connected"
-CONF_ON_DISCONNECTED = "on_disconnected"
 CONF_MICROPHONE = "microphone"
 CONF_SPEAKER = "speaker"
 
@@ -38,24 +34,12 @@ ElevenLabsStreamStopAction = elevenlabs_stream_ns.class_(
     "ElevenLabsStreamStopAction", automation.Action
 )
 
-# Triggers
+# Triggers - simplified
 ElevenLabsStreamStartTrigger = elevenlabs_stream_ns.class_(
     "ElevenLabsStreamStartTrigger", automation.Trigger.template()
 )
 ElevenLabsStreamEndTrigger = elevenlabs_stream_ns.class_(
     "ElevenLabsStreamEndTrigger", automation.Trigger.template()
-)
-ElevenLabsStreamListeningTrigger = elevenlabs_stream_ns.class_(
-    "ElevenLabsStreamListeningTrigger", automation.Trigger.template()
-)
-ElevenLabsStreamSpeakingTrigger = elevenlabs_stream_ns.class_(
-    "ElevenLabsStreamSpeakingTrigger", automation.Trigger.template()
-)
-ElevenLabsStreamConnectedTrigger = elevenlabs_stream_ns.class_(
-    "ElevenLabsStreamConnectedTrigger", automation.Trigger.template()
-)
-ElevenLabsStreamDisconnectedTrigger = elevenlabs_stream_ns.class_(
-    "ElevenLabsStreamDisconnectedTrigger", automation.Trigger.template()
 )
 ElevenLabsStreamErrorTrigger = elevenlabs_stream_ns.class_(
     "ElevenLabsStreamErrorTrigger", automation.Trigger.template(cg.std_string)
@@ -76,26 +60,6 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_END): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamEndTrigger),
-            }
-        ),
-        cv.Optional(CONF_ON_LISTENING): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamListeningTrigger),
-            }
-        ),
-        cv.Optional(CONF_ON_SPEAKING): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamSpeakingTrigger),
-            }
-        ),
-        cv.Optional(CONF_ON_CONNECTED): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamConnectedTrigger),
-            }
-        ),
-        cv.Optional(CONF_ON_DISCONNECTED): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamDisconnectedTrigger),
             }
         ),
         cv.Optional(CONF_ON_ERROR): automation.validate_automation(
@@ -139,26 +103,6 @@ async def to_code(config):
     for conf in config.get(CONF_ON_END, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
         cg.add(var.add_on_end_trigger(trigger))
-        await automation.build_automation(trigger, [], conf)
-
-    for conf in config.get(CONF_ON_LISTENING, []):
-        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
-        cg.add(var.add_on_listening_trigger(trigger))
-        await automation.build_automation(trigger, [], conf)
-
-    for conf in config.get(CONF_ON_SPEAKING, []):
-        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
-        cg.add(var.add_on_speaking_trigger(trigger))
-        await automation.build_automation(trigger, [], conf)
-
-    for conf in config.get(CONF_ON_CONNECTED, []):
-        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
-        cg.add(var.add_on_connected_trigger(trigger))
-        await automation.build_automation(trigger, [], conf)
-
-    for conf in config.get(CONF_ON_DISCONNECTED, []):
-        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
-        cg.add(var.add_on_disconnected_trigger(trigger))
         await automation.build_automation(trigger, [], conf)
 
     for conf in config.get(CONF_ON_ERROR, []):

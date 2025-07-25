@@ -188,40 +188,12 @@ void ElevenLabsStream::loop() {
   if (millis() - last_watchdog_feed > 1000) { // Feed every second
     esp_task_wdt_reset();
     last_watchdog_feed = millis();
-    ESP_LOGD(TAG, "LOOP: Watchdog fed at loop count %d, state=%d", loop_count, static_cast<int>(this->state_));
+    ESP_LOGV(TAG, "LOOP: Watchdog fed at loop count %d, state=%s", 
+             loop_count, this->state_ == StreamState::OFF ? "OFF" : "ON");
   }
   
-  // Handle connection state
-  if (this->state_ == StreamState::CONNECTING) {
-    uint32_t elapsed = millis() - this->connection_start_time_;
-    ESP_LOGD(TAG, "LOOP: CONNECTING state - elapsed=%dms, timeout=%dms", elapsed, this->connection_timeout_);
-    
-    // Check for connection timeout
-    if (elapsed > this->connection_timeout_) {
-      ESP_LOGE(TAG, "LOOP: Connection timeout after %dms", elapsed);
-      this->handle_error("Connection timeout");
-      return;
-    }
-  }
-  
-  // Handle state transition from SPEAKING back to LISTENING
-  // If we're in SPEAKING state and haven't received audio for a while, go back to LISTENING
-  if (this->state_ == StreamState::SPEAKING) {
-    uint32_t silence_duration = millis() - this->last_audio_response_time_;
-    ESP_LOGD(TAG, "LOOP: SPEAKING state - silence duration=%dms", silence_duration);
-    
-    if (silence_duration > 2000) {
-      ESP_LOGD(TAG, "LOOP: No audio received for %dms, returning to LISTENING state", silence_duration);
-      this->set_state(StreamState::LISTENING);
-      for (auto *trigger : this->on_listening_triggers_) {
-        ESP_LOGD(TAG, "LOOP: Triggering listening event at %p", trigger);
-        trigger->trigger();
-      }
-    }
-  }
-  
-  // Send periodic heartbeat (increase frequency for better connection reliability)
-  if (this->websocket_connected_) {
+  // Send periodic heartbeat when connected
+  if (this->websocket_connected_ && this->state_ == StreamState::ON) {
     uint32_t heartbeat_elapsed = millis() - this->last_heartbeat_;
     if (heartbeat_elapsed > 20000) {  // 20 seconds instead of 30
       ESP_LOGD(TAG, "LOOP: Sending heartbeat ping after %dms", heartbeat_elapsed);
@@ -236,19 +208,18 @@ void ElevenLabsStream::loop() {
 
 bool ElevenLabsStream::start_stream() {
   ESP_LOGI(TAG, "=== START_STREAM CALLED ===");
-  ESP_LOGD(TAG, "START_STREAM: Current state=%d", static_cast<int>(this->state_));
+  ESP_LOGD(TAG, "START_STREAM: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
   ESP_LOGD(TAG, "START_STREAM: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGD(TAG, "START_STREAM: Agent ID='%s'", this->agent_id_.c_str());
   ESP_LOGD(TAG, "START_STREAM: Microphone=%p, Speaker=%p", this->microphone_, this->speaker_);
   ESP_LOGD(TAG, "START_STREAM: Signed URL valid=%s", this->signed_url_valid_ ? "YES" : "NO");
   
-  if (this->state_ != StreamState::IDLE) {
-    ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already running (state=%d)", static_cast<int>(this->state_));
+  if (this->state_ == StreamState::ON) {
+    ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already ON");
     return false;
   }
   
   ESP_LOGI(TAG, "START_STREAM: Starting ElevenLabs stream...");
-  this->set_state(StreamState::CONNECTING);
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
   
@@ -275,7 +246,7 @@ bool ElevenLabsStream::start_stream() {
 
 void ElevenLabsStream::stop_stream() {
   ESP_LOGI(TAG, "=== STOP_STREAM CALLED ===");
-  ESP_LOGD(TAG, "STOP_STREAM: Current state=%d", static_cast<int>(this->state_));
+  ESP_LOGD(TAG, "STOP_STREAM: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
   ESP_LOGD(TAG, "STOP_STREAM: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGI(TAG, "STOP_STREAM: Stopping ElevenLabs stream...");
   
@@ -299,8 +270,15 @@ void ElevenLabsStream::stop_stream() {
   
   ESP_LOGD(TAG, "STOP_STREAM: Disconnecting from ElevenLabs...");
   this->disconnect_from_elevenlabs();
-  ESP_LOGD(TAG, "STOP_STREAM: Setting state to IDLE...");
-  this->set_state(StreamState::IDLE);
+  ESP_LOGD(TAG, "STOP_STREAM: Setting state to OFF...");
+  this->set_state(StreamState::OFF);
+  
+  // Trigger end event when stopping
+  ESP_LOGD(TAG, "STOP_STREAM: Triggering end events (%zu triggers)", this->on_end_triggers_.size());
+  for (auto *trigger : this->on_end_triggers_) {
+    trigger->trigger();
+  }
+  
   ESP_LOGD(TAG, "=== STOP_STREAM COMPLETE ===");
 }
 
@@ -503,8 +481,8 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
   if (should_renew) {
     ESP_LOGI(TAG, "RENEW: Renewing signed URL for fast connections...");
     
-    // Don't interrupt active connections - only renew when idle
-    if (this->state_ == StreamState::IDLE) {
+    // Don't interrupt active connections - only renew when off
+    if (this->state_ == StreamState::OFF) {
       if (this->get_signed_url()) {
         this->signed_url_valid_ = true;
         this->last_signed_url_renewal_ = current_time;
@@ -514,7 +492,7 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
         this->signed_url_valid_ = false;
       }
     } else {
-      ESP_LOGD(TAG, "RENEW: Deferring renewal - stream is active (state=%d)", static_cast<int>(this->state_));
+      ESP_LOGD(TAG, "RENEW: Deferring renewal - stream is active (state=ON)");
     }
   }
 }
@@ -665,51 +643,36 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
            audio_buffer_size, response_audio_buffer_size);
   ESP_LOGD(TAG, "DISCONNECT: Cleared conversation_id, audio formats");
   
-  // Trigger disconnected event
-  ESP_LOGD(TAG, "DISCONNECT: Triggering disconnected events...");
-  for (auto *trigger : this->on_disconnected_triggers_) {
-    ESP_LOGD(TAG, "DISCONNECT: Triggering disconnected event at %p", trigger);
-    trigger->trigger();
-  }
-  ESP_LOGD(TAG, "DISCONNECT: All disconnected events triggered");
   ESP_LOGD(TAG, "=== DISCONNECT_FROM_ELEVENLABS COMPLETE ===");
 }
 
 void ElevenLabsStream::set_state(StreamState new_state) {
   if (this->state_ == new_state) {
-    ESP_LOGD(TAG, "SET_STATE: State unchanged, still %d", static_cast<int>(new_state));
+    ESP_LOGD(TAG, "SET_STATE: State unchanged, still %s", new_state == StreamState::OFF ? "OFF" : "ON");
     return;
   }
   
   StreamState old_state = this->state_;
   this->state_ = new_state;
   
-  ESP_LOGI(TAG, "STATE_CHANGE: %d -> %d (IDLE=0, CONNECTING=1, CONNECTED=2, LISTENING=3, SPEAKING=4, ERROR=5)", 
-           static_cast<int>(old_state), static_cast<int>(new_state));
-  
-  // Log human-readable state names
-  const char* old_state_name = "UNKNOWN";
-  const char* new_state_name = "UNKNOWN";
-  
-  switch (old_state) {
-    case StreamState::IDLE: old_state_name = "IDLE"; break;
-    case StreamState::CONNECTING: old_state_name = "CONNECTING"; break;
-    case StreamState::CONNECTED: old_state_name = "CONNECTED"; break;
-    case StreamState::LISTENING: old_state_name = "LISTENING"; break;
-    case StreamState::SPEAKING: old_state_name = "SPEAKING"; break;
-    case StreamState::ERROR: old_state_name = "ERROR"; break;
-  }
-  
-  switch (new_state) {
-    case StreamState::IDLE: new_state_name = "IDLE"; break;
-    case StreamState::CONNECTING: new_state_name = "CONNECTING"; break;
-    case StreamState::CONNECTED: new_state_name = "CONNECTED"; break;
-    case StreamState::LISTENING: new_state_name = "LISTENING"; break;
-    case StreamState::SPEAKING: new_state_name = "SPEAKING"; break;
-    case StreamState::ERROR: new_state_name = "ERROR"; break;
-  }
+  const char* old_state_name = (old_state == StreamState::OFF) ? "OFF" : "ON";
+  const char* new_state_name = (new_state == StreamState::OFF) ? "OFF" : "ON";
   
   ESP_LOGI(TAG, "STATE_CHANGE: %s -> %s", old_state_name, new_state_name);
+  
+  // When transitioning to ON state, trigger start event and start audio streaming
+  if (new_state == StreamState::ON && old_state == StreamState::OFF) {
+    ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
+    for (auto *trigger : this->on_start_triggers_) {
+      trigger->trigger();
+    }
+    
+    // Start microphone capture for continuous streaming
+    if (this->microphone_ && !this->microphone_->is_running()) {
+      ESP_LOGD(TAG, "SET_STATE: Starting microphone capture");
+      this->microphone_->start();
+    }
+  }
 }
 
 void ElevenLabsStream::send_websocket_message(const std::string &message) {
@@ -812,31 +775,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
           ESP_LOGD(TAG, "PARSE_JSON_BUF: User input format: %s", user_input_format);
         }
         
-        // Start listening
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to LISTENING");
-        this->set_state(StreamState::LISTENING);
-        
-        // Start microphone if available
-        if (this->microphone_ && !this->microphone_->is_running()) {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Starting microphone capture for listening");
-          this->microphone_->start();
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Microphone started");
-        } else {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Microphone not available or already running (mic=%p, running=%s)", 
-                   this->microphone_, 
-                   this->microphone_ && this->microphone_->is_running() ? "YES" : "NO");
-        }
-        
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
-        for (auto *trigger : this->on_start_triggers_) {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering start event at %p", trigger);
-          trigger->trigger();
-        }
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering listening events (%zu triggers)", this->on_listening_triggers_.size());
-        for (auto *trigger : this->on_listening_triggers_) {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering listening event at %p", trigger);
-          trigger->trigger();
-        }
+        ESP_LOGD(TAG, "PARSE_JSON_BUF: Conversation initialized - already in ON state");
       } else {
         ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_id in metadata");
       }
@@ -874,16 +813,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
           bool decode_success = this->decode_and_play_base64_audio(audio_base64);
           if (decode_success) {
             ESP_LOGI(TAG, "PARSE_JSON_BUF: Successfully decoded and played audio data");
-            
-            // Agent is speaking - change state
-            ESP_LOGD(TAG, "PARSE_JSON_BUF: Setting state to SPEAKING");
-            this->set_state(StreamState::SPEAKING);
-            
-            ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering speaking events (%zu triggers)", this->on_speaking_triggers_.size());
-            for (auto *trigger : this->on_speaking_triggers_) {
-              ESP_LOGD(TAG, "PARSE_JSON_BUF: Triggering speaking event at %p", trigger);
-              trigger->trigger();
-            }
           } else {
             ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
           }
@@ -1002,22 +931,17 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   
   // Handle ping with proper response
   if (strcmp(type, "ping") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing ping");
     JsonObject ping = root["ping_event"];
     if (ping) {
       uint32_t event_id = ping["event_id"] | 0;
       uint32_t ping_ms = ping["ping_ms"] | 0;
       
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: Ping received: event_id=%d, ping_ms=%d", event_id, ping_ms);
-      
       // Send pong response with event_id
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: Sending pong response...");
       std::string pong_message = json::build_json([event_id](JsonObject root) {
         root["type"] = "pong";
         root["event_id"] = event_id;
       });
       this->send_websocket_message(pong_message);
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: Pong sent");
     } else {
       ESP_LOGW(TAG, "PARSE_JSON_BUF: No ping_event found");
     }
@@ -1167,9 +1091,9 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
 void ElevenLabsStream::handle_error(const std::string &error_message) {
   ESP_LOGE(TAG, "=== ERROR HANDLER CALLED ===");
   ESP_LOGE(TAG, "ERROR: %s", error_message.c_str());
-  ESP_LOGD(TAG, "ERROR: Current state=%d", static_cast<int>(this->state_));
+  ESP_LOGD(TAG, "ERROR: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
   ESP_LOGD(TAG, "ERROR: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGD(TAG, "ERROR: Setting state to ERROR");
+  ESP_LOGD(TAG, "ERROR: Setting state to OFF");
   
   // Invalidate signed URL on connection errors - it might be expired
   if (error_message.find("Failed to") != std::string::npos || 
@@ -1180,7 +1104,9 @@ void ElevenLabsStream::handle_error(const std::string &error_message) {
     this->signed_url_.clear();
   }
   
-  this->set_state(StreamState::ERROR);
+  // Disconnect and set state to OFF
+  this->disconnect_from_elevenlabs();
+  this->set_state(StreamState::OFF);
   
   ESP_LOGD(TAG, "ERROR: Triggering error events (%zu triggers)", this->on_error_triggers_.size());
   for (auto *trigger : this->on_error_triggers_) {
@@ -1262,19 +1188,11 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
     root["user_audio_chunk"] = audio_base64;
   });
   
-  ESP_LOGD(TAG, "SEND_AUDIO: Sending audio chunk: %d samples, %d bytes, base64 length: %d", 
-           audio_data.size(), audio_size, audio_base64.length());
-  
   this->send_websocket_message(message);
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
-  if (this->state_ != StreamState::LISTENING || !this->websocket_connected_ || data.empty()) {
-    ESP_LOGD(TAG, "HANDLE_MIC: Skipping microphone data - conditions not met");
-    ESP_LOGD(TAG, "HANDLE_MIC:   state=%d (LISTENING=%d), connected=%s, empty=%s",
-             static_cast<int>(this->state_), static_cast<int>(StreamState::LISTENING),
-             this->websocket_connected_ ? "NO" : "YES",
-             data.empty() ? "YES" : "NO");
+  if (this->state_ != StreamState::ON || !this->websocket_connected_ || data.empty()) {
     return;
   }
   
@@ -1304,19 +1222,13 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_CONNECTED");
       ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
       stream->websocket_connected_ = true;
-      ESP_LOGD(TAG, "WS_EVENT: Setting state to CONNECTED");
-      stream->set_state(StreamState::CONNECTED);
+      ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+      stream->set_state(StreamState::ON);
       
       // Send initial conversation setup
       ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
       stream->send_conversation_init();
       
-      // Trigger connected events
-      ESP_LOGD(TAG, "WS_EVENT: Triggering connected events (%zu triggers)", stream->on_connected_triggers_.size());
-      for (auto *trigger : stream->on_connected_triggers_) {
-        ESP_LOGD(TAG, "WS_EVENT: Triggering connected event at %p", trigger);
-        trigger->trigger();
-      }
       ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
       break;
       
@@ -1324,12 +1236,12 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
       ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = false");
       stream->websocket_connected_ = false;
-      ESP_LOGD(TAG, "WS_EVENT: Setting state to IDLE");
-      stream->set_state(StreamState::IDLE);
+      ESP_LOGD(TAG, "WS_EVENT: Setting state to OFF");
+      stream->set_state(StreamState::OFF);
       
-      ESP_LOGD(TAG, "WS_EVENT: Triggering disconnected events (%zu triggers)", stream->on_disconnected_triggers_.size());
-      for (auto *trigger : stream->on_disconnected_triggers_) {
-        ESP_LOGD(TAG, "WS_EVENT: Triggering disconnected event at %p", trigger);
+      ESP_LOGD(TAG, "WS_EVENT: Triggering end events (%zu triggers)", stream->on_end_triggers_.size());
+      for (auto *trigger : stream->on_end_triggers_) {
+        ESP_LOGD(TAG, "WS_EVENT: Triggering end event at %p", trigger);
         trigger->trigger();
       }
       ESP_LOGD(TAG, "WS_EVENT: DISCONNECTED event handling complete");
@@ -1356,8 +1268,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
           bool complete = stream->reassembler_.add(data);
           
           if (complete) {
-            ESP_LOGD(TAG, "WS_EVENT: Complete message assembled, processing...");
-            
             // Get pointer to complete message in reassembler buffer
             const uint8_t* buffer_ptr = stream->reassembler_.getBuffer();
             size_t buffer_size = stream->reassembler_.getSize();
