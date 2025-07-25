@@ -1044,9 +1044,6 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   if (!this->speaker_->is_running()) {
     ESP_LOGI(TAG, "HANDLE_AUDIO: Starting resampler speaker before sending audio data");
     this->speaker_->start();
-    // Give the speaker time to start up properly and initialize its pipeline
-    // The resampler needs to connect to mixer which connects to I2S hardware
-    vTaskDelay(pdMS_TO_TICKS(100)); // Increased startup delay for pipeline initialization
   }
   
   ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
@@ -1168,13 +1165,35 @@ void ElevenLabsStream::send_ping() {
 
 void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) {
   if (!this->websocket_connected_ || !this->websocket_client_ || audio_data.empty()) {
-    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - conditions not met");
+    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - websocket_connected_=%s, client=%p, data_empty=%s",
+             this->websocket_connected_ ? "YES" : "NO",
+             this->websocket_client_,
+             audio_data.empty() ? "YES" : "NO");
     return;
   }
+  
+  ESP_LOGD(TAG, "SEND_AUDIO: Sending %zu audio samples (%zu bytes)", audio_data.size(), audio_data.size() * sizeof(int16_t));
   
   // Convert audio data to bytes
   const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
   size_t audio_size = audio_data.size() * sizeof(int16_t);
+  
+  // Log first few samples for debugging
+  if (audio_data.size() >= 4) {
+    ESP_LOGD(TAG, "SEND_AUDIO: First 4 samples: %d, %d, %d, %d", 
+             audio_data[0], audio_data[1], audio_data[2], audio_data[3]);
+  }
+  
+  // Check if audio has any significant amplitude
+  int16_t max_amplitude = 0;
+  for (const auto& sample : audio_data) {
+    int16_t abs_sample = abs(sample);
+    if (abs_sample > max_amplitude) {
+      max_amplitude = abs_sample;
+    }
+  }
+  ESP_LOGD(TAG, "SEND_AUDIO: Max amplitude in chunk: %d (%.1f%% of full scale)", 
+           max_amplitude, (max_amplitude / 32768.0) * 100.0);
   
   // Encode audio as base64 for WebSocket transmission
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
@@ -1183,30 +1202,66 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
     ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
     return;
   }
+  
+  ESP_LOGD(TAG, "SEND_AUDIO: Encoded %zu bytes to %zu base64 chars", audio_size, audio_base64.length());
+  
   // Send as user_audio_chunk according to protocol
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
   
   this->send_websocket_message(message);
+  ESP_LOGD(TAG, "SEND_AUDIO: Audio chunk sent successfully");
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
   if (this->state_ != StreamState::ON || !this->websocket_connected_ || data.empty()) {
+    ESP_LOGV(TAG, "HANDLE_MIC: Skipping - state=%s, connected=%s, data_empty=%s",
+             this->state_ == StreamState::ON ? "ON" : "OFF",
+             this->websocket_connected_ ? "YES" : "NO",
+             data.empty() ? "YES" : "NO");
     return;
   }
   
-  // Ensure data size is even (each sample is 2 bytes)
-  if (data.size() % 2 != 0) {
-    ESP_LOGW(TAG, "HANDLE_MIC: Received odd number of bytes for int16_t samples: %d", data.size());
+  ESP_LOGD(TAG, "HANDLE_MIC: Processing %zu bytes of microphone data", data.size());
+  
+  // Microphone is configured for 32-bit samples, need to convert to 16-bit
+  if (data.size() % 4 != 0) {
+    ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 32-bit samples: %zu bytes", data.size());
     return;
   }
   
-  // Convert uint8_t data to int16_t samples
+  // Convert 32-bit samples to 16-bit samples
+  size_t num_samples_32bit = data.size() / 4;
   std::vector<int16_t> audio_samples;
-  audio_samples.resize(data.size() / sizeof(int16_t));
+  audio_samples.reserve(num_samples_32bit);
   
-  memcpy(audio_samples.data(), data.data(), data.size());
+  const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
+  
+  for (size_t i = 0; i < num_samples_32bit; i++) {
+    // Convert 32-bit sample to 16-bit by taking the upper 16 bits
+    // This preserves the most significant audio information
+    int32_t sample_32 = samples_32bit[i];
+    int16_t sample_16 = static_cast<int16_t>(sample_32 >> 16);
+    
+    // Apply moderate software gain boost for better VAD detection
+    // 2x gain provides good sensitivity without excessive noise amplification
+    int32_t boosted_sample = static_cast<int32_t>(sample_16) * 2;
+    
+    // Clip to prevent overflow
+    if (boosted_sample > 32767) {
+      boosted_sample = 32767;
+    } else if (boosted_sample < -32768) {
+      boosted_sample = -32768;
+    }
+    
+    audio_samples.push_back(static_cast<int16_t>(boosted_sample));
+  }
+  
+  ESP_LOGD(TAG, "HANDLE_MIC: Converted %zu 32-bit samples to %zu 16-bit samples with 2x gain boost", num_samples_32bit, audio_samples.size());
+  ESP_LOGD(TAG, "HANDLE_MIC: First 32-bit sample: %d, converted to 16-bit: %d", 
+           num_samples_32bit > 0 ? samples_32bit[0] : 0,
+           audio_samples.empty() ? 0 : audio_samples[0]);
   
   // Send audio chunk to ElevenLabs
   this->send_audio_chunk(audio_samples);

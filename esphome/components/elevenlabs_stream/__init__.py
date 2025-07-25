@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation, core
 from esphome.automation import Condition
-from esphome.components import speaker
+from esphome.components import speaker, microphone
 from esphome.const import (
     CONF_ID,
     CONF_ON_ERROR,
@@ -50,7 +50,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(ElevenLabsStream),
         cv.Required(CONF_AGENT_ID): cv.templatable(cv.string),
         cv.Optional(CONF_API_KEY): cv.templatable(cv.string),
-        cv.Optional(CONF_MICROPHONE): cv.use_id(cg.Parented),  # Made optional for testing
+        cv.Optional(CONF_MICROPHONE): cv.use_id(cg.Parented),  # Back to direct microphone reference
         cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),    # Use proper speaker type
         cv.Optional(CONF_ON_START): automation.validate_automation(
             {

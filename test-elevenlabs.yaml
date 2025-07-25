@@ -23,9 +23,7 @@ esphome:
   on_boot:
     priority: 375
     then:
-      - delay: 1s
       - switch.turn_on: internal_speaker_amp
-      - delay: 5s
       - lambda: id(init_in_progress) = false;
 
 esp32:
@@ -136,7 +134,7 @@ microphone:
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
-    channel: stereo
+    channel: left  # ElevenLabs expects mono - use left channel only
     on_data:
       - lambda: |-
           if (id(elevenlabs_conv_ai).is_running()) {
@@ -273,7 +271,7 @@ elevenlabs_stream:
   id: elevenlabs_conv_ai
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
-  microphone: i2s_mics
+  microphone: i2s_mics  # Direct microphone reference
   speaker: announcement_resampling_speaker  # Use announcement resampler for proper audio format conversion
   on_start:
     - lambda: id(init_in_progress) = false;
