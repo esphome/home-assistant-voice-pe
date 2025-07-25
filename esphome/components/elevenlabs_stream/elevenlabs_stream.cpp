@@ -60,28 +60,20 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
 // Helper function to decode base64 audio data
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
-  ESP_LOGI(TAG, "DECODE_B64: Starting base64 audio decode and play");
-  ESP_LOGI(TAG, "DECODE_B64: Input pointer=%p", base64_data);
-  
   if (!base64_data || strlen(base64_data) == 0) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
     return false;
   }
 
   size_t input_len = strlen(base64_data);
-  ESP_LOGD(TAG, "DECODE_B64: Input length=%zu", input_len);
-  
   size_t output_len = 0;
   
   // Calculate output length
-  ESP_LOGD(TAG, "DECODE_B64: Calculating output length...");
   int ret = mbedtls_base64_decode(nullptr, 0, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to calculate base64 decode length: %d", ret);
     return false;
   }
-  
-  ESP_LOGD(TAG, "DECODE_B64: Required output length=%zu", output_len);
   
   // Use PSRAM allocation for large audio data to avoid regular heap exhaustion
   uint8_t* psram_buffer = (uint8_t*)heap_caps_malloc(output_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -90,10 +82,7 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
     return false;
   }
   
-  ESP_LOGD(TAG, "DECODE_B64: Allocated PSRAM buffer at %p for %zu bytes", psram_buffer, output_len);
-  
   // Actually decode directly to PSRAM buffer
-  ESP_LOGD(TAG, "DECODE_B64: Performing decode...");
   ret = mbedtls_base64_decode(psram_buffer, output_len, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != 0) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
@@ -101,32 +90,24 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
     return false;
   }
   
-  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio data successfully", output_len);
-  
   // Play audio directly from PSRAM buffer - no std::vector needed!
-  ESP_LOGD(TAG, "DECODE_B64: Playing audio response directly from PSRAM buffer...");
   this->handle_audio_response(psram_buffer, output_len);
   
   // CRITICAL: Don't free the buffer until audio is finished playing!
-  // Calculate estimated duration and schedule buffer cleanup
+  // Instead of using fixed delays, we'll monitor the speaker dynamically
+  // Schedule buffer cleanup with a reasonable safety margin
   size_t samples = output_len / 2; // 16-bit samples = 2 bytes each
   uint32_t sample_rate = 44100; // ElevenLabs default
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
   
-  // Account for resampler/mixer pipeline delays - these components buffer and process data
-  // The resampler converts 44.1kHz->48kHz and the mixer combines streams
-  // Add significant buffer time to account for pipeline delays (3-5 seconds total)
-  uint32_t pipeline_delay_ms = 4000; // 4 second buffer for resampler/mixer pipeline
-  uint32_t wait_time_ms = (uint32_t)(duration_ms + pipeline_delay_ms);
-  
-  ESP_LOGI(TAG, "DECODE_B64: Scheduling buffer cleanup for audio duration: %.1f ms + %u ms pipeline buffer = %u ms", 
-           duration_ms, pipeline_delay_ms, wait_time_ms);
+  // Use a more conservative cleanup time - the dynamic speaker detection will handle precise timing
+  // We just need to ensure the buffer isn't freed too early
+  uint32_t safety_buffer_ms = 2000; // 2 second safety buffer for cleanup
+  uint32_t cleanup_time_ms = (uint32_t)(duration_ms + safety_buffer_ms);
   
   // Schedule buffer cleanup without blocking the WebSocket task
-  this->set_timeout("cleanup_audio_buffer", wait_time_ms, [psram_buffer]() {
-    ESP_LOGI("elevenlabs_stream", "CLEANUP: Audio playback completed after pipeline delay, freeing PSRAM buffer");
+  this->set_timeout("cleanup_audio_buffer", cleanup_time_ms, [psram_buffer]() {
     heap_caps_free(psram_buffer);
-    ESP_LOGD("elevenlabs_stream", "CLEANUP: PSRAM buffer freed after audio completion");
   });
   
   return true;
@@ -759,7 +740,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     return;
   }
   
-  ESP_LOGI(TAG, "PARSE_JSON_BUF: Message type: '%s'", type);
+  ESP_LOGV(TAG, "PARSE_JSON_BUF: Message type: '%s'", type);
   
   // Handle conversation_initiation_metadata
   if (strcmp(type, "conversation_initiation_metadata") == 0) {
@@ -828,43 +809,27 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   
   // Handle audio events (corrected type name)
   if (strcmp(type, "audio") == 0) {
-    ESP_LOGI(TAG, "PARSE_JSON_BUF: Processing audio event");
     JsonObject audio = root["audio_event"];
     if (audio) {
-      ESP_LOGI(TAG, "PARSE_JSON_BUF: Found audio_event");
       const char* audio_base64 = audio["audio_base_64"];
       uint32_t event_id = audio["event_id"] | 0;
       
-      ESP_LOGI(TAG, "PARSE_JSON_BUF: audio_base64=%s, event_id=%d", 
-               audio_base64 ? "PRESENT" : "NULL", event_id);
-      
       if (audio_base64) {
         size_t base64_len = strlen(audio_base64);
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Received audio data (base64 length: %zu, event_id: %d)", base64_len, event_id);
         
         // Update timing for state management
         this->last_audio_response_time_ = millis();
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Updated last_audio_response_time to %d", this->last_audio_response_time_);
         
         // Process audio chunks immediately for better real-time performance
         // Skip empty or very small chunks
         if (base64_len > 4) {
-          ESP_LOGI(TAG, "PARSE_JSON_BUF: About to decode base64 audio data (length=%zu)...", base64_len);
           // Decode base64 audio data and play it immediately
           bool decode_success = this->decode_and_play_base64_audio(audio_base64);
-          if (decode_success) {
-            ESP_LOGI(TAG, "PARSE_JSON_BUF: Successfully decoded and played audio data");
-          } else {
+          if (!decode_success) {
             ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
           }
-        } else {
-          ESP_LOGD(TAG, "PARSE_JSON_BUF: Skipping small audio chunk (length=%zu)", base64_len);
         }
-      } else {
-        ESP_LOGW(TAG, "PARSE_JSON_BUF: No audio_base_64 in audio event");
       }
-    } else {
-      ESP_LOGW(TAG, "PARSE_JSON_BUF: No audio_event found in audio message");
     }
     return;
   }
@@ -924,7 +889,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   
   // Handle VAD score
   if (strcmp(type, "vad_score") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing vad_score");
     JsonObject vad = root["vad_score_event"];
     if (vad) {
       float vad_score = vad["vad_score"] | 0.0f;
@@ -1042,22 +1006,14 @@ void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t lengt
 }
 
 void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length) {
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Processing audio response");
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Data pointer=%p, length=%zu", data, length);
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Playing audio response: %d bytes", length);
-  
   if (!data || length == 0) {
-    ESP_LOGD(TAG, "HANDLE_AUDIO: No audio data to play (data=%p, length=%zu)", data, length);
     return;
   }
   
   if (!this->speaker_) {
-    ESP_LOGD(TAG, "HANDLE_AUDIO: No speaker configured");
+    ESP_LOGW(TAG, "HANDLE_AUDIO: No speaker configured");
     return;
   }
-  
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker available at %p", this->speaker_);
-  ESP_LOGD(TAG, "HANDLE_AUDIO: Speaker running=%s", this->speaker_->is_running() ? "YES" : "NO");
   
   // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
   uint32_t sample_rate = 44100; // Default to 44.1kHz
@@ -1067,60 +1023,55 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
     if (underscore_pos != std::string::npos) {
       std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
       sample_rate = std::stoul(rate_str);
-      ESP_LOGI(TAG, "HANDLE_AUDIO: Using sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
     }
   }
   
   // Ensure speaker is started (should already be started from conversation init, but double-check)
   if (!this->speaker_->is_running()) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: Speaker not running, starting now");
     this->speaker_->start();
   }
-  
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
-  
-  size_t samples = length / 2; // 16-bit samples = 2 bytes each
-  float duration_ms = (float)samples / (sample_rate / 1000.0f);
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Estimated audio duration: %.1f ms (%zu samples at %d Hz)", duration_ms, samples, sample_rate);
   
   // Track speaker activity to prevent microphone echo/feedback
   uint32_t current_time = millis();
   this->speaker_is_active_ = true;
   this->speaker_start_time_ = current_time;
-  // Calculate when this audio chunk should finish playing (add pipeline buffer)
-  uint32_t pipeline_delay_ms = 500; // Conservative estimate for resampler/mixer delay
-  this->speaker_end_time_ = current_time + (uint32_t)duration_ms + pipeline_delay_ms;
-  
-  ESP_LOGI(TAG, "HANDLE_AUDIO: *** SPEAKER ACTIVATED *** - Blocking microphone for %.1f ms + %u ms buffer", 
-           duration_ms, pipeline_delay_ms);
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Speaker activity tracked - start=%u, end=%u", 
-           this->speaker_start_time_, this->speaker_end_time_);
-  
-  // Send audio data to resampler - speaker should already be configured with correct format
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to pre-configured speaker");
-  
-  // Send the audio data to the speaker (resampler pipeline)
-  // The resampler will convert 44.1kHz->48kHz, then send to mixer, then to I2S hardware
+  // Clear awaiting_first_agent_audio_ flag when first agent audio is played
+  if (this->awaiting_first_agent_audio_) {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: First agent audio played, unblocking microphone");
+    this->awaiting_first_agent_audio_ = false;
+  }
   size_t bytes_written = this->speaker_->play(data, length);
-  
   if (bytes_written != length) {
-    ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker play() returned %zu bytes, expected %zu bytes", bytes_written, length);
+    ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, length);
+  }
+  this->set_timeout("check_speaker_finished", 100, [this]() {
+    this->check_speaker_finished();
+  });
+}
+
+void ElevenLabsStream::check_speaker_finished() {
+  if (!this->speaker_) {
+    return;
+  }
+  
+  // Check if the speaker is still playing audio by looking at buffered data
+  // When has_buffered_data() returns false, the speaker has finished playing
+  if (this->speaker_->has_buffered_data()) {
+    // Still playing, schedule another check
+    this->set_timeout("check_speaker_finished", 100, [this]() {
+      this->check_speaker_finished();
+    });
   } else {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: Successfully sent %zu bytes to speaker pipeline", bytes_written);
+    // Speaker has finished, add silence buffer before enabling microphone
+    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing, adding silence buffer");
+    this->speaker_end_time_ = millis();
+    
+    // Add a small silence buffer to prevent immediate microphone activation
+    this->set_timeout("enable_microphone", this->speaker_silence_buffer_ms_, [this]() {
+      this->speaker_is_active_ = false;
+      ESP_LOGD(TAG, "SPEAKER_FINISHED: Microphone re-enabled after silence buffer");
+    });
   }
-  
-  // Don't block here - let the audio play naturally through the pipeline
-  // The resampler and mixer will handle the timing and conversion
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio data sent to resampler pipeline, continuing...");
-  
-  // Add debug info about speaker state after sending audio
-  if (this->speaker_ && this->speaker_->is_running()) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: Resampler speaker is running successfully");
-  } else if (this->speaker_) {
-    ESP_LOGW(TAG, "HANDLE_AUDIO: Resampler speaker NOT running - audio may not play");
-  }
-  
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio response handling complete (%zu total bytes)", length);
 }
 
 void ElevenLabsStream::handle_error(const std::string &error_message) {
@@ -1239,48 +1190,38 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     return;
   }
   
-  // Update speaker activity status and check if we should mute microphone
-  this->update_speaker_activity();
-  
   if (this->is_speaker_active()) {
     ESP_LOGV(TAG, "HANDLE_MIC: Blocking microphone input - agent is speaking (speaker active)");
     return;
   }
 
-  // Microphone is configured for 32-bit samples, need to convert to 16-bit
+  // Microphone is now configured for 16-bit samples directly, no conversion needed
+  if (data.size() % 2 != 0) {
+    ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 16-bit samples: %zu bytes", data.size());
+    return;
+  }
+  
+  // Microphone is configured for 32-bit samples, convert to 16-bit PCM
   if (data.size() % 4 != 0) {
     ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 32-bit samples: %zu bytes", data.size());
     return;
   }
-  
-  // Convert 32-bit samples to 16-bit samples
   size_t num_samples_32bit = data.size() / 4;
+  const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
   std::vector<int16_t> audio_samples;
   audio_samples.reserve(num_samples_32bit);
-  
-  const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
-  
+  constexpr int gain_factor = 2; // Reduce gain to 2 to avoid clipping
+  // Log first 8 raw 32-bit samples for debugging
+  int16_t debug_samples[8] = {0};
   for (size_t i = 0; i < num_samples_32bit; i++) {
-    // Convert 32-bit sample to 16-bit by taking the upper 16 bits
-    // This preserves the most significant audio information
-    int32_t sample_32 = samples_32bit[i];
-    int16_t sample_16 = static_cast<int16_t>(sample_32 >> 16);
-    
-    // Apply moderate software gain boost for better VAD detection
-    // 2x gain provides good sensitivity without excessive noise amplification
-    int32_t boosted_sample = static_cast<int32_t>(sample_16) * 2;
-    
-    // Clip to prevent overflow
-    if (boosted_sample > 32767) {
-      boosted_sample = 32767;
-    } else if (boosted_sample < -32768) {
-      boosted_sample = -32768;
-    }
-    
-    audio_samples.push_back(static_cast<int16_t>(boosted_sample));
+    int32_t boosted = (samples_32bit[i] >> 8) * gain_factor;
+    if (boosted > 32767) boosted = 32767;
+    if (boosted < -32768) boosted = -32768;
+    int16_t sample16 = static_cast<int16_t>(boosted);
+    audio_samples.push_back(sample16);
+    if (i < 8) debug_samples[i] = sample16;
   }
-  
-  // Send audio chunk to ElevenLabs
+  // Send converted buffer to ElevenLabs pipeline
   this->send_audio_chunk(audio_samples);
 }
 
@@ -1297,9 +1238,10 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
       stream->set_state(StreamState::ON);
       
-      // Block microphone immediately until we receive the agent's first response
+      // Block microphone until first agent audio is played
       stream->speaker_is_active_ = true;
-      ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Waiting for agent's initial response");
+      stream->awaiting_first_agent_audio_ = true;
+      ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Awaiting first agent audio");
       
       // Send initial conversation setup
       ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
@@ -1385,35 +1327,24 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
 // Speaker activity tracking methods
 bool ElevenLabsStream::is_speaker_active() const {
-  if (!this->speaker_is_active_) {
-    return false;
-  }
-  
-  uint32_t current_time = millis();
-  
-  // Check if audio should still be playing (with silence buffer)
-  bool still_playing = current_time < (this->speaker_end_time_ + this->speaker_silence_buffer_ms_);
-  
-  return still_playing;
+  // Block mic if speaker is active or awaiting first agent audio
+  return this->speaker_is_active_ || this->awaiting_first_agent_audio_;
 }
 
 void ElevenLabsStream::update_speaker_activity() {
-  if (!this->speaker_is_active_) {
-    return; // Nothing to update
+  // With dynamic speaker detection, this method mainly serves as a safety fallback
+  // The primary detection is handled by check_speaker_finished() callbacks
+  if (!this->speaker_is_active_ || !this->speaker_) {
+    return;
   }
-  
-  uint32_t current_time = millis();
-  
-  // Check if audio playback has finished (including silence buffer)
-  if (current_time >= (this->speaker_end_time_ + this->speaker_silence_buffer_ms_)) {
-    ESP_LOGD(TAG, "SPEAKER_ACTIVITY: Audio playback finished, enabling microphone (was blocked for %u ms)",
+  // Safety check: if speaker has no buffered data, we haven't detected it yet
+  if (!this->speaker_->has_buffered_data()) {
+    uint32_t current_time = millis();
+    ESP_LOGD(TAG, "SPEAKER_ACTIVITY: Safety check detected speaker stopped (was active for %u ms)",
              current_time - this->speaker_start_time_);
     this->speaker_is_active_ = false;
     this->speaker_start_time_ = 0;
-    this->speaker_end_time_ = 0;
-  } else {
-    ESP_LOGV(TAG, "SPEAKER_ACTIVITY: Still playing - current=%u, end=%u (+%u buffer)",
-             current_time, this->speaker_end_time_, this->speaker_silence_buffer_ms_);
+    this->speaker_end_time_ = current_time;
   }
 }
 

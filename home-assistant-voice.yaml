@@ -1427,7 +1427,7 @@ microphone:
     adc_type: external
     pdm: false
     sample_rate: 16000
-    bits_per_sample: 32bit
+    bits_per_sample: 16bit  # Changed from 32bit to 16bit for direct processing
     i2s_mode: secondary
     i2s_audio_id: i2s_input
     channel: stereo

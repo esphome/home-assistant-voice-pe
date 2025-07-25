@@ -130,11 +130,11 @@ microphone:
     i2s_din_pin: GPIO15
     adc_type: external
     pdm: false
-    sample_rate: 16000
+    sample_rate: 16000  # ElevenLabs expects 16kHz mono PCM
     bits_per_sample: 32bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
-    channel: left  # ElevenLabs expects mono - use left channel only
+    channel: left  # Use left channel for mono
     on_data:
       - lambda: |-
           if (id(elevenlabs_conv_ai).is_running()) {
