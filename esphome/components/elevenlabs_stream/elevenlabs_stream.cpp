@@ -1286,6 +1286,10 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
       stream->set_state(StreamState::ON);
       
+      // Block microphone immediately until we receive the agent's first response
+      stream->speaker_is_active_ = true;
+      ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Waiting for agent's initial response");
+      
       // Send initial conversation setup
       ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
       stream->send_conversation_init();
