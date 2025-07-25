@@ -68,6 +68,7 @@ class ElevenLabsStream : public Component {
   
   // Internal methods
   bool get_signed_url();
+  void renew_signed_url_if_needed();  // New method for automatic renewal
   void connect_to_elevenlabs();
   void disconnect_from_elevenlabs();
   void send_websocket_message(const std::string &message);
@@ -123,6 +124,9 @@ class ElevenLabsStream : public Component {
   uint32_t connection_timeout_{10000};  // Reduced to 10 seconds
   uint32_t connection_start_time_{0};
   uint32_t last_heartbeat_{0};
+  uint32_t last_signed_url_renewal_{0};  // Track when we last renewed the signed URL
+  uint32_t signed_url_renewal_interval_{600000};  // 10 minutes in milliseconds
+  bool signed_url_valid_{false};  // Track if we have a valid signed URL
   static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB
 };
 

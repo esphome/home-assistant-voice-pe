@@ -160,6 +160,18 @@ void ElevenLabsStream::setup() {
   }
   
   ESP_LOGD(TAG, "SETUP: Initial state set to %d (IDLE)", static_cast<int>(this->state_));
+  
+  // Initialize signed URL at startup for speedy connections
+  ESP_LOGI(TAG, "SETUP: Initializing signed URL for faster connections...");
+  if (this->get_signed_url()) {
+    this->signed_url_valid_ = true;
+    this->last_signed_url_renewal_ = millis();
+    ESP_LOGI(TAG, "SETUP: Signed URL initialized successfully");
+  } else {
+    ESP_LOGW(TAG, "SETUP: Failed to get initial signed URL - will retry in loop");
+    this->signed_url_valid_ = false;
+  }
+  
   ESP_LOGCONFIG(TAG, "=== SETUP COMPLETE ===");
 }
 
@@ -177,13 +189,13 @@ void ElevenLabsStream::loop() {
   if (millis() - last_watchdog_feed > 1000) { // Feed every second
     esp_task_wdt_reset();
     last_watchdog_feed = millis();
-    ESP_LOGV(TAG, "LOOP: Watchdog fed at loop count %d, state=%d", loop_count, static_cast<int>(this->state_));
+    ESP_LOGD(TAG, "LOOP: Watchdog fed at loop count %d, state=%d", loop_count, static_cast<int>(this->state_));
   }
   
   // Handle connection state
   if (this->state_ == StreamState::CONNECTING) {
     uint32_t elapsed = millis() - this->connection_start_time_;
-    ESP_LOGV(TAG, "LOOP: CONNECTING state - elapsed=%dms, timeout=%dms", elapsed, this->connection_timeout_);
+    ESP_LOGD(TAG, "LOOP: CONNECTING state - elapsed=%dms, timeout=%dms", elapsed, this->connection_timeout_);
     
     // Check for connection timeout
     if (elapsed > this->connection_timeout_) {
@@ -197,7 +209,7 @@ void ElevenLabsStream::loop() {
   // If we're in SPEAKING state and haven't received audio for a while, go back to LISTENING
   if (this->state_ == StreamState::SPEAKING) {
     uint32_t silence_duration = millis() - this->last_audio_response_time_;
-    ESP_LOGV(TAG, "LOOP: SPEAKING state - silence duration=%dms", silence_duration);
+    ESP_LOGD(TAG, "LOOP: SPEAKING state - silence duration=%dms", silence_duration);
     
     if (silence_duration > 2000) {
       ESP_LOGD(TAG, "LOOP: No audio received for %dms, returning to LISTENING state", silence_duration);
@@ -218,6 +230,9 @@ void ElevenLabsStream::loop() {
       this->last_heartbeat_ = millis();
     }
   }
+  
+  // Renew signed URL periodically for fast connections
+  this->renew_signed_url_if_needed();
 }
 
 bool ElevenLabsStream::start_stream() {
@@ -226,6 +241,7 @@ bool ElevenLabsStream::start_stream() {
   ESP_LOGD(TAG, "START_STREAM: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGD(TAG, "START_STREAM: Agent ID='%s'", this->agent_id_.c_str());
   ESP_LOGD(TAG, "START_STREAM: Microphone=%p, Speaker=%p", this->microphone_, this->speaker_);
+  ESP_LOGD(TAG, "START_STREAM: Signed URL valid=%s", this->signed_url_valid_ ? "YES" : "NO");
   
   if (this->state_ != StreamState::IDLE) {
     ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already running (state=%d)", static_cast<int>(this->state_));
@@ -237,15 +253,21 @@ bool ElevenLabsStream::start_stream() {
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
   
-  // First get the signed URL, then connect
-  ESP_LOGD(TAG, "START_STREAM: Getting signed URL...");
-  if (!this->get_signed_url()) {
-    ESP_LOGE(TAG, "START_STREAM: Failed to get signed URL");
-    this->handle_error("Failed to get signed URL");
-    return false;
+  // Use cached signed URL if available and valid, otherwise get a new one
+  if (!this->signed_url_valid_ || this->signed_url_.empty()) {
+    ESP_LOGD(TAG, "START_STREAM: No valid cached signed URL, getting new one...");
+    if (!this->get_signed_url()) {
+      ESP_LOGE(TAG, "START_STREAM: Failed to get signed URL");
+      this->handle_error("Failed to get signed URL");
+      return false;
+    }
+    this->signed_url_valid_ = true;
+    this->last_signed_url_renewal_ = millis();
+    ESP_LOGD(TAG, "START_STREAM: New signed URL obtained successfully");
+  } else {
+    ESP_LOGI(TAG, "START_STREAM: Using cached signed URL for fast connection");
   }
   
-  ESP_LOGD(TAG, "START_STREAM: Signed URL obtained successfully");
   ESP_LOGD(TAG, "START_STREAM: Connecting to ElevenLabs...");
   this->connect_to_elevenlabs();
   ESP_LOGD(TAG, "=== START_STREAM COMPLETE ===");
@@ -342,7 +364,7 @@ bool ElevenLabsStream::get_signed_url() {
           // Append response data to signed_url_ temporarily
           std::string response_chunk(static_cast<const char*>(evt->data), evt->data_len);
           stream->signed_url_ += response_chunk;
-          ESP_LOGV(TAG, "GET_SIGNED_URL: Received chunk: '%s'", response_chunk.c_str());
+          ESP_LOGD(TAG, "GET_SIGNED_URL: Received chunk: '%s'", response_chunk.c_str());
         }
         break;
       case HTTP_EVENT_ON_FINISH:
@@ -358,7 +380,7 @@ bool ElevenLabsStream::get_signed_url() {
         esp_task_wdt_reset();
         break;
       default:
-        ESP_LOGV(TAG, "GET_SIGNED_URL: HTTP event %d", evt->event_id);
+        ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP event %d", evt->event_id);
         break;
     }
     return ESP_OK;
@@ -422,7 +444,7 @@ bool ElevenLabsStream::get_signed_url() {
   
   if (!response.empty()) {
     ESP_LOGD(TAG, "GET_SIGNED_URL: Parsing JSON response...");
-    ESP_LOGV(TAG, "GET_SIGNED_URL: Full response: %s", response.c_str());
+    ESP_LOGD(TAG, "GET_SIGNED_URL: Full response: %s", response.c_str());
     
     // Parse JSON response using ESPHome's JSON utility
     bool parse_success = json::parse_json(response, [this](JsonObject root) -> bool {
@@ -454,6 +476,48 @@ bool ElevenLabsStream::get_signed_url() {
   
   ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
   return false;
+}
+
+void ElevenLabsStream::renew_signed_url_if_needed() {
+  // Skip renewal if we don't have a valid agent ID configured
+  if (this->agent_id_.empty()) {
+    return;
+  }
+  
+  uint32_t current_time = millis();
+  
+  // Check if we need to renew the signed URL
+  bool should_renew = false;
+  
+  // Renew if we don't have a valid signed URL
+  if (!this->signed_url_valid_ || this->signed_url_.empty()) {
+    ESP_LOGD(TAG, "RENEW: No valid signed URL available, will renew");
+    should_renew = true;
+  }
+  // Renew if the renewal interval has passed
+  else if (current_time - this->last_signed_url_renewal_ >= this->signed_url_renewal_interval_) {
+    uint32_t elapsed_minutes = (current_time - this->last_signed_url_renewal_) / 60000;
+    ESP_LOGI(TAG, "RENEW: Signed URL renewal interval reached (%d minutes elapsed)", elapsed_minutes);
+    should_renew = true;
+  }
+  
+  if (should_renew) {
+    ESP_LOGI(TAG, "RENEW: Renewing signed URL for fast connections...");
+    
+    // Don't interrupt active connections - only renew when idle
+    if (this->state_ == StreamState::IDLE) {
+      if (this->get_signed_url()) {
+        this->signed_url_valid_ = true;
+        this->last_signed_url_renewal_ = current_time;
+        ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
+      } else {
+        ESP_LOGW(TAG, "RENEW: Failed to renew signed URL");
+        this->signed_url_valid_ = false;
+      }
+    } else {
+      ESP_LOGD(TAG, "RENEW: Deferring renewal - stream is active (state=%d)", static_cast<int>(this->state_));
+    }
+  }
 }
 
 void ElevenLabsStream::connect_to_elevenlabs() {
@@ -614,7 +678,7 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
 
 void ElevenLabsStream::set_state(StreamState new_state) {
   if (this->state_ == new_state) {
-    ESP_LOGV(TAG, "SET_STATE: State unchanged, still %d", static_cast<int>(new_state));
+    ESP_LOGD(TAG, "SET_STATE: State unchanged, still %d", static_cast<int>(new_state));
     return;
   }
   
@@ -891,14 +955,14 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
   
   // Handle VAD score
   if (strcmp(type, "vad_score") == 0) {
-    ESP_LOGV(TAG, "PARSE_JSON_BUF: Processing vad_score");
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing vad_score");
     JsonObject vad = root["vad_score_event"];
     if (vad) {
       float vad_score = vad["vad_score"] | 0.0f;
-      ESP_LOGV(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);
       // Could use this for voice activity detection
     } else {
-      ESP_LOGV(TAG, "PARSE_JSON_BUF: No vad_score_event found");
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: No vad_score_event found");
     }
     return;
   }
@@ -1108,6 +1172,15 @@ void ElevenLabsStream::handle_error(const std::string &error_message) {
   ESP_LOGD(TAG, "ERROR: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGD(TAG, "ERROR: Setting state to ERROR");
   
+  // Invalidate signed URL on connection errors - it might be expired
+  if (error_message.find("Failed to") != std::string::npos || 
+      error_message.find("timeout") != std::string::npos ||
+      error_message.find("connection") != std::string::npos) {
+    ESP_LOGW(TAG, "ERROR: Connection-related error detected, invalidating signed URL");
+    this->signed_url_valid_ = false;
+    this->signed_url_.clear();
+  }
+  
   this->set_state(StreamState::ERROR);
   
   ESP_LOGD(TAG, "ERROR: Triggering error events (%zu triggers)", this->on_error_triggers_.size());
@@ -1175,13 +1248,13 @@ void ElevenLabsStream::send_ping() {
 }
 
 void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) {
-  ESP_LOGV(TAG, "SEND_AUDIO: Attempting to send audio chunk");
-  ESP_LOGV(TAG, "SEND_AUDIO: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGV(TAG, "SEND_AUDIO: WebSocket client=%p", this->websocket_client_);
-  ESP_LOGV(TAG, "SEND_AUDIO: Audio data size=%zu samples", audio_data.size());
+  ESP_LOGD(TAG, "SEND_AUDIO: Attempting to send audio chunk");
+  ESP_LOGD(TAG, "SEND_AUDIO: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
+  ESP_LOGD(TAG, "SEND_AUDIO: WebSocket client=%p", this->websocket_client_);
+  ESP_LOGD(TAG, "SEND_AUDIO: Audio data size=%zu samples", audio_data.size());
   
   if (!this->websocket_connected_ || !this->websocket_client_ || audio_data.empty()) {
-    ESP_LOGV(TAG, "SEND_AUDIO: Cannot send audio - conditions not met");
+    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - conditions not met");
     return;
   }
   
@@ -1189,10 +1262,10 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
   const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
   size_t audio_size = audio_data.size() * sizeof(int16_t);
   
-  ESP_LOGV(TAG, "SEND_AUDIO: Audio bytes=%p, size=%zu", audio_bytes, audio_size);
+  ESP_LOGD(TAG, "SEND_AUDIO: Audio bytes=%p, size=%zu", audio_bytes, audio_size);
   
   // Encode audio as base64 for WebSocket transmission
-  ESP_LOGV(TAG, "SEND_AUDIO: Encoding audio to base64...");
+  ESP_LOGD(TAG, "SEND_AUDIO: Encoding audio to base64...");
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
   
   if (audio_base64.empty()) {
@@ -1200,30 +1273,30 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
     return;
   }
   
-  ESP_LOGV(TAG, "SEND_AUDIO: Base64 encoded, length=%zu", audio_base64.length());
+  ESP_LOGD(TAG, "SEND_AUDIO: Base64 encoded, length=%zu", audio_base64.length());
   
   // Send as user_audio_chunk according to protocol
-  ESP_LOGV(TAG, "SEND_AUDIO: Building JSON message...");
+  ESP_LOGD(TAG, "SEND_AUDIO: Building JSON message...");
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
   
-  ESP_LOGV(TAG, "SEND_AUDIO: Sending audio chunk: %d samples, %d bytes, base64 length: %d", 
+  ESP_LOGD(TAG, "SEND_AUDIO: Sending audio chunk: %d samples, %d bytes, base64 length: %d", 
            audio_data.size(), audio_size, audio_base64.length());
   
   this->send_websocket_message(message);
-  ESP_LOGV(TAG, "SEND_AUDIO: Audio chunk sent");
+  ESP_LOGD(TAG, "SEND_AUDIO: Audio chunk sent");
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
-  ESP_LOGV(TAG, "HANDLE_MIC: Received microphone data");
-  ESP_LOGV(TAG, "HANDLE_MIC: Current state=%d", static_cast<int>(this->state_));
-  ESP_LOGV(TAG, "HANDLE_MIC: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGV(TAG, "HANDLE_MIC: Data size=%zu bytes", data.size());
+  ESP_LOGD(TAG, "HANDLE_MIC: Received microphone data");
+  ESP_LOGD(TAG, "HANDLE_MIC: Current state=%d", static_cast<int>(this->state_));
+  ESP_LOGD(TAG, "HANDLE_MIC: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
+  ESP_LOGD(TAG, "HANDLE_MIC: Data size=%zu bytes", data.size());
   
   if (this->state_ != StreamState::LISTENING || !this->websocket_connected_ || data.empty()) {
-    ESP_LOGV(TAG, "HANDLE_MIC: Skipping microphone data - conditions not met");
-    ESP_LOGV(TAG, "HANDLE_MIC:   state=%d (LISTENING=%d), connected=%s, empty=%s",
+    ESP_LOGD(TAG, "HANDLE_MIC: Skipping microphone data - conditions not met");
+    ESP_LOGD(TAG, "HANDLE_MIC:   state=%d (LISTENING=%d), connected=%s, empty=%s",
              static_cast<int>(this->state_), static_cast<int>(StreamState::LISTENING),
              this->websocket_connected_ ? "NO" : "YES",
              data.empty() ? "YES" : "NO");
@@ -1236,7 +1309,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     return;
   }
   
-  ESP_LOGV(TAG, "HANDLE_MIC: Converting uint8_t data to int16_t samples...");
+  ESP_LOGD(TAG, "HANDLE_MIC: Converting uint8_t data to int16_t samples...");
   
   // Convert uint8_t data to int16_t samples
   std::vector<int16_t> audio_samples;
@@ -1244,12 +1317,12 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
   
   memcpy(audio_samples.data(), data.data(), data.size());
   
-  ESP_LOGV(TAG, "HANDLE_MIC: Converted to %zu int16_t samples", audio_samples.size());
-  ESP_LOGV(TAG, "HANDLE_MIC: Sending %d audio samples to ElevenLabs", audio_samples.size());
+  ESP_LOGD(TAG, "HANDLE_MIC: Converted to %zu int16_t samples", audio_samples.size());
+  ESP_LOGD(TAG, "HANDLE_MIC: Sending %d audio samples to ElevenLabs", audio_samples.size());
   
   // Send audio chunk to ElevenLabs
   this->send_audio_chunk(audio_samples);
-  ESP_LOGV(TAG, "HANDLE_MIC: Microphone data processing complete");
+  ESP_LOGD(TAG, "HANDLE_MIC: Microphone data processing complete");
 }
 
 // WebSocket event handler
