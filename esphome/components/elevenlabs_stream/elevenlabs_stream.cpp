@@ -789,6 +789,33 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
           ESP_LOGD(TAG, "PARSE_JSON_BUF: User input format: %s", user_input_format);
         }
         
+        // Initialize speaker with correct audio format early for faster response
+        if (this->speaker_ && agent_output_format) {
+          // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
+          uint32_t sample_rate = 44100; // Default to 44.1kHz
+          size_t underscore_pos = this->agent_output_audio_format_.find('_');
+          if (underscore_pos != std::string::npos) {
+            std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
+            sample_rate = std::stoul(rate_str);
+            ESP_LOGI(TAG, "PARSE_JSON_BUF: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
+          }
+          
+          // Set the input audio stream info for the resampler based on ElevenLabs format
+          esphome::audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
+          ESP_LOGI(TAG, "PARSE_JSON_BUF: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
+                   16, 1, sample_rate);
+          
+          // Configure the speaker with the correct input format
+          this->speaker_->set_audio_stream_info(input_stream_info);
+          ESP_LOGI(TAG, "PARSE_JSON_BUF: Audio stream info configured on speaker for faster playback");
+          
+          // Start the speaker early for immediate readiness
+          if (!this->speaker_->is_running()) {
+            ESP_LOGI(TAG, "PARSE_JSON_BUF: Starting speaker early for faster audio response");
+            this->speaker_->start();
+          }
+        }
+        
         ESP_LOGD(TAG, "PARSE_JSON_BUF: Conversation initialized - already in ON state");
       } else {
         ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_id in metadata");
@@ -1040,33 +1067,17 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
     if (underscore_pos != std::string::npos) {
       std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
       sample_rate = std::stoul(rate_str);
-      ESP_LOGI(TAG, "HANDLE_AUDIO: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
+      ESP_LOGI(TAG, "HANDLE_AUDIO: Using sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
     }
   }
   
-  // Set the input audio stream info for the resampler based on ElevenLabs format
-  // ElevenLabs sends 16-bit mono PCM audio
-  esphome::audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
-           16, 1, sample_rate);
-  
-  // Configure the speaker with the correct input format BEFORE playing any audio
-  this->speaker_->set_audio_stream_info(input_stream_info);
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Input audio stream info set on speaker - letting speaker start naturally with play()");
-  
-  // Ensure the speaker is started before sending audio data
+  // Ensure speaker is started (should already be started from conversation init, but double-check)
   if (!this->speaker_->is_running()) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: Starting resampler speaker before sending audio data");
+    ESP_LOGI(TAG, "HANDLE_AUDIO: Speaker not running, starting now");
     this->speaker_->start();
   }
   
   ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
-  
-  // Let's examine the first few bytes to understand the audio format
-  if (length >= 8) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: First 8 bytes: %02x %02x %02x %02x %02x %02x %02x %02x", 
-             data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-  }
   
   size_t samples = length / 2; // 16-bit samples = 2 bytes each
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
@@ -1085,8 +1096,8 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   ESP_LOGI(TAG, "HANDLE_AUDIO: Speaker activity tracked - start=%u, end=%u", 
            this->speaker_start_time_, this->speaker_end_time_);
   
-  // Send audio data to resampler - now with correct input format set
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to resampler with input format %d Hz -> output 48 kHz", sample_rate);
+  // Send audio data to resampler - speaker should already be configured with correct format
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to pre-configured speaker");
   
   // Send the audio data to the speaker (resampler pipeline)
   // The resampler will convert 44.1kHz->48kHz, then send to mixer, then to I2S hardware
@@ -1232,7 +1243,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
   this->update_speaker_activity();
   
   if (this->is_speaker_active()) {
-    ESP_LOGD(TAG, "HANDLE_MIC: Blocking microphone input - agent is speaking (speaker active)");
+    ESP_LOGV(TAG, "HANDLE_MIC: Blocking microphone input - agent is speaking (speaker active)");
     return;
   }
 
