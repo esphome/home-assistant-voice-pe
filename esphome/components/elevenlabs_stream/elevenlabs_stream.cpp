@@ -1269,11 +1269,6 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     audio_samples.push_back(static_cast<int16_t>(boosted_sample));
   }
   
-  ESP_LOGD(TAG, "HANDLE_MIC: Converted %zu 32-bit samples to %zu 16-bit samples with 2x gain boost", num_samples_32bit, audio_samples.size());
-  ESP_LOGD(TAG, "HANDLE_MIC: First 32-bit sample: %d, converted to 16-bit: %d", 
-           num_samples_32bit > 0 ? samples_32bit[0] : 0,
-           audio_samples.empty() ? 0 : audio_samples[0]);
-  
   // Send audio chunk to ElevenLabs
   this->send_audio_chunk(audio_samples);
 }
