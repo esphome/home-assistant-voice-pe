@@ -693,7 +693,7 @@ void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t le
   }
   
   this->parse_json_message_from_buffer(buffer, length);
-  ESP_LOGD(TAG, "HANDLE_WS_MSG: Message processing complete");
+  ESP_LOGV(TAG, "HANDLE_WS_MSG: Message processing complete");
 }
 
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
@@ -1210,16 +1210,9 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
   const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
   std::vector<int16_t> audio_samples;
   audio_samples.reserve(num_samples_32bit);
-  constexpr int gain_factor = 2; // Reduce gain to 2 to avoid clipping
-  // Log first 8 raw 32-bit samples for debugging
-  int16_t debug_samples[8] = {0};
   for (size_t i = 0; i < num_samples_32bit; i++) {
-    int32_t boosted = (samples_32bit[i] >> 8) * gain_factor;
-    if (boosted > 32767) boosted = 32767;
-    if (boosted < -32768) boosted = -32768;
-    int16_t sample16 = static_cast<int16_t>(boosted);
+    int16_t sample16 = static_cast<int16_t>(samples_32bit[i] >> 16);
     audio_samples.push_back(sample16);
-    if (i < 8) debug_samples[i] = sample16;
   }
   // Send converted buffer to ElevenLabs pipeline
   this->send_audio_chunk(audio_samples);
