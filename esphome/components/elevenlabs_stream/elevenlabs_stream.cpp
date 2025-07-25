@@ -8,7 +8,6 @@
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/audio/audio.h"
 
-#ifdef USE_ESP32
 #include <esp_websocket_client.h>
 #include <esp_http_client.h>
 #include <esp_tls.h>
@@ -1225,15 +1224,11 @@ void ElevenLabsStream::send_conversation_init() {
 }
 
 void ElevenLabsStream::send_ping() {
-  ESP_LOGD(TAG, "SEND_PING: Preparing ping message");
-  
   // Send WebSocket ping frame using ESPHome's JSON builder with proper event_id and timing
   static uint32_t ping_event_id = 1;
   uint32_t ping_ms = millis();
   
   uint32_t current_event_id = ping_event_id++;
-  
-  ESP_LOGD(TAG, "SEND_PING: Ping event_id=%d, ping_ms=%d", current_event_id, ping_ms);
   
   std::string message = json::build_json([current_event_id, ping_ms](JsonObject root) {
     root["type"] = "ping";
@@ -1242,17 +1237,10 @@ void ElevenLabsStream::send_ping() {
     ping_event["ping_ms"] = ping_ms;
   });
   
-  ESP_LOGD(TAG, "SEND_PING: Sending ping with event_id: %d, message: %s", current_event_id, message.c_str());
   this->send_websocket_message(message);
-  ESP_LOGD(TAG, "SEND_PING: Ping sent");
 }
 
 void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) {
-  ESP_LOGD(TAG, "SEND_AUDIO: Attempting to send audio chunk");
-  ESP_LOGD(TAG, "SEND_AUDIO: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGD(TAG, "SEND_AUDIO: WebSocket client=%p", this->websocket_client_);
-  ESP_LOGD(TAG, "SEND_AUDIO: Audio data size=%zu samples", audio_data.size());
-  
   if (!this->websocket_connected_ || !this->websocket_client_ || audio_data.empty()) {
     ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - conditions not met");
     return;
@@ -1262,21 +1250,14 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
   const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
   size_t audio_size = audio_data.size() * sizeof(int16_t);
   
-  ESP_LOGD(TAG, "SEND_AUDIO: Audio bytes=%p, size=%zu", audio_bytes, audio_size);
-  
   // Encode audio as base64 for WebSocket transmission
-  ESP_LOGD(TAG, "SEND_AUDIO: Encoding audio to base64...");
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
   
   if (audio_base64.empty()) {
     ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
     return;
   }
-  
-  ESP_LOGD(TAG, "SEND_AUDIO: Base64 encoded, length=%zu", audio_base64.length());
-  
   // Send as user_audio_chunk according to protocol
-  ESP_LOGD(TAG, "SEND_AUDIO: Building JSON message...");
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
@@ -1285,15 +1266,9 @@ void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) 
            audio_data.size(), audio_size, audio_base64.length());
   
   this->send_websocket_message(message);
-  ESP_LOGD(TAG, "SEND_AUDIO: Audio chunk sent");
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
-  ESP_LOGD(TAG, "HANDLE_MIC: Received microphone data");
-  ESP_LOGD(TAG, "HANDLE_MIC: Current state=%d", static_cast<int>(this->state_));
-  ESP_LOGD(TAG, "HANDLE_MIC: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
-  ESP_LOGD(TAG, "HANDLE_MIC: Data size=%zu bytes", data.size());
-  
   if (this->state_ != StreamState::LISTENING || !this->websocket_connected_ || data.empty()) {
     ESP_LOGD(TAG, "HANDLE_MIC: Skipping microphone data - conditions not met");
     ESP_LOGD(TAG, "HANDLE_MIC:   state=%d (LISTENING=%d), connected=%s, empty=%s",
@@ -1309,20 +1284,14 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     return;
   }
   
-  ESP_LOGD(TAG, "HANDLE_MIC: Converting uint8_t data to int16_t samples...");
-  
   // Convert uint8_t data to int16_t samples
   std::vector<int16_t> audio_samples;
   audio_samples.resize(data.size() / sizeof(int16_t));
   
   memcpy(audio_samples.data(), data.data(), data.size());
   
-  ESP_LOGD(TAG, "HANDLE_MIC: Converted to %zu int16_t samples", audio_samples.size());
-  ESP_LOGD(TAG, "HANDLE_MIC: Sending %d audio samples to ElevenLabs", audio_samples.size());
-  
   // Send audio chunk to ElevenLabs
   this->send_audio_chunk(audio_samples);
-  ESP_LOGD(TAG, "HANDLE_MIC: Microphone data processing complete");
 }
 
 // WebSocket event handler
@@ -1430,5 +1399,3 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 
 }  // namespace elevenlabs_stream
 }  // namespace esphome
-
-#endif  // USE_ESP32
