@@ -176,12 +176,14 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1  # ElevenLabs sends mono audio
-    # Input will be 16kHz mono from ElevenLabs, output will be 48kHz mono for mixer
+    buffer_duration: 2000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
+    # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for mixer
   - platform: resampler
     id: media_resampling_speaker
     output_speaker: media_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
+    buffer_duration: 2000ms  # Match announcement resampler
     taps: 32  # Higher quality resampling (more CPU intensive)
 
 # Media player with sound files for testing speaker functionality

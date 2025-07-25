@@ -113,14 +113,19 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   size_t samples = output_len / 2; // 16-bit samples = 2 bytes each
   uint32_t sample_rate = 44100; // ElevenLabs default
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
-  uint32_t wait_time_ms = (uint32_t)(duration_ms + 1000); // Add 1000ms buffer for safety
   
-  ESP_LOGI(TAG, "DECODE_B64: Scheduling buffer cleanup for audio duration: %.1f ms + 1000ms buffer = %u ms", 
-           duration_ms, wait_time_ms);
+  // Account for resampler/mixer pipeline delays - these components buffer and process data
+  // The resampler converts 44.1kHz->48kHz and the mixer combines streams
+  // Add significant buffer time to account for pipeline delays (3-5 seconds total)
+  uint32_t pipeline_delay_ms = 4000; // 4 second buffer for resampler/mixer pipeline
+  uint32_t wait_time_ms = (uint32_t)(duration_ms + pipeline_delay_ms);
+  
+  ESP_LOGI(TAG, "DECODE_B64: Scheduling buffer cleanup for audio duration: %.1f ms + %u ms pipeline buffer = %u ms", 
+           duration_ms, pipeline_delay_ms, wait_time_ms);
   
   // Schedule buffer cleanup without blocking the WebSocket task
   this->set_timeout("cleanup_audio_buffer", wait_time_ms, [psram_buffer]() {
-    ESP_LOGI("elevenlabs_stream", "CLEANUP: Audio playback completed, freeing PSRAM buffer");
+    ESP_LOGI("elevenlabs_stream", "CLEANUP: Audio playback completed after pipeline delay, freeing PSRAM buffer");
     heap_caps_free(psram_buffer);
     ESP_LOGD("elevenlabs_stream", "CLEANUP: PSRAM buffer freed after audio completion");
   });
@@ -1052,8 +1057,9 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   if (!this->speaker_->is_running()) {
     ESP_LOGI(TAG, "HANDLE_AUDIO: Starting resampler speaker before sending audio data");
     this->speaker_->start();
-    // Give the speaker time to start up properly
-    vTaskDelay(pdMS_TO_TICKS(50)); // Reduced to 50ms since we now keep buffer alive longer
+    // Give the speaker time to start up properly and initialize its pipeline
+    // The resampler needs to connect to mixer which connects to I2S hardware
+    vTaskDelay(pdMS_TO_TICKS(100)); // Increased startup delay for pipeline initialization
   }
   
   ESP_LOGI(TAG, "HANDLE_AUDIO: Agent output format: %s", this->agent_output_audio_format_.c_str());
@@ -1070,11 +1076,20 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   
   // Send audio data to resampler - now with correct input format set
   ESP_LOGI(TAG, "HANDLE_AUDIO: Sending audio data to resampler with input format %d Hz -> output 48 kHz", sample_rate);
-  this->speaker_->play(data, length);
   
-  // Don't block here - let the audio play naturally
+  // Send the audio data to the speaker (resampler pipeline)
+  // The resampler will convert 44.1kHz->48kHz, then send to mixer, then to I2S hardware
+  size_t bytes_written = this->speaker_->play(data, length);
+  
+  if (bytes_written != length) {
+    ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker play() returned %zu bytes, expected %zu bytes", bytes_written, length);
+  } else {
+    ESP_LOGI(TAG, "HANDLE_AUDIO: Successfully sent %zu bytes to speaker pipeline", bytes_written);
+  }
+  
+  // Don't block here - let the audio play naturally through the pipeline
   // The resampler and mixer will handle the timing and conversion
-  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio data sent to resampler, continuing...");
+  ESP_LOGI(TAG, "HANDLE_AUDIO: Audio data sent to resampler pipeline, continuing...");
   
   // Add debug info about speaker state after sending audio
   if (this->speaker_ && this->speaker_->is_running()) {
