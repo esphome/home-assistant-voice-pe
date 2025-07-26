@@ -50,6 +50,7 @@ class ElevenLabsStream : public Component {
   StreamState get_state() const { return this->state_; }
   void handle_microphone_data(const std::vector<uint8_t> &data);
   
+
   // Speaker activity tracking
   bool is_speaker_active() const;
 
@@ -118,6 +119,9 @@ class ElevenLabsStream : public Component {
   uint32_t last_signed_url_renewal_{0};  // Track when we last renewed the signed URL
   uint32_t signed_url_renewal_interval_{600000};  // 10 minutes in milliseconds
   bool signed_url_valid_{false};  // Track if we have a valid signed URL
+
+  // Accumulated playback duration for all segments
+  uint32_t accumulated_duration_ms_{0};
   
   // Speaker activity tracking to prevent microphone echo/feedback
   bool speaker_is_active_{false};  // Track if agent is currently speaking
@@ -147,14 +151,11 @@ class ElevenLabsStreamErrorTrigger : public Trigger<std::string> {};
 
 // Condition
 template<typename... Ts> class ElevenLabsStreamIsRunningCondition : public Condition<Ts...> {
- public:
+public:
   ElevenLabsStreamIsRunningCondition(ElevenLabsStream *parent) : parent_(parent) {}
-  
   bool check(Ts... x) override { return this->parent_->is_running(); }
-  
   void set_parent(ElevenLabsStream *parent) { this->parent_ = parent; }
-  
- protected:
+protected:
   ElevenLabsStream *parent_;
 };
 
