@@ -166,14 +166,14 @@ void ElevenLabsStream::setup() {
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
     this->set_timeout("audio_output_callback", 100, [this]() {
-      ESP_LOGD(TAG, "DECODE_B64: speaker finished");
-      this->speaker_is_active_ = false;
-
-      if(this->microphone_->is_running()) {
+      if(this->microphone_->is_running() && this->speaker_is_active_) {
         for (auto *trigger : this->on_listening_triggers_) {
             trigger->trigger();
         }
       }
+
+      ESP_LOGD(TAG, "DECODE_B64: speaker finished");
+      this->speaker_is_active_ = false;
     });
   });
   
