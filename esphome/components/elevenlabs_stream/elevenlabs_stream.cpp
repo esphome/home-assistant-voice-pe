@@ -96,18 +96,34 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   // CRITICAL: Don't free the buffer until audio is finished playing!
   // Instead of using fixed delays, we'll monitor the speaker dynamically
   // Schedule buffer cleanup with a reasonable safety margin
-  size_t samples = output_len / 2; // 16-bit samples = 2 bytes each
+  size_t samples = output_len; // 16-bit samples = 2 bytes each
   uint32_t sample_rate = 44100; // ElevenLabs default
   float duration_ms = (float)samples / (sample_rate / 1000.0f);
-  
+
   // Use a more conservative cleanup time - the dynamic speaker detection will handle precise timing
   // We just need to ensure the buffer isn't freed too early
-  uint32_t safety_buffer_ms = 2000; // 2 second safety buffer for cleanup
-  uint32_t cleanup_time_ms = (uint32_t)(duration_ms + safety_buffer_ms);
+  uint32_t safety_buffer_ms = 100;
+  uint32_t cleanup_time_ms = (uint32_t)(duration_ms);
+
+  if(this->speaker_end_time_ < millis()) {
+    this->speaker_end_time_ = millis(); // Reset if already expired
+  }
+
+  this->speaker_end_time_ += cleanup_time_ms;
+  ESP_LOGI(TAG, "DECODE_B64: Speaker end time set to %d (added %d ms)", 
+           this->speaker_end_time_, cleanup_time_ms);
   
   // Schedule buffer cleanup without blocking the WebSocket task
-  this->set_timeout("cleanup_audio_buffer", cleanup_time_ms, [psram_buffer]() {
+  this->set_timeout("cleanup_audio_buffer", cleanup_time_ms + safety_buffer_ms, [this, psram_buffer]() {
     heap_caps_free(psram_buffer);
+
+    if(millis() < this->speaker_end_time_) {
+      ESP_LOGW(TAG, "DECODE_B64: Cleanup called too early, speaker still active");
+      return; // Don't free yet, speaker is still playing
+    }
+
+    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing");
+    this->speaker_is_active_ = false;
   });
   
   return true;
@@ -182,9 +198,6 @@ void ElevenLabsStream::loop() {
       this->last_heartbeat_ = millis();
     }
   }
-  
-  // Update speaker activity tracking
-  this->update_speaker_activity();
   
   // Renew signed URL periodically for fast connections
   this->renew_signed_url_if_needed();
@@ -491,6 +504,11 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ESP_LOGI(TAG, "=== CONNECT_TO_ELEVENLABS START ===");
   ESP_LOGI(TAG, "CONNECT: Connecting to ElevenLabs using signed URL...");
   ESP_LOGD(TAG, "CONNECT: Signed URL length=%zu", this->signed_url_.length());
+
+  // Block microphone until first agent audio is played
+  ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Awaiting first agent audio");
+  this->speaker_is_active_ = true;
+  this->awaiting_first_agent_audio_ = true;
   
   if (this->signed_url_.empty()) {
     ESP_LOGE(TAG, "CONNECT: No signed URL available");
@@ -505,7 +523,7 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ws_cfg.uri = this->signed_url_.c_str();
   ws_cfg.buffer_size = 4096;
   ws_cfg.task_stack = 8192;
-  ws_cfg.task_prio = 5;
+  ws_cfg.task_prio = 1;
   ws_cfg.disable_auto_reconnect = true;
   ws_cfg.user_context = this;  // Pass this instance as context
   ws_cfg.transport = WEBSOCKET_TRANSPORT_OVER_SSL;
@@ -565,6 +583,17 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "CONNECT: Connection start time updated to %d", this->connection_start_time_);
   ESP_LOGD(TAG, "=== CONNECT_TO_ELEVENLABS INITIATED ===");
+  
+  // Send initial conversation setup
+  ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
+  this->send_conversation_init();
+  
+  ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
+
+  ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
+  this->websocket_connected_ = true;
+  ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+  this->set_state(StreamState::ON);
 }
 
 void ElevenLabsStream::disconnect_from_elevenlabs() {
@@ -659,9 +688,9 @@ void ElevenLabsStream::set_state(StreamState new_state) {
   if (new_state == StreamState::ON && old_state == StreamState::OFF) {
     ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
     for (auto *trigger : this->on_start_triggers_) {
+      // Only trigger LED spin, do NOT play chime sound
       trigger->trigger();
     }
-    
     // Start microphone capture for continuous streaming
     if (this->microphone_ && !this->microphone_->is_running()) {
       ESP_LOGD(TAG, "SET_STATE: Starting microphone capture");
@@ -892,6 +921,10 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     JsonObject vad = root["vad_score_event"];
     if (vad) {
       float vad_score = vad["vad_score"] | 0.0f;
+      if(vad_score <= 0.0f && !this->is_speaker_active()) {
+        return; // Skip invalid scores
+      }
+
       ESP_LOGD(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);
       // Could use this for voice activity detection
     } else {
@@ -1046,21 +1079,6 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
   }
 }
 
-void ElevenLabsStream::check_speaker_finished() {
-  if (!this->speaker_) {
-    return;
-  }
-  
-  // Check if the speaker is still playing audio by looking at buffered data
-  // When has_buffered_data() returns false, the speaker has finished playing
-  if (!this->speaker_->has_buffered_data() && !this->speaker_->is_running()) {
-    // Speaker has finished, add silence buffer before enabling microphone
-    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing");
-    this->speaker_end_time_ = millis();
-    this->speaker_is_active_ = false;
-  }
-}
-
 void ElevenLabsStream::handle_error(const std::string &error_message) {
   ESP_LOGE(TAG, "=== ERROR HANDLER CALLED ===");
   ESP_LOGE(TAG, "ERROR: %s", error_message.c_str());
@@ -1209,21 +1227,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
   switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_CONNECTED");
-      ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
-      stream->websocket_connected_ = true;
-      ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
-      stream->set_state(StreamState::ON);
-      
-      // Block microphone until first agent audio is played
-      stream->speaker_is_active_ = true;
-      stream->awaiting_first_agent_audio_ = true;
-      ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Awaiting first agent audio");
-      
-      // Send initial conversation setup
-      ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
-      stream->send_conversation_init();
-      
-      ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
       break;
       
     case WEBSOCKET_EVENT_DISCONNECTED:
@@ -1305,23 +1308,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 bool ElevenLabsStream::is_speaker_active() const {
   // Block mic if speaker is active or awaiting first agent audio
   return this->speaker_is_active_ || this->awaiting_first_agent_audio_;
-}
-
-void ElevenLabsStream::update_speaker_activity() {
-  // With dynamic speaker detection, this method mainly serves as a safety fallback
-  // The primary detection is handled by check_speaker_finished() callbacks
-  if (!this->speaker_is_active_ || !this->speaker_) {
-    return;
-  }
-  // Safety check: if speaker has no buffered data, we haven't detected it yet
-  if (!this->speaker_->has_buffered_data()) {
-    uint32_t current_time = millis();
-    ESP_LOGD(TAG, "SPEAKER_ACTIVITY: Safety check detected speaker stopped (was active for %u ms)",
-             current_time - this->speaker_start_time_);
-    this->speaker_is_active_ = false;
-    this->speaker_start_time_ = 0;
-    this->speaker_end_time_ = current_time;
-  }
 }
 
 }  // namespace elevenlabs_stream
