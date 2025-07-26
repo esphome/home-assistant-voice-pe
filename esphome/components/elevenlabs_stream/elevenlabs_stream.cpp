@@ -130,9 +130,8 @@ void ElevenLabsStream::setup() {
 
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
-    this->set_timeout("audio_output_callback", 1000, [this]() {
+    this->set_timeout("audio_output_callback", 3000, [this]() {
       ESP_LOGD(TAG, "DECODE_B64: speaker finished");
-      this->speaker_is_active_ = false;
 
       if (persistent_audio_buffer) {
         memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
@@ -140,6 +139,8 @@ void ElevenLabsStream::setup() {
         persistent_audio_buffer_len = 0;
         ESP_LOGD(TAG, "CHAIN_PLAY: persistent_audio_buffer reset after playback");
       }
+      
+      this->speaker_is_active_ = false;
     });
   });
   
@@ -825,15 +826,13 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         
         // Update timing for state management
         this->last_audio_response_time_ = millis();
+        this->speaker_is_active_ = true;
+        this->speaker_->start();
         
-        // Process audio chunks immediately for better real-time performance
-        // Skip empty or very small chunks
-        if (base64_len > 4) {
-          // Decode base64 audio data and play it immediately
-          bool decode_success = this->decode_and_play_base64_audio(audio_base64);
-          if (!decode_success) {
-            ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
-          }
+        // Decode base64 audio data and play it immediately
+        bool decode_success = this->decode_and_play_base64_audio(audio_base64);
+        if (!decode_success) {
+          ESP_LOGW(TAG, "PARSE_JSON_BUF: Failed to decode audio data");
         }
       }
     }
@@ -946,37 +945,6 @@ void ElevenLabsStream::handle_websocket_binary(const uint8_t *data, size_t lengt
   // This method is kept for completeness but may not be used by ElevenLabs
   ESP_LOGW(TAG, "HANDLE_WS_BIN: Binary WebSocket frames not expected in ElevenLabs protocol");
   ESP_LOGD(TAG, "HANDLE_WS_BIN: Binary data handling complete");
-}
-
-void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length) {
-  if (!data || length == 0) {
-    return;
-  }
-  
-  if (!this->speaker_) {
-    ESP_LOGW(TAG, "HANDLE_AUDIO: No speaker configured");
-    return;
-  }
-  
-  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
-  uint32_t sample_rate = 44100; // Default to 44.1kHz
-  if (!this->agent_output_audio_format_.empty()) {
-    // Extract sample rate from format string like "pcm_44100"
-    size_t underscore_pos = this->agent_output_audio_format_.find('_');
-    if (underscore_pos != std::string::npos) {
-      std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
-      sample_rate = std::stoul(rate_str);
-    }
-  }
-  
-  // Track speaker activity to prevent microphone echo/feedback
-  uint32_t current_time = millis();
-  this->speaker_is_active_ = true;
-  this->speaker_start_time_ = current_time;
-  size_t bytes_written = this->speaker_->play(data, length);
-  if (bytes_written != length) {
-    ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, length);
-  }
 }
 
 void ElevenLabsStream::handle_error(const std::string &error_message) {
