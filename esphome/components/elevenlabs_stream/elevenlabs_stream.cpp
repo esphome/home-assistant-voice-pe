@@ -61,8 +61,9 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 // Persistent audio buffer for streaming (1MB)
 static constexpr size_t AUDIO_BUFFER_SIZE = 512 * 1024;
 static uint8_t* persistent_audio_buffer = nullptr;
-static size_t persistent_audio_buffer_pos = 0;
-static size_t persistent_audio_buffer_len = 0; // Tracks current length inside the buffer
+static size_t ring_write_pos = 0; // Next write position
+static size_t ring_read_pos = 0;  // Next read position
+static size_t ring_count = 0;     // Number of bytes currently in buffer
 
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   // Allocate buffer in PSRAM if not already allocated
@@ -73,8 +74,9 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
       return false;
     }
     memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
-    persistent_audio_buffer_pos = 0;
-    persistent_audio_buffer_len = 0;
+    ring_write_pos = 0;
+    ring_read_pos = 0;
+    ring_count = 0;
   }
 
   size_t input_len = strlen(base64_data);
@@ -91,27 +93,69 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
     return false;
   }
 
-  if (persistent_audio_buffer_pos + required_output_len > AUDIO_BUFFER_SIZE) {
-    ESP_LOGE(TAG, "DECODE_B64: Persistent buffer overflow (%zu + %zu > %zu), dropping chunk", persistent_audio_buffer_pos, required_output_len, AUDIO_BUFFER_SIZE);
-    persistent_audio_buffer_pos = 0; // Optionally reset buffer
-    persistent_audio_buffer_len = 0;
-    memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
+  // If incoming chunk is larger than buffer, drop it
+  if (required_output_len > AUDIO_BUFFER_SIZE) {
+    ESP_LOGE(TAG, "DECODE_B64: Chunk too large for buffer (%zu > %zu), dropping", required_output_len, AUDIO_BUFFER_SIZE);
     return false;
   }
 
+  // If not enough space, overwrite oldest data (move read_pos forward)
+  while (ring_count + required_output_len > AUDIO_BUFFER_SIZE) {
+    ring_read_pos = (ring_read_pos + 1) % AUDIO_BUFFER_SIZE;
+    ring_count--;
+  }
+
   size_t output_len = 0;
-  ret = mbedtls_base64_decode(&persistent_audio_buffer[persistent_audio_buffer_pos], required_output_len, &output_len, (const unsigned char*)base64_data, input_len);
+  // Write decoded audio into ring buffer, handling wrap-around
+  if (ring_write_pos + required_output_len <= AUDIO_BUFFER_SIZE) {
+    ret = mbedtls_base64_decode(&persistent_audio_buffer[ring_write_pos], required_output_len, &output_len, (const unsigned char*)base64_data, input_len);
+  } else {
+    // Split into two writes: end of buffer, then start
+    size_t first_part = AUDIO_BUFFER_SIZE - ring_write_pos;
+    size_t second_part = required_output_len - first_part;
+    size_t temp_len = 0;
+    ret = mbedtls_base64_decode(&persistent_audio_buffer[ring_write_pos], first_part, &temp_len, (const unsigned char*)base64_data, input_len);
+    if (ret == 0) {
+      // Write remaining to start of buffer
+      size_t temp_len2 = 0;
+      ret = mbedtls_base64_decode(&persistent_audio_buffer[0], second_part, &temp_len2, (const unsigned char*)base64_data + first_part, input_len - first_part);
+      output_len = temp_len + temp_len2;
+    }
+  }
   if (ret != 0) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
     return false;
   }
 
-  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio at pos %zu (PSRAM)", output_len, persistent_audio_buffer_pos);
-  persistent_audio_buffer_len += output_len;
-  size_t bytes_written = this->speaker_->play(&persistent_audio_buffer[persistent_audio_buffer_pos], static_cast<size_t>(persistent_audio_buffer_len));
-  persistent_audio_buffer_pos += bytes_written;
-  ESP_LOGD(TAG, "DECODE_B64: Appended %zu bytes to persistent_audio_buffer, new pos=%zu, buffer_len=%zu", bytes_written, persistent_audio_buffer_pos, persistent_audio_buffer_len);
-  
+  // Update write position and count
+  ring_write_pos = (ring_write_pos + output_len) % AUDIO_BUFFER_SIZE;
+  ring_count += output_len;
+
+  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio at write_pos %zu (PSRAM)", output_len, ring_write_pos);
+
+  // Playback: play from ring_read_pos up to ring_write_pos (handle wrap)
+  size_t bytes_to_play = ring_count;
+  if (ring_read_pos < ring_write_pos) {
+    // Linear region
+    size_t bytes_written = this->speaker_->play(&persistent_audio_buffer[ring_read_pos], bytes_to_play);
+    ring_read_pos = (ring_read_pos + bytes_written) % AUDIO_BUFFER_SIZE;
+    ring_count -= bytes_written;
+    ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from ring buffer, new read_pos=%zu, count=%zu", bytes_written, ring_read_pos, ring_count);
+  } else if (ring_count > 0) {
+    // Wrapped region: play to end, then from start
+    size_t first_part = AUDIO_BUFFER_SIZE - ring_read_pos;
+    size_t bytes_written1 = this->speaker_->play(&persistent_audio_buffer[ring_read_pos], first_part);
+    ring_read_pos = (ring_read_pos + bytes_written1) % AUDIO_BUFFER_SIZE;
+    ring_count -= bytes_written1;
+    ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from ring buffer (end), new read_pos=%zu, count=%zu", bytes_written1, ring_read_pos, ring_count);
+    if (ring_count > 0) {
+      size_t bytes_written2 = this->speaker_->play(&persistent_audio_buffer[ring_read_pos], ring_count);
+      ring_read_pos = (ring_read_pos + bytes_written2) % AUDIO_BUFFER_SIZE;
+      ring_count -= bytes_written2;
+      ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from ring buffer (start), new read_pos=%zu, count=%zu", bytes_written2, ring_read_pos, ring_count);
+    }
+  }
+
   return true;
 }
 
@@ -132,14 +176,6 @@ void ElevenLabsStream::setup() {
     this->cancel_timeout("audio_output_callback");
     this->set_timeout("audio_output_callback", 3000, [this]() {
       ESP_LOGD(TAG, "DECODE_B64: speaker finished");
-
-      if (persistent_audio_buffer) {
-        memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
-        persistent_audio_buffer_pos = 0;
-        persistent_audio_buffer_len = 0;
-        ESP_LOGD(TAG, "CHAIN_PLAY: persistent_audio_buffer reset after playback");
-      }
-      
       this->speaker_is_active_ = false;
     });
   });
@@ -633,7 +669,6 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
   if (persistent_audio_buffer) {
     heap_caps_free(persistent_audio_buffer);
     persistent_audio_buffer = nullptr;
-    persistent_audio_buffer_pos = 0;
     ESP_LOGD(TAG, "DISCONNECT: Freed persistent PSRAM audio buffer");
   }
   

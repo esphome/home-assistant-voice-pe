@@ -1,5 +1,3 @@
-
-
 # Home Assistant Voice PE + ElevenLabs Bridge
 
 ## Overview
@@ -30,6 +28,10 @@ Instead of using the Wyoming protocol, this firmware connects directly to Eleven
 - [Home Assistant Voice: Preview Edition](https://www.home-assistant.io/voice-pe/)
 - [Documentation](https://voice-pe.home-assistant.io/)
 - [Firmware Installer](https://esphome.github.io/home-assistant-voice-pe/)
+
+## Integration Notes
+
+- **Supported TTS Output Format:** Only ElevenLabs agent TTS output formats of PCM 16000 Hz or below are supported. This ensures enough memory for longer messages. Higher sample rates (e.g., 22050 Hz, 44100 Hz) may exceed the available buffer and cause audio truncation or loss.
 
 ## Notes
 
