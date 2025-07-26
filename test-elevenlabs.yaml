@@ -310,8 +310,13 @@ binary_sensor:
           ESP_LOGI("speaker_test", "Speaker mute state: %s", id(i2s_audio_speaker)->get_mute_state() ? "MUTED" : "UNMUTED");
           ESP_LOGI("speaker_test", "Speaker volume: %.2f", id(i2s_audio_speaker)->get_volume());
           ESP_LOGI("speaker_test", "Speaker amplifier pin state: %s", id(internal_speaker_amp)->state ? "ON" : "OFF");
-      - delay: 2s  # Wait for test sound to finish
-      - logger.log: "Test sound finished, now testing ElevenLabs"
+
+      # Play test sound using script (same as voice_kit component does)
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: center_button_press_sound
+        
       - if:
           condition:
             elevenlabs_stream.is_running: {}
@@ -321,9 +326,3 @@ binary_sensor:
           else:
             - elevenlabs_stream.start: {}
             - logger.log: "Starting ElevenLabs stream via button"
-
-      # Play test sound using script (same as voice_kit component does)
-      - script.execute:
-          id: play_sound
-          priority: true
-          sound_file: center_button_press_sound

@@ -58,8 +58,8 @@ static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/g
 // Forward declaration for WebSocket event handler
 void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
-// Persistent audio buffer for streaming (512KB)
-static constexpr size_t AUDIO_BUFFER_SIZE = 512 * 1024;
+// Persistent audio buffer for streaming (1MB)
+static constexpr size_t AUDIO_BUFFER_SIZE = 1024 * 1024;
 static uint8_t* persistent_audio_buffer = nullptr;
 static size_t persistent_audio_buffer_pos = 0;
 
@@ -75,27 +75,29 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
     persistent_audio_buffer_pos = 0;
   }
 
-  if (!base64_data || strlen(base64_data) == 0) {
+  size_t input_len = strlen(base64_data);
+  if (!base64_data || input_len == 0) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
     return false;
   }
 
-  size_t input_len = strlen(base64_data);
-  size_t output_len = 0;
-  int ret = mbedtls_base64_decode(nullptr, 0, &output_len, (const unsigned char*)base64_data, input_len);
+  // Two-step base64 decode: first get required output length
+  size_t required_output_len = 0;
+  int ret = mbedtls_base64_decode(nullptr, 0, &required_output_len, (const unsigned char*)base64_data, input_len);
   if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to calculate base64 decode length: %d", ret);
+    ESP_LOGE(TAG, "DECODE_B64: Failed to get base64 output length: %d", ret);
     return false;
   }
 
-  if (persistent_audio_buffer_pos + output_len > AUDIO_BUFFER_SIZE) {
-    ESP_LOGE(TAG, "DECODE_B64: Persistent buffer overflow (%zu + %zu > %zu), dropping chunk", persistent_audio_buffer_pos, output_len, AUDIO_BUFFER_SIZE);
+  if (persistent_audio_buffer_pos + required_output_len > AUDIO_BUFFER_SIZE) {
+    ESP_LOGE(TAG, "DECODE_B64: Persistent buffer overflow (%zu + %zu > %zu), dropping chunk", persistent_audio_buffer_pos, required_output_len, AUDIO_BUFFER_SIZE);
     persistent_audio_buffer_pos = 0; // Optionally reset buffer
     memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
     return false;
   }
 
-  ret = mbedtls_base64_decode(&persistent_audio_buffer[persistent_audio_buffer_pos], output_len, &output_len, (const unsigned char*)base64_data, input_len);
+  size_t output_len = 0;
+  ret = mbedtls_base64_decode(&persistent_audio_buffer[persistent_audio_buffer_pos], required_output_len, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != 0) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
     return false;
@@ -103,22 +105,23 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
 
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio at pos %zu (PSRAM)", output_len, persistent_audio_buffer_pos);
 
-  // Play chunk directly from buffer
+  // Play all new data in buffer (handle multiple chunks)
   if (this->speaker_ && output_len > 0) {
     this->speaker_is_active_ = true;
-    size_t bytes_written = this->speaker_->play(&persistent_audio_buffer[persistent_audio_buffer_pos], output_len);
-    if (bytes_written != output_len) {
-      ESP_LOGW(TAG, "DECODE_B64: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, output_len);
+    size_t play_start = persistent_audio_buffer_pos;
+    persistent_audio_buffer_pos += output_len;
+    size_t bytes_to_play = persistent_audio_buffer_pos - play_start;
+
+    // Log speaker state and buffer size before playback
+    ESP_LOGD(TAG, "DECODE_B64: Speaker state: running=%s, bytes_to_play=%zu", this->speaker_->is_running() ? "YES" : "NO", bytes_to_play);
+
+    size_t bytes_written = this->speaker_->play(&persistent_audio_buffer[play_start], bytes_to_play);
+    if (bytes_written != bytes_to_play) {
+      ESP_LOGW(TAG, "DECODE_B64: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, bytes_to_play);
       // Optionally drop or retry remaining bytes
     }
   }
-  persistent_audio_buffer_pos += output_len;
-  // Optionally reset buffer if it gets too full
-  if (persistent_audio_buffer_pos > AUDIO_BUFFER_SIZE / 2) {
-    ESP_LOGD(TAG, "DECODE_B64: Buffer past halfway, resetting");
-    persistent_audio_buffer_pos = 0;
-    memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
-  }
+  
   return true;
 }
 
@@ -567,9 +570,6 @@ void ElevenLabsStream::connect_to_elevenlabs() {
     return;
   }
   
-  ESP_LOGI(TAG, "CONNECT: WebSocket client started, waiting for connection...");
-  this->connection_start_time_ = millis();
-  ESP_LOGD(TAG, "CONNECT: Connection start time updated to %d", this->connection_start_time_);
   ESP_LOGD(TAG, "=== CONNECT_TO_ELEVENLABS INITIATED ===");
 }
 
@@ -1126,22 +1126,31 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
   esp_websocket_event_data_t *data = static_cast<esp_websocket_event_data_t*>(event_data);
   
   switch (event_id) {
-    case WEBSOCKET_EVENT_CONNECTED:
+    case WEBSOCKET_EVENT_CONNECTED: {
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_CONNECTED");
 
       ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
       stream->websocket_connected_ = true;
-  
+
       // Send initial conversation setup
       ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
       stream->send_conversation_init();
-      
+
       ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
 
-      ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
-      stream->set_state(StreamState::ON);
+      uint32_t current_time = millis();
+      uint32_t time_since_connect_start = current_time - stream->connection_start_time_;
+      uint32_t grace_period = 3000;
+      stream->set_timeout(
+        "enable_microphone", 
+        std::max(1u, static_cast<unsigned int>(grace_period - time_since_connect_start)),
+        [stream]() {
+          ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+          stream->set_state(StreamState::ON);
+        });
 
       break;
+    }
       
     case WEBSOCKET_EVENT_DISCONNECTED:
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
