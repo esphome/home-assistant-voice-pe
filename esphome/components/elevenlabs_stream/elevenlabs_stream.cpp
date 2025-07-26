@@ -8,12 +8,6 @@
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/audio/audio.h"
 
-namespace esphome {
-namespace elevenlabs_stream {
-int voice_assistant_phase = 1; // Initial phase value (idle)
-} // namespace elevenlabs_stream
-} // namespace esphome
-
 #include "elevenlabs_stream.h"
 #include "ws_big_reassembler.h"
 #include "esphome/core/log.h"
@@ -95,9 +89,6 @@ void ElevenLabsStream::handle_websocket_disconnected() {
     trigger->trigger();
   }
   ESP_LOGD(TAG, "WS_EVENT: DISCONNECTED event handling complete");
-
-  extern int voice_assistant_phase;
-  voice_assistant_phase = 1; // 1 = idle phase, update if your config uses a different value
 }
 
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
@@ -166,6 +157,10 @@ void ElevenLabsStream::setup() {
     this->set_timeout("audio_output_callback", 100, [this]() {
       ESP_LOGD(TAG, "DECODE_B64: speaker finished");
       this->speaker_is_active_ = false;
+
+      for (auto *trigger : this->on_listening_triggers_) {
+          trigger->trigger();
+      }
     });
   });
   
@@ -843,7 +838,14 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         
         // Update timing for state management
         this->last_audio_response_time_ = millis();
-        this->speaker_is_active_ = true;
+
+        if(!this->speaker_is_active_) {
+          this->speaker_is_active_ = true;
+          
+          for (auto *trigger : this->on_replying_triggers_) {
+              trigger->trigger();
+          }
+        }
         
         // Decode base64 audio data and play it immediately
         bool decode_success = this->decode_and_play_base64_audio(audio_base64);
@@ -898,6 +900,16 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
       float vad_score = vad["vad_score"] | 0.0f;
       if(vad_score <= 0.0f && this->speaker_is_active_) {
         return; // Skip invalid scores
+      }
+
+      if(vad_score > 0.5f) {
+        for (auto *trigger : this->on_listening_triggers_) {
+            trigger->trigger();
+        }
+      } else {
+        for (auto *trigger : this->on_processing_triggers_) {
+            trigger->trigger();
+        }
       }
 
       ESP_LOGD(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);

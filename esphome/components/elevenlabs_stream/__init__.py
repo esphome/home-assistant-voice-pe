@@ -44,6 +44,16 @@ ElevenLabsStreamEndTrigger = elevenlabs_stream_ns.class_(
 ElevenLabsStreamErrorTrigger = elevenlabs_stream_ns.class_(
     "ElevenLabsStreamErrorTrigger", automation.Trigger.template(cg.std_string)
 )
+# New triggers for voice assistant states
+ElevenLabsStreamListeningTrigger = elevenlabs_stream_ns.class_(
+    "ElevenLabsStreamListeningTrigger", automation.Trigger.template()
+)
+ElevenLabsStreamProcessingTrigger = elevenlabs_stream_ns.class_(
+    "ElevenLabsStreamProcessingTrigger", automation.Trigger.template()
+)
+ElevenLabsStreamReplyingTrigger = elevenlabs_stream_ns.class_(
+    "ElevenLabsStreamReplyingTrigger", automation.Trigger.template()
+)
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -65,6 +75,22 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_ERROR): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamErrorTrigger),
+            }
+        ),
+        # New schema entries for additional triggers
+        cv.Optional("on_listening"): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamListeningTrigger),
+            }
+        ),
+        cv.Optional("on_processing"): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamProcessingTrigger),
+            }
+        ),
+        cv.Optional("on_replying"): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamReplyingTrigger),
             }
         ),
     }
@@ -109,6 +135,22 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
         cg.add(var.add_on_error_trigger(trigger))
         await automation.build_automation(trigger, [(cg.std_string, "error_message")], conf)
+
+    # Register new triggers
+    for conf in config.get("on_listening", []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
+        cg.add(var.add_on_listening_trigger(trigger))
+        await automation.build_automation(trigger, [], conf)
+
+    for conf in config.get("on_processing", []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
+        cg.add(var.add_on_processing_trigger(trigger))
+        await automation.build_automation(trigger, [], conf)
+
+    for conf in config.get("on_replying", []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
+        cg.add(var.add_on_replying_trigger(trigger))
+        await automation.build_automation(trigger, [], conf)
 
 
 # Actions

@@ -1060,11 +1060,17 @@ elevenlabs_stream:
   speaker: announcement_resampling_speaker  # Use announcement resampler for proper audio format conversion
   on_start:
     - lambda: id(init_in_progress) = false;
-    - lambda: id(voice_assistant_phase) = 1;
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - logger.log: "ElevenLabs stream started - audio streaming ON"
   on_end:
-    - lambda: id(voice_assistant_phase) = 10;
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - logger.log: "ElevenLabs stream ended - audio streaming OFF"
+  on_listening:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+  on_processing:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+  on_replying:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
   on_error:
     - lambda: |
         if (!id(init_in_progress)) {
@@ -1074,7 +1080,7 @@ elevenlabs_stream:
         format: "ElevenLabs error: %s"
         args: ['error_message']
     - delay: 1s
-    - lambda: id(voice_assistant_phase) = 1;
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
 
 # Test button to trigger stream and test speaker
 binary_sensor:

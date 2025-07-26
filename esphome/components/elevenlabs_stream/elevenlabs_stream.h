@@ -59,6 +59,9 @@ class ElevenLabsStream : public Component {
   void add_on_start_trigger(Trigger<> *trigger) { this->on_start_triggers_.push_back(trigger); }
   void add_on_end_trigger(Trigger<> *trigger) { this->on_end_triggers_.push_back(trigger); }
   void add_on_error_trigger(Trigger<std::string> *trigger) { this->on_error_triggers_.push_back(trigger); }
+  void add_on_listening_trigger(Trigger<> *trigger) { this->on_listening_triggers_.push_back(trigger); }
+  void add_on_processing_trigger(Trigger<> *trigger) { this->on_processing_triggers_.push_back(trigger); }
+  void add_on_replying_trigger(Trigger<> *trigger) { this->on_replying_triggers_.push_back(trigger); }
 
  protected:
   friend void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
@@ -100,6 +103,9 @@ class ElevenLabsStream : public Component {
   std::vector<Trigger<> *> on_start_triggers_;
   std::vector<Trigger<> *> on_end_triggers_;
   std::vector<Trigger<std::string> *> on_error_triggers_;
+  std::vector<Trigger<> *> on_listening_triggers_;
+  std::vector<Trigger<> *> on_processing_triggers_;
+  std::vector<Trigger<> *> on_replying_triggers_;
 
   // Audio buffering
   std::vector<int16_t> audio_buffer_;
@@ -148,6 +154,9 @@ template<typename... Ts> class ElevenLabsStreamStopAction : public Action<Ts...>
 class ElevenLabsStreamStartTrigger : public Trigger<> {};
 class ElevenLabsStreamEndTrigger : public Trigger<> {};
 class ElevenLabsStreamErrorTrigger : public Trigger<std::string> {};
+class ElevenLabsStreamListeningTrigger : public Trigger<> {};
+class ElevenLabsStreamProcessingTrigger : public Trigger<> {};
+class ElevenLabsStreamReplyingTrigger : public Trigger<> {};
 
 // Condition
 template<typename... Ts> class ElevenLabsStreamIsRunningCondition : public Condition<Ts...> {
