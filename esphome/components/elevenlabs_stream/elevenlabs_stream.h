@@ -120,7 +120,6 @@ class ElevenLabsStream : public Component {
   bool signed_url_valid_{false};  // Track if we have a valid signed URL
   
   // Speaker activity tracking to prevent microphone echo/feedback
-  bool awaiting_first_agent_audio_{true}; // Block mic until first agent audio played
   bool speaker_is_active_{false};  // Track if agent is currently speaking
   uint32_t speaker_start_time_{0};  // When current audio playback started
   uint32_t speaker_end_time_{0};   // When current audio playback should end

@@ -58,8 +58,23 @@ static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/g
 // Forward declaration for WebSocket event handler
 void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
-// Helper function to decode base64 audio data
+// Persistent audio buffer for streaming (512KB)
+static constexpr size_t AUDIO_BUFFER_SIZE = 512 * 1024;
+static uint8_t* persistent_audio_buffer = nullptr;
+static size_t persistent_audio_buffer_pos = 0;
+
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
+  // Allocate buffer in PSRAM if not already allocated
+  if (!persistent_audio_buffer) {
+    persistent_audio_buffer = (uint8_t*)heap_caps_malloc(AUDIO_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!persistent_audio_buffer) {
+      ESP_LOGE(TAG, "DECODE_B64: Failed to allocate persistent buffer in PSRAM");
+      return false;
+    }
+    memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
+    persistent_audio_buffer_pos = 0;
+  }
+
   if (!base64_data || strlen(base64_data) == 0) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
     return false;
@@ -67,65 +82,43 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
 
   size_t input_len = strlen(base64_data);
   size_t output_len = 0;
-  
-  // Calculate output length
   int ret = mbedtls_base64_decode(nullptr, 0, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to calculate base64 decode length: %d", ret);
     return false;
   }
-  
-  // Use PSRAM allocation for large audio data to avoid regular heap exhaustion
-  uint8_t* psram_buffer = (uint8_t*)heap_caps_malloc(output_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!psram_buffer) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to allocate PSRAM buffer for decoded audio (%zu bytes)", output_len);
+
+  if (persistent_audio_buffer_pos + output_len > AUDIO_BUFFER_SIZE) {
+    ESP_LOGE(TAG, "DECODE_B64: Persistent buffer overflow (%zu + %zu > %zu), dropping chunk", persistent_audio_buffer_pos, output_len, AUDIO_BUFFER_SIZE);
+    persistent_audio_buffer_pos = 0; // Optionally reset buffer
+    memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
     return false;
   }
-  
-  // Actually decode directly to PSRAM buffer
-  ret = mbedtls_base64_decode(psram_buffer, output_len, &output_len, (const unsigned char*)base64_data, input_len);
+
+  ret = mbedtls_base64_decode(&persistent_audio_buffer[persistent_audio_buffer_pos], output_len, &output_len, (const unsigned char*)base64_data, input_len);
   if (ret != 0) {
     ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
-    heap_caps_free(psram_buffer);
     return false;
   }
-  
-  // Play audio directly from PSRAM buffer - no std::vector needed!
-  this->handle_audio_response(psram_buffer, output_len);
-  
-  // CRITICAL: Don't free the buffer until audio is finished playing!
-  // Instead of using fixed delays, we'll monitor the speaker dynamically
-  // Schedule buffer cleanup with a reasonable safety margin
-  size_t samples = output_len; // 16-bit samples = 2 bytes each
-  uint32_t sample_rate = 44100; // ElevenLabs default
-  float duration_ms = (float)samples / (sample_rate / 1000.0f);
 
-  // Use a more conservative cleanup time - the dynamic speaker detection will handle precise timing
-  // We just need to ensure the buffer isn't freed too early
-  uint32_t safety_buffer_ms = 100;
-  uint32_t cleanup_time_ms = (uint32_t)(duration_ms);
+  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio at pos %zu (PSRAM)", output_len, persistent_audio_buffer_pos);
 
-  if(this->speaker_end_time_ < millis()) {
-    this->speaker_end_time_ = millis(); // Reset if already expired
-  }
-
-  this->speaker_end_time_ += cleanup_time_ms;
-  ESP_LOGI(TAG, "DECODE_B64: Speaker end time set to %d (added %d ms)", 
-           this->speaker_end_time_, cleanup_time_ms);
-  
-  // Schedule buffer cleanup without blocking the WebSocket task
-  this->set_timeout("cleanup_audio_buffer", cleanup_time_ms + safety_buffer_ms, [this, psram_buffer]() {
-    heap_caps_free(psram_buffer);
-
-    if(millis() < this->speaker_end_time_) {
-      ESP_LOGW(TAG, "DECODE_B64: Cleanup called too early, speaker still active");
-      return; // Don't free yet, speaker is still playing
+  // Play chunk directly from buffer
+  if (this->speaker_ && output_len > 0) {
+    this->speaker_is_active_ = true;
+    size_t bytes_written = this->speaker_->play(&persistent_audio_buffer[persistent_audio_buffer_pos], output_len);
+    if (bytes_written != output_len) {
+      ESP_LOGW(TAG, "DECODE_B64: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, output_len);
+      // Optionally drop or retry remaining bytes
     }
-
-    ESP_LOGD(TAG, "SPEAKER_FINISHED: Speaker stopped playing");
-    this->speaker_is_active_ = false;
-  });
-  
+  }
+  persistent_audio_buffer_pos += output_len;
+  // Optionally reset buffer if it gets too full
+  if (persistent_audio_buffer_pos > AUDIO_BUFFER_SIZE / 2) {
+    ESP_LOGD(TAG, "DECODE_B64: Buffer past halfway, resetting");
+    persistent_audio_buffer_pos = 0;
+    memset(persistent_audio_buffer, 0, AUDIO_BUFFER_SIZE);
+  }
   return true;
 }
 
@@ -504,11 +497,6 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   ESP_LOGI(TAG, "=== CONNECT_TO_ELEVENLABS START ===");
   ESP_LOGI(TAG, "CONNECT: Connecting to ElevenLabs using signed URL...");
   ESP_LOGD(TAG, "CONNECT: Signed URL length=%zu", this->signed_url_.length());
-
-  // Block microphone until first agent audio is played
-  ESP_LOGI(TAG, "WS_EVENT: *** BLOCKING MICROPHONE *** - Awaiting first agent audio");
-  this->speaker_is_active_ = true;
-  this->awaiting_first_agent_audio_ = true;
   
   if (this->signed_url_.empty()) {
     ESP_LOGE(TAG, "CONNECT: No signed URL available");
@@ -583,17 +571,6 @@ void ElevenLabsStream::connect_to_elevenlabs() {
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "CONNECT: Connection start time updated to %d", this->connection_start_time_);
   ESP_LOGD(TAG, "=== CONNECT_TO_ELEVENLABS INITIATED ===");
-  
-  // Send initial conversation setup
-  ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
-  this->send_conversation_init();
-  
-  ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
-
-  ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
-  this->websocket_connected_ = true;
-  ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
-  this->set_state(StreamState::ON);
 }
 
 void ElevenLabsStream::disconnect_from_elevenlabs() {
@@ -657,6 +634,14 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
   this->conversation_id_.clear();
   this->agent_output_audio_format_.clear();
   this->user_input_audio_format_.clear();
+
+  // Free persistent PSRAM buffer
+  if (persistent_audio_buffer) {
+    heap_caps_free(persistent_audio_buffer);
+    persistent_audio_buffer = nullptr;
+    persistent_audio_buffer_pos = 0;
+    ESP_LOGD(TAG, "DISCONNECT: Freed persistent PSRAM audio buffer");
+  }
   
   // Reset speaker activity tracking
   this->speaker_is_active_ = false;
@@ -740,7 +725,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     }
   };
   
-  BasicJsonDocument<PSRAMAllocator> json_document(length + 1024); // Extra space for parsing overhead
+  BasicJsonDocument<PSRAMAllocator> json_document(length + (1024 * 10)); // Extra space for parsing overhead
   if (json_document.overflowed()) {
     ESP_LOGE(TAG, "PARSE_JSON_BUF: Could not allocate memory for JSON document!");
     return;
@@ -899,29 +884,12 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     return;
   }
   
-  // Handle internal tentative agent response
-  if (strcmp(type, "internal_tentative_agent_response") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing internal_tentative_agent_response");
-    JsonObject tentative = root["tentative_agent_response_internal_event"];
-    if (tentative) {
-      const char* tentative_response = tentative["tentative_agent_response"];
-      if (tentative_response) {
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Tentative agent response: '%s'", tentative_response);
-      } else {
-        ESP_LOGW(TAG, "PARSE_JSON_BUF: No tentative_agent_response in event");
-      }
-    } else {
-      ESP_LOGW(TAG, "PARSE_JSON_BUF: No tentative_agent_response_internal_event found");
-    }
-    return;
-  }
-  
   // Handle VAD score
   if (strcmp(type, "vad_score") == 0) {
     JsonObject vad = root["vad_score_event"];
     if (vad) {
       float vad_score = vad["vad_score"] | 0.0f;
-      if(vad_score <= 0.0f && !this->is_speaker_active()) {
+      if(vad_score <= 0.0f && !this->speaker_is_active_) {
         return; // Skip invalid scores
       }
 
@@ -950,23 +918,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     return;
   }
   
-  // Handle agent_response_correction
-  if (strcmp(type, "agent_response_correction") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing agent_response_correction");
-    JsonObject correction = root["agent_response_correction_event"];
-    if (correction) {
-      const char* corrected_text = correction["corrected_text"];
-      if (corrected_text) {
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Agent response correction: '%s'", corrected_text);
-      } else {
-        ESP_LOGW(TAG, "PARSE_JSON_BUF: No corrected_text in correction event");
-      }
-    } else {
-      ESP_LOGW(TAG, "PARSE_JSON_BUF: No agent_response_correction_event found");
-    }
-    return;
-  }
-  
   // Handle ping with proper response
   if (strcmp(type, "ping") == 0) {
     JsonObject ping = root["ping_event"];
@@ -982,39 +933,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
       this->send_websocket_message(pong_message);
     } else {
       ESP_LOGW(TAG, "PARSE_JSON_BUF: No ping_event found");
-    }
-    return;
-  }
-  
-  // Handle client tool call
-  if (strcmp(type, "client_tool_call") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing client_tool_call");
-    JsonObject tool_call = root["client_tool_call"];
-    if (tool_call) {
-      const char* tool_name = tool_call["tool_name"];
-      const char* tool_call_id = tool_call["tool_call_id"];
-      JsonObject parameters = tool_call["parameters"];
-      
-      if (tool_name && tool_call_id) {
-        ESP_LOGI(TAG, "PARSE_JSON_BUF: Client tool call: %s (id: %s)", tool_name, tool_call_id);
-        // Handle tool calls - would need to implement tool handling
-      } else {
-        ESP_LOGW(TAG, "PARSE_JSON_BUF: Missing tool_name or tool_call_id in client_tool_call");
-      }
-    } else {
-      ESP_LOGW(TAG, "PARSE_JSON_BUF: No client_tool_call object found");
-    }
-    return;
-  }
-  
-  // Handle contextual update
-  if (strcmp(type, "contextual_update") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing contextual_update");
-    const char* text = root["text"];
-    if (text) {
-      ESP_LOGD(TAG, "PARSE_JSON_BUF: Contextual update: '%s'", text);
-    } else {
-      ESP_LOGW(TAG, "PARSE_JSON_BUF: No text in contextual_update");
     }
     return;
   }
@@ -1059,20 +977,10 @@ void ElevenLabsStream::handle_audio_response(const uint8_t *data, size_t length)
     }
   }
   
-  // Ensure speaker is started (should already be started from conversation init, but double-check)
-  if (!this->speaker_->is_running()) {
-    this->speaker_->start();
-  }
-  
   // Track speaker activity to prevent microphone echo/feedback
   uint32_t current_time = millis();
   this->speaker_is_active_ = true;
   this->speaker_start_time_ = current_time;
-  // Clear awaiting_first_agent_audio_ flag when first agent audio is played
-  if (this->awaiting_first_agent_audio_) {
-    ESP_LOGI(TAG, "HANDLE_AUDIO: First agent audio played, unblocking microphone");
-    this->awaiting_first_agent_audio_ = false;
-  }
   size_t bytes_written = this->speaker_->play(data, length);
   if (bytes_written != length) {
     ESP_LOGW(TAG, "HANDLE_AUDIO: Speaker buffer full, only wrote %zu/%zu bytes", bytes_written, length);
@@ -1124,15 +1032,8 @@ void ElevenLabsStream::send_conversation_init() {
     // TTS configuration
     JsonObject tts = conversation_config["tts"].to<JsonObject>();
     
-    // Audio interface configuration
-    conversation_config["audio_interface"] = "pcm_16000";
-    
-    // Turn detection configuration
-    JsonObject turn_detection = conversation_config["turn_detection"].to<JsonObject>();
-    turn_detection["type"] = "server_vad";
-    
     // Language configuration
-    conversation_config["language"] = "en";
+    agent["first_message"] = "";
   });
   
   ESP_LOGD(TAG, "SEND_CONV_INIT: Sending conversation init: %s", message.c_str());
@@ -1197,7 +1098,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
   }
 
   // Block microphone input if speaker is active or agent audio is playing
-  if (this->is_speaker_active()) {
+  if (this->speaker_is_active_) {
     ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
     return;
   }
@@ -1227,6 +1128,19 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
   switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
       ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_CONNECTED");
+
+      ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = true");
+      stream->websocket_connected_ = true;
+  
+      // Send initial conversation setup
+      ESP_LOGD(TAG, "WS_EVENT: Sending conversation initialization...");
+      stream->send_conversation_init();
+      
+      ESP_LOGD(TAG, "WS_EVENT: CONNECTED event handling complete");
+
+      ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+      stream->set_state(StreamState::ON);
+
       break;
       
     case WEBSOCKET_EVENT_DISCONNECTED:
@@ -1302,12 +1216,6 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       ESP_LOGD(TAG, "WS_EVENT: Unknown WebSocket event: %d", event_id);
       break;
   }
-}
-
-// Speaker activity tracking methods
-bool ElevenLabsStream::is_speaker_active() const {
-  // Block mic if speaker is active or awaiting first agent audio
-  return this->speaker_is_active_ || this->awaiting_first_agent_audio_;
 }
 
 }  // namespace elevenlabs_stream
