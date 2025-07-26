@@ -215,8 +215,8 @@ speaker:
     output_speaker: media_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
+    num_channels: 1  
     task_stack_in_psram: true
-    taps: 32  # Higher quality resampling (more CPU intensive)
 
 # Media player with sound files for testing speaker functionality
 media_player:
@@ -235,7 +235,7 @@ media_player:
     media_pipeline:
       speaker: media_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
-      num_channels: 2
+      num_channels: 1
       sample_rate: 48000
     on_mute:
       - script.execute: control_leds

@@ -283,15 +283,6 @@ void ElevenLabsStream::stop_stream() {
     ESP_LOGD(TAG, "STOP_STREAM: Microphone not running or not configured");
   }
   
-  // Stop speaker if running  
-  if (this->speaker_ && this->speaker_->is_running()) {
-    ESP_LOGD(TAG, "STOP_STREAM: Stopping speaker");
-    this->speaker_->stop();
-    ESP_LOGD(TAG, "STOP_STREAM: Speaker stopped");
-  } else {
-    ESP_LOGD(TAG, "STOP_STREAM: Speaker not running or not configured");
-  }
-  
   // Reset speaker activity tracking
   this->speaker_is_active_ = false;
   this->speaker_start_time_ = 0;
@@ -626,7 +617,7 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
   // Stop speaker if running
   if (this->speaker_ && this->speaker_->is_running()) {
     ESP_LOGD(TAG, "DISCONNECT: Stopping speaker");
-    this->speaker_->stop();
+    this->speaker_->finish();
     ESP_LOGD(TAG, "DISCONNECT: Speaker stopped");
   } else {
     ESP_LOGD(TAG, "DISCONNECT: Speaker not running or not configured");
@@ -672,6 +663,14 @@ void ElevenLabsStream::disconnect_from_elevenlabs() {
   this->speaker_start_time_ = 0;
   this->speaker_end_time_ = 0;
   this->accumulated_duration_ms_ = 0;
+  
+  // Reset speaker audio stream info to initial value
+  this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
+  
+  // Reset audio-related state variables
+  this->last_audio_response_time_ = 0;
+  this->signed_url_valid_ = false;
+  this->last_signed_url_renewal_ = 0;
   
   ESP_LOGD(TAG, "DISCONNECT: Cleared audio_buffer (%zu bytes), response_audio_buffer (%zu bytes)", 
            audio_buffer_size, response_audio_buffer_size);
@@ -826,6 +825,10 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
                    16, 1, sample_rate);
           
           // Configure the speaker with the correct input format
+          if (!this->initial_audio_stream_info_set_) {
+            this->initial_audio_stream_info_ = this->speaker_->get_audio_stream_info();
+            this->initial_audio_stream_info_set_ = true;
+          }
           this->speaker_->set_audio_stream_info(input_stream_info);
           ESP_LOGI(TAG, "PARSE_JSON_BUF: Audio stream info configured on speaker for faster playback");
           
@@ -951,11 +954,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     JsonObject interruption = root["interruption_event"];
     if (interruption) {
       ESP_LOGD(TAG, "PARSE_JSON_BUF: Interruption event received");
-      // Handle interruption logic - could stop current audio playback
-      if (this->speaker_) {
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Stopping speaker due to interruption");
-        this->speaker_->stop();
-      }
     } else {
       ESP_LOGW(TAG, "PARSE_JSON_BUF: No interruption_event found");
     }

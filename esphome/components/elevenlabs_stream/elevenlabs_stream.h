@@ -5,6 +5,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/network/ip_address.h"
 #include "esphome/components/json/json_util.h"
+#include "esphome/components/audio/audio.h"
 
 #ifdef USE_ESP32
 #include <esp_websocket_client.h>
@@ -140,6 +141,10 @@ class ElevenLabsStream : public Component {
 
   // Last VAD score for tracking voice activity detection
   float last_vad_score_ = 0.0f;
+
+  // Initial audio stream info
+  esphome::audio::AudioStreamInfo initial_audio_stream_info_{};
+  bool initial_audio_stream_info_set_ = false;
 };
 
 // Actions
