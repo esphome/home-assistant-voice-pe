@@ -907,7 +907,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         return; // Skip invalid scores
       }
 
-      const led_threshold = 0.25f;
+      float led_threshold = 0.25f;
       if(vad_score > led_threshold) {
         if(this->last_vad_score_ <= led_threshold) {
           for (auto *trigger : this->on_listening_triggers_) {
