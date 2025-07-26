@@ -224,6 +224,11 @@ bool ElevenLabsStream::start_stream() {
     ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already ON");
     return false;
   }
+
+  ESP_LOGD(TAG, "SET_STATE: Triggering replying events (%zu triggers)", this->on_replying_triggers_.size());
+  for (auto *trigger : this->on_replying_triggers_) {
+    trigger->trigger();
+  }
   
   ESP_LOGI(TAG, "START_STREAM: Starting ElevenLabs stream...");
   this->connection_start_time_ = millis();
@@ -902,15 +907,22 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         return; // Skip invalid scores
       }
 
-      if(vad_score > 0.5f) {
-        for (auto *trigger : this->on_listening_triggers_) {
-            trigger->trigger();
+      const led_threshold = 0.25f;
+      if(vad_score > led_threshold) {
+        if(this->last_vad_score_ <= led_threshold) {
+          for (auto *trigger : this->on_listening_triggers_) {
+              trigger->trigger();
+          }
         }
       } else {
-        for (auto *trigger : this->on_processing_triggers_) {
-            trigger->trigger();
+        if(this->last_vad_score_ > led_threshold) {
+          for (auto *trigger : this->on_processing_triggers_) {
+              trigger->trigger();
+          }
         }
       }
+
+      this->last_vad_score_ = vad_score;
 
       ESP_LOGD(TAG, "PARSE_JSON_BUF: VAD score: %.2f", vad_score);
       // Could use this for voice activity detection
@@ -1146,6 +1158,12 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
         std::max(1u, static_cast<unsigned int>(grace_period - time_since_connect_start)),
         [stream]() {
           ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+
+          ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", stream->on_start_triggers_.size());
+          for (auto *trigger : stream->on_start_triggers_) {
+            trigger->trigger();
+          }
+
           stream->set_state(StreamState::ON);
           stream->speaker_is_active_ = false; // Mark speaker as inactive
         });

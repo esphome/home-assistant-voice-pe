@@ -137,6 +137,9 @@ class ElevenLabsStream : public Component {
   
   // Audio processing configuration
   static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB
+
+  // Last VAD score for tracking voice activity detection
+  float last_vad_score_ = 0.0f;
 };
 
 // Actions

@@ -436,7 +436,7 @@ script:
           condition:
             light.is_on: led_ring
           then:
-            light.turn_on: led_ring
+            light.turn_off: led_ring
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
   # Slow clockwise spin of the LED ring.
@@ -1061,16 +1061,24 @@ elevenlabs_stream:
   on_start:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
     - logger.log: "ElevenLabs stream started - audio streaming ON"
   on_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
     - logger.log: "ElevenLabs stream ended - audio streaming OFF"
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+    - logger.log: "ElevenLabs listening"
   on_processing:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+    - script.execute: control_leds
+    - logger.log: "ElevenLabs processing"
   on_replying:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+    - script.execute: control_leds
+    - logger.log: "ElevenLabs replying"
   on_error:
     - lambda: |
         if (!id(init_in_progress)) {
