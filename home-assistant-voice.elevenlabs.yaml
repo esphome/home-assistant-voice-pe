@@ -26,8 +26,8 @@ substitutions:
   wifi_password: !env_var WIFI_PASSWORD
 
 esphome:
-  name: test-elevenlabs
-  friendly_name: Test ElevenLabs
+  name: hass-elevenlabs
+  friendly_name: Home Assistant Voice ElevenLabs
   name_add_mac_suffix: true
   min_version: 2025.5.1
   on_boot:
