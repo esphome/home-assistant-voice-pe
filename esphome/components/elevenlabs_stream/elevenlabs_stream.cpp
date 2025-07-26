@@ -862,7 +862,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         // Update timing for state management
         this->last_audio_response_time_ = millis();
         this->speaker_is_active_ = true;
-        this->speaker_->start();
         
         // Decode base64 audio data and play it immediately
         bool decode_success = this->decode_and_play_base64_audio(audio_base64);
