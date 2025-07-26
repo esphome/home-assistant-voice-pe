@@ -129,9 +129,20 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
 
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", output_len);
 
+  if(!this->speaker_->is_running()) {
+    ESP_LOGD(TAG, "DECODE_B64: Starting speaker");
+    this->speaker_->start();
+  }
+
   // Playback: play decoded audio directly
   size_t bytes_written = this->speaker_->play(temp_audio_buffer, output_len);
   ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from temp buffer", bytes_written);
+
+  if (bytes_written != output_len) {
+    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", output_len, bytes_written);
+    heap_caps_free(temp_audio_buffer);
+    return false;
+  }
 
   // Free temporary buffer
   heap_caps_free(temp_audio_buffer);
@@ -158,8 +169,10 @@ void ElevenLabsStream::setup() {
       ESP_LOGD(TAG, "DECODE_B64: speaker finished");
       this->speaker_is_active_ = false;
 
-      for (auto *trigger : this->on_listening_triggers_) {
-          trigger->trigger();
+      if(this->microphone_->is_running()) {
+        for (auto *trigger : this->on_listening_triggers_) {
+            trigger->trigger();
+        }
       }
     });
   });
