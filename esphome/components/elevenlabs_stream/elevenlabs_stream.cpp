@@ -8,6 +8,22 @@
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/audio/audio.h"
 
+namespace esphome {
+namespace elevenlabs_stream {
+int voice_assistant_phase = 1; // Initial phase value (idle)
+} // namespace elevenlabs_stream
+} // namespace esphome
+
+#include "elevenlabs_stream.h"
+#include "ws_big_reassembler.h"
+#include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
+#include "esphome/components/json/json_util.h"
+#include "esphome/components/speaker/speaker.h"
+#include "esphome/components/microphone/microphone.h"
+#include "esphome/components/audio/audio.h"
+
 #include <esp_websocket_client.h>
 #include <esp_http_client.h>
 #include <esp_tls.h>
@@ -61,6 +77,28 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 // Persistent audio buffer for streaming (1MB)
 
 static constexpr size_t AUDIO_BUFFER_SIZE = 512 * 1024;
+
+void ElevenLabsStream::handle_websocket_disconnected() {
+  if(!this->websocket_connected_) {
+    ESP_LOGW(TAG, "WebSocket already disconnected, ignoring event");
+    return;
+  }
+
+  ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
+  ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = false");
+  this->websocket_connected_ = false;
+  ESP_LOGD(TAG, "WS_EVENT: Setting state to OFF");
+  this->set_state(StreamState::OFF);
+  ESP_LOGD(TAG, "WS_EVENT: Triggering end events (%zu triggers)", this->on_end_triggers_.size());
+  for (auto *trigger : this->on_end_triggers_) {
+    ESP_LOGD(TAG, "WS_EVENT: Triggering end event at %p", trigger);
+    trigger->trigger();
+  }
+  ESP_LOGD(TAG, "WS_EVENT: DISCONNECTED event handling complete");
+
+  extern int voice_assistant_phase;
+  voice_assistant_phase = 1; // 1 = idle phase, update if your config uses a different value
+}
 
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   size_t input_len = strlen(base64_data);
@@ -1054,8 +1092,17 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     int16_t sample16 = static_cast<int16_t>(samples_32bit[i] >> 16);
     audio_samples.push_back(sample16);
   }
-  // Send converted buffer to ElevenLabs pipeline
-  this->send_audio_chunk(audio_samples);
+  // Convert stereo to mono by averaging each left/right sample pair
+  std::vector<int16_t> mono_samples;
+  mono_samples.reserve(audio_samples.size() / 2);
+  for (size_t i = 0; i + 1 < audio_samples.size(); i += 2) {
+    int16_t left = audio_samples[i];
+    int16_t right = audio_samples[i + 1];
+    int16_t mono = (left + right) / 2;
+    mono_samples.push_back(mono);
+  }
+  // Send mono buffer to ElevenLabs pipeline
+  this->send_audio_chunk(mono_samples);
 }
 
 // WebSocket event handler
@@ -1095,18 +1142,7 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
     }
       
     case WEBSOCKET_EVENT_DISCONNECTED:
-      ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
-      ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = false");
-      stream->websocket_connected_ = false;
-      ESP_LOGD(TAG, "WS_EVENT: Setting state to OFF");
-      stream->set_state(StreamState::OFF);
-      
-      ESP_LOGD(TAG, "WS_EVENT: Triggering end events (%zu triggers)", stream->on_end_triggers_.size());
-      for (auto *trigger : stream->on_end_triggers_) {
-        ESP_LOGD(TAG, "WS_EVENT: Triggering end event at %p", trigger);
-        trigger->trigger();
-      }
-      ESP_LOGD(TAG, "WS_EVENT: DISCONNECTED event handling complete");
+      stream->handle_websocket_disconnected();
       break;
       
     case WEBSOCKET_EVENT_DATA:
@@ -1118,7 +1154,7 @@ void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t 
         } else {
           ESP_LOGW(TAG, "WS_EVENT: Close frame without code");
         }
-        // Handle close frame - this will trigger WEBSOCKET_EVENT_DISCONNECTED
+        stream->handle_websocket_disconnected();
         break;
       }
       

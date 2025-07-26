@@ -49,6 +49,7 @@ class ElevenLabsStream : public Component {
   bool is_connected() const { return this->websocket_connected_; }
   StreamState get_state() const { return this->state_; }
   void handle_microphone_data(const std::vector<uint8_t> &data);
+  void handle_websocket_disconnected();
   
 
   // Speaker activity tracking

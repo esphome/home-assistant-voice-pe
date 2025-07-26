@@ -134,7 +134,6 @@ async def elevenlabs_stream_stop_to_code(config, action_id, template_arg, args):
     return var
 
 
-# Conditions
 @automation.register_condition(
     "elevenlabs_stream.is_running",
     automation.LambdaCondition,
@@ -142,6 +141,6 @@ async def elevenlabs_stream_stop_to_code(config, action_id, template_arg, args):
 )
 async def elevenlabs_stream_is_running_to_code(config, condition_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
-    # Create a lambda that returns the connection status
-    lambda_code = f"[=]() {{ return {parent}->is_connected(); }}"
+    # Accept & ignore any Ts... from the surrounding trigger
+    lambda_code = f"[=](auto&&...) -> bool {{ return {parent}->is_connected(); }}"
     return cg.new_Pvariable(condition_id, template_arg, cg.RawExpression(lambda_code))
