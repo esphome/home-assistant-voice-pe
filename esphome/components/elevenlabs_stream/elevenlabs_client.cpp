@@ -7,6 +7,7 @@
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/base64.h>
+#include "ws_big_reassembler.h"
 
 namespace esphome {
 namespace elevenlabs_stream {
@@ -16,15 +17,8 @@ static const char *const ELEVENLABS_HOST = "api.elevenlabs.io";
 static const int ELEVENLABS_PORT = 443;
 static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/get_signed_url";
 
-#ifdef USE_ESP32
-#include "ws_big_reassembler.h"
-#endif
-
 ElevenLabsClient::ElevenLabsClient(const std::string &agent_id, const std::string &api_key)
-    : agent_id_(agent_id), api_key_(api_key)
-#ifdef USE_ESP32
-    , reassembler_(256*1024)
-#endif
+    : agent_id_(agent_id), api_key_(api_key), reassembler_(512*1024)
 {}
 
 ElevenLabsClient::~ElevenLabsClient() { disconnect(); }

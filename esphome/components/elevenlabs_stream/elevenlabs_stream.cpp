@@ -675,14 +675,28 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
     return;
   }
-  // Convert std::vector<uint8_t> to std::vector<int16_t>
+
+  size_t num_samples_32bit = data.size() / 4;
+  const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
   std::vector<int16_t> audio_samples;
-  audio_samples.reserve(data.size() / 2);
-  for (size_t i = 0; i + 1 < data.size(); i += 2) {
-    int16_t sample = (static_cast<int16_t>(data[i + 1]) << 8) | data[i];
-    audio_samples.push_back(sample);
+  audio_samples.reserve(num_samples_32bit);
+  for (size_t i = 0; i < num_samples_32bit; i++) {
+    int16_t sample16 = static_cast<int16_t>(samples_32bit[i] >> 16);
+    audio_samples.push_back(sample16);
   }
-  this->send_audio_chunk(audio_samples);
+
+  // Convert stereo to mono by averaging each left/right sample pair
+  std::vector<int16_t> mono_samples;
+  mono_samples.reserve(audio_samples.size() / 2);
+  for (size_t i = 0; i + 1 < audio_samples.size(); i += 2) {
+    int16_t left = audio_samples[i];
+    int16_t right = audio_samples[i + 1];
+    int16_t mono = (left + right) / 2;
+    mono_samples.push_back(mono);
+  }
+  
+  // Send mono buffer to ElevenLabs pipeline
+  this->send_audio_chunk(mono_samples);
 }
 
 void ElevenLabsStream::set_state(StreamState new_state) {
