@@ -8,7 +8,6 @@ namespace esphome {
 namespace elevenlabs_stream {
 
 bool HttpClient::get(const std::string& url,
-                     const std::function<void(void*)>& config_callback,
                      std::string& response_out) {
     esp_http_client_config_t config = {};
     config.url = url.c_str();
@@ -22,11 +21,6 @@ bool HttpClient::get(const std::string& url,
     config.use_global_ca_store = false;
     config.skip_cert_common_name_check = false;
     config.disable_auto_redirect = true;
-
-    // Allow caller to set additional config fields (headers, etc)
-    if (config_callback) {
-        config_callback(&config);
-    }
 
     response_out.clear();
     auto http_event_handler = [](esp_http_client_event_t *evt) -> esp_err_t {

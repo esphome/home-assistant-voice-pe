@@ -54,20 +54,7 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
   ESP_LOGD(TAG, "GET_SIGNED_URL: Cleared previous signed URL");
 
   std::string response;
-  bool http_ok = HttpClient::get(url,
-    [this](void* cfg_ptr) {
-      auto* config = static_cast<esp_http_client_config_t*>(cfg_ptr);
-      // Set headers only if API key is provided
-      if (!this->api_key_.empty()) {
-        config->crt_bundle_attach = esp_crt_bundle_attach;
-        config->use_global_ca_store = false;
-        config->skip_cert_common_name_check = false;
-        config->disable_auto_redirect = true;
-        // Set API key header after client init (not possible here, but can be handled in event handler or refactored)
-      }
-    },
-    response
-  );
+  bool http_ok = HttpClient::get(url, response);
   if (!http_ok) {
     ESP_LOGE(TAG, "GET_SIGNED_URL: HTTP request failed");
     ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
