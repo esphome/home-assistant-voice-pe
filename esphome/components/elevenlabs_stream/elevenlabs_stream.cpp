@@ -224,7 +224,10 @@ bool ElevenLabsStream::start_stream() {
   bool connected = this->client_->connect(
     this->signed_url_,
     [this](const uint8_t* buffer, size_t length) { this->handle_websocket_message(buffer, length); },
-    [this]() { this->set_state(StreamState::ON); },
+    [this]() { 
+      this->set_state(StreamState::ON); 
+      this->send_conversation_init();
+    },
     [this]() { this->handle_websocket_disconnected(); },
     [this](const std::string& err) { this->handle_error(err); }
   );
@@ -694,7 +697,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     int16_t mono = (left + right) / 2;
     mono_samples.push_back(mono);
   }
-  
+
   // Send mono buffer to ElevenLabs pipeline
   this->send_audio_chunk(mono_samples);
 }

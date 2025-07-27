@@ -18,8 +18,10 @@ static const int ELEVENLABS_PORT = 443;
 static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/get_signed_url";
 
 ElevenLabsClient::ElevenLabsClient(const std::string &agent_id, const std::string &api_key)
-    : agent_id_(agent_id), api_key_(api_key), reassembler_(512*1024)
-{}
+    : agent_id_(agent_id), api_key_(api_key)
+{
+    ESP_LOGI(TAG, "=== CONSTRUCTOR CALLED ===");
+}
 
 ElevenLabsClient::~ElevenLabsClient() { disconnect(); }
 
@@ -297,29 +299,6 @@ void ElevenLabsClient::websocket_event_handler(void *handler_args, esp_event_bas
       break;
   }
 }
-public:
-    ElevenLabsClient(const std::string &agent_id, const std::string &api_key);
-    ~ElevenLabsClient();
-    bool get_signed_url(std::string &signed_url_out);
-    bool connect(const std::string &signed_url, std::function<void(const uint8_t *, size_t)> on_message,
-                 std::function<void()> on_connected, std::function<void()> on_disconnected,
-                 std::function<void(const std::string &)> on_error);
-    void disconnect();
-    bool send_message(const std::string &message);
-    bool send_binary(const uint8_t *data, size_t length);
-    bool is_connected() const;
-    static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id,
-                                       void *event_data);
 
-private:
-    std::string agent_id_;
-    std::string api_key_;
-    esp_websocket_client_handle_t websocket_client_{nullptr};
-    bool websocket_connected_{false};
-    std::function<void(const uint8_t *, size_t)> on_message_;
-    std::function<void()> on_connected_;
-    std::function<void()> on_disconnected_;
-    std::function<void(const std::string &)> on_error_;
-#ifdef USE_ESP32
-    WsBigReassembler reassembler_;
-#endif
+}  // namespace elevenlabs_stream
+}  // namespace esphome

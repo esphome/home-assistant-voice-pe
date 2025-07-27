@@ -10,6 +10,7 @@
 #include <esp_event.h>
 #include <esp_tls.h>
 #include <esp_crt_bundle.h>
+#include "ws_big_reassembler.h"
 
 namespace esphome {
 namespace elevenlabs_stream {
@@ -55,6 +56,7 @@ private:
   std::function<void()> on_connected_;
   std::function<void()> on_disconnected_;
   std::function<void(const std::string&)> on_error_;
+  WsBigReassembler reassembler_{512*1024};
 };
 
 } // namespace elevenlabs_stream

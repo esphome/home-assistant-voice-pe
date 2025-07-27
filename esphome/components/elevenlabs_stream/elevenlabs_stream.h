@@ -8,13 +8,11 @@
 #include "esphome/components/audio/audio.h"
 #include "elevenlabs_client.h"
 
-#ifdef USE_ESP32
 #include <esp_websocket_client.h>
 #include <esp_http_client.h>
 #include <esp_timer.h>
 #include <mbedtls/base64.h>
 #include "ws_big_reassembler.h"
-#endif
 
 namespace esphome {
 
