@@ -94,6 +94,7 @@ class ElevenLabsStream : public Component {
   std::string conversation_id_;
   std::string agent_output_audio_format_;
   std::string user_input_audio_format_;
+  std::string signed_url_; // Stores the current signed URL for ElevenLabs WebSocket
 
   // Triggers - simplified
   std::vector<Trigger<> *> on_start_triggers_;
@@ -120,7 +121,6 @@ class ElevenLabsStream : public Component {
   uint32_t last_heartbeat_{0};
   uint32_t last_signed_url_renewal_{0};  // Track when we last renewed the signed URL
   uint32_t signed_url_renewal_interval_{600000};  // 10 minutes in milliseconds
-  bool signed_url_valid_{false};  // Track if we have a valid signed URL
 
   // Accumulated playback duration for all segments
   uint32_t accumulated_duration_ms_{0};

@@ -16,8 +16,16 @@ static const char *const ELEVENLABS_HOST = "api.elevenlabs.io";
 static const int ELEVENLABS_PORT = 443;
 static const char *const ELEVENLABS_SIGNED_URL_PATH = "/v1/convai/conversation/get_signed_url";
 
+#ifdef USE_ESP32
+#include "ws_big_reassembler.h"
+#endif
+
 ElevenLabsClient::ElevenLabsClient(const std::string &agent_id, const std::string &api_key)
-    : agent_id_(agent_id), api_key_(api_key) {}
+    : agent_id_(agent_id), api_key_(api_key)
+#ifdef USE_ESP32
+    , reassembler_(256*1024)
+#endif
+{}
 
 ElevenLabsClient::~ElevenLabsClient() { disconnect(); }
 
@@ -62,8 +70,11 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
   ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP client config prepared");
   ESP_LOGD(TAG, "GET_SIGNED_URL: Timeout=%dms, SSL=YES, Buffer=%d", config.timeout_ms, config.buffer_size);
 
-  // Set event handler to capture response data
-  config.event_handler = [](esp_http_client_event_t *evt) -> esp_err_t {
+  std::string response = "";
+
+  // Static event handler for ESP-IDF
+  auto http_event_handler = [](esp_http_client_event_t *evt) -> esp_err_t {
+    std::string *response_ptr = static_cast<std::string *>(evt->user_data);
     switch (evt->event_id) {
       case HTTP_EVENT_ON_CONNECTED:
         ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP_EVENT_ON_CONNECTED");
@@ -71,9 +82,11 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
         break;
       case HTTP_EVENT_ON_DATA:
         ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-        if (evt->data_len > 0) {
-          // Feed watchdog during data reception
+        if (evt->data_len > 0 && response_ptr) {
           esp_task_wdt_reset();
+          std::string response_chunk(static_cast<const char*>(evt->data), evt->data_len);
+          (*response_ptr) += response_chunk;
+          ESP_LOGD(TAG, "GET_SIGNED_URL: Received chunk: '%s'", response_chunk.c_str());
         }
         break;
       case HTTP_EVENT_ON_FINISH:
@@ -94,7 +107,8 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
     }
     return ESP_OK;
   };
-  config.user_data = this;
+  config.event_handler = http_event_handler;
+  config.user_data = &response;
 
   ESP_LOGD(TAG, "GET_SIGNED_URL: Initializing HTTP client with ESP32 certificate bundle");
 
@@ -130,18 +144,9 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
   // Feed watchdog after request completion
   esp_task_wdt_reset();
 
-  std::string response = "";
-
   if (err == ESP_OK) {
     int status_code = esp_http_client_get_status_code(client);
     ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP response code: %d", status_code);
-
-    if (status_code == 200) {
-      // Response data should be in signed_url_ from the event handler
-      ESP_LOGI(TAG, "GET_SIGNED_URL: Response: %s", signed_url_out.c_str());
-    } else {
-      ESP_LOGE(TAG, "GET_SIGNED_URL: HTTP request failed with status code: %d", status_code);
-    }
   } else {
     ESP_LOGE(TAG, "GET_SIGNED_URL: HTTP request failed: %s", esp_err_to_name(err));
   }
@@ -268,13 +273,6 @@ bool ElevenLabsClient::is_connected() const { return websocket_connected_; }
 void ElevenLabsClient::websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id,
                                                void *event_data) {
   ElevenLabsClient *client = static_cast<ElevenLabsClient *>(handler_args);
-  if (event_id == WEBSOCKET_EVENT_DATA) {
-    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
-    ElevenLabsClient *client = (ElevenLabsClient *) handler_args;
-    if (client && client->on_message_) {
-      client->on_message_(reinterpret_cast<const uint8_t *>(data->data_ptr), data->data_len);
-    }
-  }
   switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
       client->websocket_connected_ = true;
@@ -290,10 +288,44 @@ void ElevenLabsClient::websocket_event_handler(void *handler_args, esp_event_bas
       if (client->on_error_)
         client->on_error_("WebSocket connection error");
       break;
+    case WEBSOCKET_EVENT_DATA:
+      {
+        esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
+        if (client->reassembler_.add(data)) {
+          if (client->on_message_) {
+            client->on_message_(client->reassembler_.getBuffer(), client->reassembler_.getSize());
+          }
+          client->reassembler_.reset();
+        }
+      }
+      break;
     default:
       break;
   }
 }
+public:
+    ElevenLabsClient(const std::string &agent_id, const std::string &api_key);
+    ~ElevenLabsClient();
+    bool get_signed_url(std::string &signed_url_out);
+    bool connect(const std::string &signed_url, std::function<void(const uint8_t *, size_t)> on_message,
+                 std::function<void()> on_connected, std::function<void()> on_disconnected,
+                 std::function<void(const std::string &)> on_error);
+    void disconnect();
+    bool send_message(const std::string &message);
+    bool send_binary(const uint8_t *data, size_t length);
+    bool is_connected() const;
+    static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id,
+                                       void *event_data);
 
-}  // namespace elevenlabs_stream
-}  // namespace esphome
+private:
+    std::string agent_id_;
+    std::string api_key_;
+    esp_websocket_client_handle_t websocket_client_{nullptr};
+    bool websocket_connected_{false};
+    std::function<void(const uint8_t *, size_t)> on_message_;
+    std::function<void()> on_connected_;
+    std::function<void()> on_disconnected_;
+    std::function<void(const std::string &)> on_error_;
+#ifdef USE_ESP32
+    WsBigReassembler reassembler_;
+#endif

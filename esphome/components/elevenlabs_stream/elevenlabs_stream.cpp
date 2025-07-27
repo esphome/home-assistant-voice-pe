@@ -146,6 +146,10 @@ void ElevenLabsStream::setup() {
     return;
   }
 
+  if (!this->client_) {
+    this->client_ = new ElevenLabsClient(this->agent_id_, this->api_key_);
+  }
+
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
     this->set_timeout("audio_output_callback", 100, [this]() {
@@ -216,18 +220,9 @@ bool ElevenLabsStream::start_stream() {
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
 
-  if (!this->client_) {
-    this->client_ = new ElevenLabsClient(this->agent_id_, this->api_key_);
-  }
-  std::string signed_url;
-  if (!this->client_->get_signed_url(signed_url)) {
-    ESP_LOGE(TAG, "START_STREAM: Failed to get signed URL");
-    this->handle_error("Failed to get signed URL");
-    return false;
-  }
   ESP_LOGD(TAG, "START_STREAM: Connecting to ElevenLabs...");
   bool connected = this->client_->connect(
-    signed_url,
+    this->signed_url_,
     [this](const uint8_t* buffer, size_t length) { this->handle_websocket_message(buffer, length); },
     [this]() { this->set_state(StreamState::ON); },
     [this]() { this->handle_websocket_disconnected(); },
@@ -267,13 +262,13 @@ void ElevenLabsStream::stop_stream() {
 }
 
 void ElevenLabsStream::renew_signed_url_if_needed() {
-  if (this->agent_id_.empty()) {
+  if (!this->client_) {
     return;
   }
   uint32_t current_time = millis();
   bool should_renew = false;
-  if (!this->signed_url_valid_) {
-    ESP_LOGD(TAG, "RENEW: No valid signed URL available, will renew");
+  if (this->signed_url_.empty()) {
+    ESP_LOGD(TAG, "RENEW: No signed URL available, will renew");
     should_renew = true;
   } else if (current_time - this->last_signed_url_renewal_ >= this->signed_url_renewal_interval_) {
     uint32_t elapsed_minutes = (current_time - this->last_signed_url_renewal_) / 60000;
@@ -284,13 +279,13 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
     ESP_LOGI(TAG, "RENEW: Renewing signed URL for fast connections...");
     if (this->state_ == StreamState::OFF) {
       std::string signed_url;
-      if (this->client_ && this->client_->get_signed_url(signed_url)) {
-        this->signed_url_valid_ = true;
+      if (this->client_->get_signed_url(signed_url)) {
+        this->signed_url_ = signed_url;
         this->last_signed_url_renewal_ = current_time;
         ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
       } else {
         ESP_LOGW(TAG, "RENEW: Failed to renew signed URL");
-        this->signed_url_valid_ = false;
+        this->signed_url_.clear();
       }
     } else {
       ESP_LOGD(TAG, "RENEW: Deferring renewal - stream is active (state=ON)");
@@ -332,7 +327,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     }
   };
   
-  BasicJsonDocument<PSRAMAllocator> json_document(length); // Extra space for parsing overhead
+  BasicJsonDocument<PSRAMAllocator> json_document(length + 1024); // Extra space for parsing overhead
   if (json_document.overflowed()) {
     ESP_LOGE(TAG, "PARSE_JSON_BUF: Could not allocate memory for JSON document!");
     return;
@@ -581,7 +576,7 @@ void ElevenLabsStream::handle_error(const std::string &error_message) {
       error_message.find("timeout") != std::string::npos ||
       error_message.find("connection") != std::string::npos) {
     ESP_LOGW(TAG, "ERROR: Connection-related error detected, invalidating signed URL");
-    this->signed_url_valid_ = false;
+    this->signed_url_.clear();
   }
   
   if (this->client_) {
