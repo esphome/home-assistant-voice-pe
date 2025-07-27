@@ -1030,7 +1030,6 @@ micro_wake_word:
                     condition:
                       elevenlabs_stream.is_running:
                     then:
-                      elevenlabs_stream.stop:
                     # Stop any other media player announcement
                     else:
                       - if:
@@ -1064,10 +1063,12 @@ elevenlabs_stream:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
     - logger.log: "ElevenLabs stream started - audio streaming ON"
+    - micro_wake_word.stop:
   on_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
     - logger.log: "ElevenLabs stream ended - audio streaming OFF"
+    - micro_wake_word.start:
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
@@ -1090,6 +1091,7 @@ elevenlabs_stream:
         args: ['error_message']
     - delay: 1s
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - micro_wake_word.start:
 
 # Test button to trigger stream and test speaker
 binary_sensor:
