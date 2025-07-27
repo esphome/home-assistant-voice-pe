@@ -12,7 +12,6 @@
 #include <esp_http_client.h>
 #include <esp_timer.h>
 #include <mbedtls/base64.h>
-#include "ws_big_reassembler.h"
 
 namespace esphome {
 

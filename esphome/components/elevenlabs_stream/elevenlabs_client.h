@@ -10,7 +10,6 @@
 #include <esp_event.h>
 #include <esp_tls.h>
 #include <esp_crt_bundle.h>
-#include "ws_big_reassembler.h"
 
 namespace esphome {
 namespace elevenlabs_stream {

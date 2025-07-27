@@ -1,7 +1,6 @@
 // Disconnects from ElevenLabs and resets protocol state.
 // See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
 #include "elevenlabs_stream.h"
-#include "ws_big_reassembler.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
@@ -11,7 +10,6 @@
 #include "esphome/components/audio/audio.h"
 
 #include "elevenlabs_stream.h"
-#include "ws_big_reassembler.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
@@ -21,6 +19,7 @@
 #include "esphome/components/audio/audio.h"
 
 #include "elevenlabs_client.h"
+#include "json.h"
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/base64.h>
@@ -316,39 +315,13 @@ void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t le
 }
 
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
-  // Use ArduinoJson directly with PSRAM allocator
-  // Create a PSRAM allocator for BasicJsonDocument
-  struct PSRAMAllocator {
-    void *allocate(size_t size) {
-      return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    void deallocate(void *pointer) {
-      heap_caps_free(pointer);
-    }
-    void *reallocate(void *ptr, size_t new_size) {
-      return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-  };
-  
-  BasicJsonDocument<PSRAMAllocator> json_document(length + 1024); // Extra space for parsing overhead
-  if (json_document.overflowed()) {
-    ESP_LOGE(TAG, "PARSE_JSON_BUF: Could not allocate memory for JSON document!");
+  // Use new JsonDeserializer class
+  std::string error_out;
+  JsonObject root = JsonDeserializer::parse(buffer, length, error_out);
+  if (!root) {
+    ESP_LOGE(TAG, "PARSE_JSON_BUF: %s", error_out.c_str());
     return;
   }
-  
-  // Parse JSON directly from buffer
-  DeserializationError err = deserializeJson(json_document, (const char*)buffer, length);
-  
-  if (err != DeserializationError::Ok) {
-    if (err == DeserializationError::NoMemory) {
-      ESP_LOGE(TAG, "PARSE_JSON_BUF: Can not allocate more memory for deserialization. Consider making source string smaller");
-    } else {
-      ESP_LOGE(TAG, "PARSE_JSON_BUF: Parse error: %s", err.c_str());
-    }
-    return;
-  }
-  
-  JsonObject root = json_document.as<JsonObject>();
   const char* type = root["type"];
   if (!type) {
     ESP_LOGW(TAG, "PARSE_JSON_BUF: Message missing type field");
