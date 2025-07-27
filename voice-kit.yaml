@@ -1,4 +1,0 @@
-# File moved to home-assistant-voice.yaml
-# This file is kept for older adopted configs
-
-<<: !include home-assistant-voice.yaml

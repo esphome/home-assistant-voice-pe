@@ -8,8 +8,10 @@
             "defines": [
                 "_DEBUG",
                 "UNICODE",
-                "_UNICODE"
-            ]
+                "_UNICODE",
+                "USE_ESP32"
+            ],
+            "mergeConfigurations": true
         }
     ],
     "version": 4
