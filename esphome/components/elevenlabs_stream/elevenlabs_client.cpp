@@ -64,8 +64,6 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
 
   // Set event handler to capture response data
   config.event_handler = [](esp_http_client_event_t *evt) -> esp_err_t {
-    ElevenLabsStream *stream = static_cast<ElevenLabsStream *>(evt->user_data);
-
     switch (evt->event_id) {
       case HTTP_EVENT_ON_CONNECTED:
         ESP_LOGD(TAG, "GET_SIGNED_URL: HTTP_EVENT_ON_CONNECTED");
@@ -156,7 +154,7 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
     ESP_LOGD(TAG, "GET_SIGNED_URL: Full response: %s", response.c_str());
 
     // Parse JSON response using ESPHome's JSON utility
-    bool parse_success = json::parse_json(response, [this, signed_url_out](JsonObject root) -> bool {
+    bool parse_success = json::parse_json(response, [this, &signed_url_out](JsonObject root) -> bool {
       const char *signed_url = root["signed_url"];
       if (signed_url) {
         signed_url_out = std::string(signed_url);
@@ -172,7 +170,7 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
       }
     });
 
-    if (parse_success && !this->signed_url_.empty()) {
+    if (parse_success && !signed_url_out.empty()) {
       ESP_LOGI(TAG, "GET_SIGNED_URL: Got signed URL successfully");
       ESP_LOGD(TAG, "=== GET_SIGNED_URL SUCCESS ===");
       return true;
