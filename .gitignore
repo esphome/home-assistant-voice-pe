@@ -91,7 +91,6 @@ venv-*/
 .pioenvs
 .piolibdeps
 .pio
-.vscode/
 !.vscode/tasks.json
 CMakeListsPrivate.txt
 CMakeLists.txt
@@ -136,5 +135,3 @@ sdkconfig.*
 !sdkconfig.defaults
 
 .tests/
-
-/components

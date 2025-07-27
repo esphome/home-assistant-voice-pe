@@ -1,0 +1,34 @@
+{
+    "files.associations": {
+        "*.yaml": "yaml",
+        "*.yml": "yaml",
+        "*.h": "cpp",
+        "*.cpp": "cpp"
+    },
+    "yaml.schemas": {
+        "https://esphome.io/esphome.json": "*.yaml"
+    },
+    "C_Cpp.default.configurationProvider": "",
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.intelliSenseEngineFallback": "enabled",
+    "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+    },
+    "search.exclude": {
+        "**/.esphome": true,
+        "**/build": true
+    },
+    "github.copilot.chat.agent.terminal.allowList": {
+        ".\\test-elevenlabs.bat": true,
+        "test-elevenlabs.bat": true
+    },
+    "chat.agent.maxRequests": 1000,
+    "C_Cpp.errorSquiggles": "disabled",
+}

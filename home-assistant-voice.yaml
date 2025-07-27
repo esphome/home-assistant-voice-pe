@@ -21,7 +21,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2025.5.1
+  min_version: 2025.7.2
   on_boot:
     priority: 375
     then:
@@ -1427,7 +1427,7 @@ microphone:
     adc_type: external
     pdm: false
     sample_rate: 16000
-    bits_per_sample: 32bit
+    bits_per_sample: 16bit  # Changed from 32bit to 16bit for direct processing
     i2s_mode: secondary
     i2s_audio_id: i2s_input
     channel: stereo
