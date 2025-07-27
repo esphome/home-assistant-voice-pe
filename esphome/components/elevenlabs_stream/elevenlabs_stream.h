@@ -6,6 +6,7 @@
 #include "esphome/components/network/ip_address.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/audio/audio.h"
+#include "elevenlabs_client.h"
 
 #ifdef USE_ESP32
 #include <esp_websocket_client.h>
@@ -23,7 +24,7 @@ namespace speaker { class Speaker; }
 
 namespace elevenlabs_stream {
 
-// Forward declarations
+class ElevenLabsClient;
 class ElevenLabsStream;
 void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
@@ -47,11 +48,9 @@ class ElevenLabsStream : public Component {
   bool start_stream();
   void stop_stream();
   bool is_running() const { return this->state_ == StreamState::ON; }
-  bool is_connected() const { return this->websocket_connected_; }
   StreamState get_state() const { return this->state_; }
   void handle_microphone_data(const std::vector<uint8_t> &data);
   void handle_websocket_disconnected();
-  
 
   // Speaker activity tracking
   bool is_speaker_active() const;
@@ -64,14 +63,15 @@ class ElevenLabsStream : public Component {
   void add_on_processing_trigger(Trigger<> *trigger) { this->on_processing_triggers_.push_back(trigger); }
   void add_on_replying_trigger(Trigger<> *trigger) { this->on_replying_triggers_.push_back(trigger); }
 
+  bool is_connected() const {
+    return this->client_ && this->client_->is_connected();
+  }
+
  protected:
   friend void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
-  
+
   // Internal methods
-  bool get_signed_url();
-  void renew_signed_url_if_needed();  // New method for automatic renewal
-  void connect_to_elevenlabs();
-  void disconnect_from_elevenlabs();
+  void renew_signed_url_if_needed();
   void send_websocket_message(const std::string &message);
   void handle_websocket_message(const uint8_t *buffer, size_t length);
   void parse_json_message_from_buffer(const uint8_t *buffer, size_t length);
@@ -87,17 +87,13 @@ class ElevenLabsStream : public Component {
   std::string api_key_;
   microphone::Microphone *microphone_{nullptr};
   speaker::Speaker *speaker_{nullptr};
-
+  ElevenLabsClient* client_ = nullptr;
   StreamState state_{StreamState::OFF};
 
-#ifdef USE_ESP32
-  esp_websocket_client_handle_t websocket_client_{nullptr};
-  bool websocket_connected_{false};
+  // Protocol state members for ElevenLabs API
   std::string conversation_id_;
-  std::string signed_url_;
   std::string agent_output_audio_format_;
   std::string user_input_audio_format_;
-#endif
 
   // Triggers - simplified
   std::vector<Trigger<> *> on_start_triggers_;

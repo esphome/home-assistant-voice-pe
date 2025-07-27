@@ -25,6 +25,10 @@ This is a fork of the Home Assistant Voice Preview Edition firmware that integra
 
 Never write new documentation (`.md` files or similar) unless explicitly asked to.
 
+Never ask questions or ask for confirmation. Just do what is asked without hessitation. Make best-guess assumptions if needed, but always try to use web search first.
+
+After making changes, always test the code by running the `test-elevenlabs.bat` script. This script is designed to ensure that the code works correctly with the ESP32-S3 device and that all changes are properly integrated.
+
 ### Build & Deploy Process
 Always use `test-elevenlabs.bat` script to ensure proper workflow for testing the application, including compilation and upload to the ESP32-S3 device. This script handles:
 - Compiling the ESPHome configuration

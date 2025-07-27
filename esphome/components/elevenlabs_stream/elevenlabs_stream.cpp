@@ -1,4 +1,3 @@
-
 // Disconnects from ElevenLabs and resets protocol state.
 // See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
 #include "elevenlabs_stream.h"
@@ -71,15 +70,7 @@ std::string base64_encode(const uint8_t* data, size_t len) {
 
 
 void ElevenLabsStream::handle_websocket_disconnected() {
-  if(!this->websocket_connected_) {
-    ESP_LOGW(TAG, "WebSocket already disconnected, ignoring event");
-    return;
-  }
-
   ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
-  ESP_LOGD(TAG, "WS_EVENT: Setting websocket_connected_ = false");
-  this->websocket_connected_ = false;
-  ESP_LOGD(TAG, "WS_EVENT: Setting state to OFF");
   this->set_state(StreamState::OFF);
   ESP_LOGD(TAG, "WS_EVENT: Triggering end events (%zu triggers)", this->on_end_triggers_.size());
   for (auto *trigger : this->on_end_triggers_) {
@@ -170,18 +161,6 @@ void ElevenLabsStream::setup() {
   });
   
   ESP_LOGD(TAG, "SETUP: Initial state set to %d (IDLE)", static_cast<int>(this->state_));
-  
-  // Initialize signed URL at startup for speedy connections
-  ESP_LOGI(TAG, "SETUP: Initializing signed URL for faster connections...");
-  if (this->get_signed_url()) {
-    this->signed_url_valid_ = true;
-    this->last_signed_url_renewal_ = millis();
-    ESP_LOGI(TAG, "SETUP: Signed URL initialized successfully");
-  } else {
-    ESP_LOGW(TAG, "SETUP: Failed to get initial signed URL - will retry in loop");
-    this->signed_url_valid_ = false;
-  }
-  
   ESP_LOGCONFIG(TAG, "=== SETUP COMPLETE ===");
 }
 
@@ -204,7 +183,7 @@ void ElevenLabsStream::loop() {
   }
   
   // Send periodic heartbeat when connected
-  if (this->websocket_connected_ && this->state_ == StreamState::ON) {
+  if (this->client_ && this->state_ == StreamState::ON) {
     uint32_t heartbeat_elapsed = millis() - this->last_heartbeat_;
     if (heartbeat_elapsed > 10000) {  // 10 seconds instead of 20
       ESP_LOGD(TAG, "LOOP: Sending heartbeat ping after %dms", heartbeat_elapsed);
@@ -219,11 +198,9 @@ void ElevenLabsStream::loop() {
 
 bool ElevenLabsStream::start_stream() {
   ESP_LOGI(TAG, "=== START_STREAM CALLED ===");
-  ESP_LOGD(TAG, "START_STREAM: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
-  ESP_LOGD(TAG, "START_STREAM: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
+  ESP_LOGD(TAG, "START_STREAM: Current state=%s", stream_state_to_string(this->state_));
   ESP_LOGD(TAG, "START_STREAM: Agent ID='%s'", this->agent_id_.c_str());
   ESP_LOGD(TAG, "START_STREAM: Microphone=%p, Speaker=%p", this->microphone_, this->speaker_);
-  ESP_LOGD(TAG, "START_STREAM: Signed URL valid=%s", this->signed_url_valid_ ? "YES" : "NO");
   
   if (this->state_ == StreamState::ON) {
     ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already ON");
@@ -234,13 +211,11 @@ bool ElevenLabsStream::start_stream() {
   for (auto *trigger : this->on_replying_triggers_) {
     trigger->trigger();
   }
-  
+
   ESP_LOGI(TAG, "START_STREAM: Starting ElevenLabs stream...");
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
-  
-  // Use cached signed URL if available and valid, otherwise get a new one
-  // Use ElevenLabsClient to get signed URL and connect
+
   if (!this->client_) {
     this->client_ = new ElevenLabsClient(this->agent_id_, this->api_key_);
   }
@@ -269,71 +244,47 @@ bool ElevenLabsStream::start_stream() {
 
 void ElevenLabsStream::stop_stream() {
   ESP_LOGI(TAG, "=== STOP_STREAM CALLED ===");
-  ESP_LOGD(TAG, "STOP_STREAM: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
-  ESP_LOGD(TAG, "STOP_STREAM: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGI(TAG, "STOP_STREAM: Stopping ElevenLabs stream...");
-  
-  // Stop microphone if capturing
   if (this->microphone_ && this->microphone_->is_running()) {
     ESP_LOGD(TAG, "STOP_STREAM: Stopping microphone capture");
     this->microphone_->stop();
     ESP_LOGD(TAG, "STOP_STREAM: Microphone stopped");
-  } else {
-    ESP_LOGD(TAG, "STOP_STREAM: Microphone not running or not configured");
   }
-  
-  // Reset speaker activity tracking
   this->speaker_is_active_ = false;
   this->speaker_start_time_ = 0;
   this->speaker_end_time_ = 0;
   this->accumulated_duration_ms_ = 0;
   ESP_LOGD(TAG, "STOP_STREAM: Speaker activity tracking reset");
-  
-  ESP_LOGD(TAG, "STOP_STREAM: Disconnecting from ElevenLabs...");
   if (this->client_) {
     this->client_->disconnect();
   }
-  ESP_LOGD(TAG, "STOP_STREAM: Setting state to OFF...");
   this->set_state(StreamState::OFF);
-  
-  // Trigger end event when stopping
   ESP_LOGD(TAG, "STOP_STREAM: Triggering end events (%zu triggers)", this->on_end_triggers_.size());
   for (auto *trigger : this->on_end_triggers_) {
     trigger->trigger();
   }
-  
   ESP_LOGD(TAG, "=== STOP_STREAM COMPLETE ===");
 }
 
 void ElevenLabsStream::renew_signed_url_if_needed() {
-  // Skip renewal if we don't have a valid agent ID configured
   if (this->agent_id_.empty()) {
     return;
   }
-  
   uint32_t current_time = millis();
-  
-  // Check if we need to renew the signed URL
   bool should_renew = false;
-  
-  // Renew if we don't have a valid signed URL
-  if (!this->signed_url_valid_ || this->signed_url_.empty()) {
+  if (!this->signed_url_valid_) {
     ESP_LOGD(TAG, "RENEW: No valid signed URL available, will renew");
     should_renew = true;
-  }
-  // Renew if the renewal interval has passed
-  else if (current_time - this->last_signed_url_renewal_ >= this->signed_url_renewal_interval_) {
+  } else if (current_time - this->last_signed_url_renewal_ >= this->signed_url_renewal_interval_) {
     uint32_t elapsed_minutes = (current_time - this->last_signed_url_renewal_) / 60000;
     ESP_LOGI(TAG, "RENEW: Signed URL renewal interval reached (%d minutes elapsed)", elapsed_minutes);
     should_renew = true;
   }
-  
   if (should_renew) {
     ESP_LOGI(TAG, "RENEW: Renewing signed URL for fast connections...");
-    
-    // Don't interrupt active connections - only renew when off
     if (this->state_ == StreamState::OFF) {
-      if (this->get_signed_url()) {
+      std::string signed_url;
+      if (this->client_ && this->client_->get_signed_url(signed_url)) {
         this->signed_url_valid_ = true;
         this->last_signed_url_renewal_ = current_time;
         ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
@@ -347,45 +298,6 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
   }
 }
 
-// Sets the internal state of the stream and triggers automation events.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-void ElevenLabsStream::set_state(StreamState new_state) {
-// Sets the internal state of the stream and triggers automation events.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-  if (this->state_ == new_state) {
-    ESP_LOGD(TAG, "SET_STATE: State unchanged, still %s", stream_state_to_string(new_state));
-    return;
-  }
-  StreamState old_state = this->state_;
-  this->state_ = new_state;
-  ESP_LOGI(TAG, "STATE_CHANGE: %s -> %s", stream_state_to_string(old_state), stream_state_to_string(new_state));
-// Parses a JSON message from the ElevenLabs WebSocket protocol.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-// Handles errors, logs details, and triggers error automations.
-// Sends the initial conversation setup message to ElevenLabs.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-// Sends a ping message to the ElevenLabs WebSocket for keepalive.
-// Encodes and sends an audio chunk to ElevenLabs as base64.
-// Handles incoming microphone data, converts to mono PCM, and sends to ElevenLabs.
-// Handles WebSocket events for ElevenLabs protocol.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-  
-  // When transitioning to ON state, trigger start event and start audio streaming
-  if (new_state == StreamState::ON && old_state == StreamState::OFF) {
-    ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
-    for (auto *trigger : this->on_start_triggers_) {
-      // Only trigger LED spin, do NOT play chime sound
-      trigger->trigger();
-    }
-    // Start microphone capture for continuous streaming
-    if (this->microphone_ && !this->microphone_->is_running()) {
-      ESP_LOGD(TAG, "SET_STATE: Starting microphone capture");
-      this->microphone_->start();
-    }
-  }
-}
-
-// Sends a text message over the ElevenLabs WebSocket connection.
 void ElevenLabsStream::send_websocket_message(const std::string &message) {
   if (!this->client_ || !this->client_->is_connected() || message.empty()) {
     ESP_LOGW(TAG, "SEND_WS_MSG: Cannot send message - WebSocket not connected or message empty");
@@ -396,19 +308,15 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
   }
 }
 
-// Handles a complete WebSocket message (text frame) from ElevenLabs.
 void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t length) {
   if (!buffer || length == 0) {
     ESP_LOGW(TAG, "HANDLE_WS_MSG: Received empty WebSocket message");
     return;
   }
-  
   this->parse_json_message_from_buffer(buffer, length);
   ESP_LOGV(TAG, "HANDLE_WS_MSG: Message processing complete");
 }
 
-// Parses a JSON message from the ElevenLabs WebSocket protocol.
-// See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
   // Use ArduinoJson directly with PSRAM allocator
   // Create a PSRAM allocator for BasicJsonDocument
@@ -666,8 +574,6 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
 void ElevenLabsStream::handle_error(const std::string &error_message) {
   ESP_LOGE(TAG, "=== ERROR HANDLER CALLED ===");
   ESP_LOGE(TAG, "ERROR: %s", error_message.c_str());
-  ESP_LOGD(TAG, "ERROR: Current state=%s", this->state_ == StreamState::OFF ? "OFF" : "ON");
-  ESP_LOGD(TAG, "ERROR: WebSocket connected=%s", this->websocket_connected_ ? "YES" : "NO");
   ESP_LOGD(TAG, "ERROR: Setting state to OFF");
   
   // Invalidate signed URL on connection errors - it might be expired
@@ -676,13 +582,12 @@ void ElevenLabsStream::handle_error(const std::string &error_message) {
       error_message.find("connection") != std::string::npos) {
     ESP_LOGW(TAG, "ERROR: Connection-related error detected, invalidating signed URL");
     this->signed_url_valid_ = false;
-    this->signed_url_.clear();
   }
   
-  // Disconnect and set state to OFF
-  this->disconnect_from_elevenlabs();
+  if (this->client_) {
+    this->client_->disconnect();
+  }
   this->set_state(StreamState::OFF);
-  
   ESP_LOGD(TAG, "ERROR: Triggering error events (%zu triggers)", this->on_error_triggers_.size());
   for (auto *trigger : this->on_error_triggers_) {
     ESP_LOGD(TAG, "ERROR: Triggering error event at %p with message: '%s'", trigger, error_message.c_str());
@@ -739,78 +644,56 @@ void ElevenLabsStream::send_ping() {
 
 // Encodes and sends an audio chunk to ElevenLabs as base64.
 void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) {
-  if (!this->websocket_connected_ || !this->websocket_client_ || audio_data.empty()) {
-    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - websocket_connected_=%s, client=%p, data_empty=%s",
-             this->websocket_connected_ ? "YES" : "NO",
-             this->websocket_client_,
+  if (!this->client_ || !this->client_->is_connected() || audio_data.empty()) {
+    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - client connected=%s, data_empty=%s",
+             this->client_ && this->client_->is_connected() ? "YES" : "NO",
              audio_data.empty() ? "YES" : "NO");
     return;
   }
-  
   // Convert audio data to bytes
   const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
   size_t audio_size = audio_data.size() * sizeof(int16_t);
-  
   // Encode audio as base64 for WebSocket transmission
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
-  
   if (audio_base64.empty()) {
     ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
     return;
   }
-  
   // Send as user_audio_chunk according to protocol
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
-  
   this->send_websocket_message(message);
 }
 
-// Handles incoming microphone data, converts to mono PCM, and sends to ElevenLabs.
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
   // Only process microphone data if stream is ON, websocket is connected, and data is present
-  if (this->state_ != StreamState::ON || !this->websocket_connected_ || data.empty()) {
-    ESP_LOGV(TAG, "HANDLE_MIC: Skipping - state=%s, connected=%s, data_empty=%s",
+  if (this->state_ != StreamState::ON || !this->client_ || !this->client_->is_connected() || data.empty()) {
+    ESP_LOGV(TAG, "HANDLE_MIC: Skipping - state=%s, client connected=%s, data_empty=%s",
              this->state_ == StreamState::ON ? "ON" : "OFF",
-             this->websocket_connected_ ? "YES" : "NO",
+             this->client_ && this->client_->is_connected() ? "YES" : "NO",
              data.empty() ? "YES" : "NO");
     return;
   }
-
   // Block microphone input if speaker is active or agent audio is playing
   if (this->speaker_is_active_) {
     ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
     return;
   }
-
-  // Microphone is configured for 32-bit samples, convert to 16-bit PCM
-  if (data.size() % 4 != 0) {
-    ESP_LOGW(TAG, "HANDLE_MIC: Received data not aligned to 32-bit samples: %zu bytes", data.size());
-    return;
+  // Convert std::vector<uint8_t> to std::vector<int16_t>
+  std::vector<int16_t> audio_samples;
+  audio_samples.reserve(data.size() / 2);
+  for (size_t i = 0; i + 1 < data.size(); i += 2) {
+    int16_t sample = (static_cast<int16_t>(data[i + 1]) << 8) | data[i];
+    audio_samples.push_back(sample);
   }
-  // size_t num_samples_32bit = data.size() / 4;
-  // const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
-  // std::vector<int16_t> audio_samples;
-  // audio_samples.reserve(num_samples_32bit);
-  // for (size_t i = 0; i < num_samples_32bit; i++) {
-  //   int16_t sample16 = static_cast<int16_t>(samples_32bit[i] >> 16);
-  //   audio_samples.push_back(sample16);
-  // }
-  // // Convert stereo to mono by averaging each left/right sample pair
-  // std::vector<int16_t> mono_samples;
-  // mono_samples.reserve(audio_samples.size() / 2);
-  // for (size_t i = 0; i + 1 < audio_samples.size(); i += 2) {
-  //   int16_t left = audio_samples[i];
-  //   int16_t right = audio_samples[i + 1];
-  //   int16_t mono = (left + right) / 2;
-  //   mono_samples.push_back(mono);
-  // }
-  // Send mono buffer to ElevenLabs pipeline
-  this->send_audio_chunk(data);
+  this->send_audio_chunk(audio_samples);
 }
 
-// Removed: now handled by ElevenLabsClient
+void ElevenLabsStream::set_state(StreamState new_state) {
+  this->state_ = new_state;
+  ESP_LOGD(TAG, "SET_STATE: State changed to %s", stream_state_to_string(new_state));
+}
 
 }  // namespace elevenlabs_stream
 }  // namespace esphome
