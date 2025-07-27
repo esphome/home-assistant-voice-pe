@@ -206,7 +206,7 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1  # ElevenLabs sends mono audio
-    buffer_duration: 30000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
+    buffer_duration: 60000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
     task_stack_in_psram: true
     # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for mixer
     

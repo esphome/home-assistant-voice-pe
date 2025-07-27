@@ -129,13 +129,13 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
 
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", output_len);
 
-  if(!this->speaker_->is_running()) {
-    ESP_LOGD(TAG, "DECODE_B64: Starting speaker");
-    this->speaker_->start();
+  size_t bytes_written = 0;
+  for (int retry=0; retry<5 && bytes_written==0; ++retry) {
+    bytes_written = speaker_->play(temp_audio_buffer, output_len);
+    if (bytes_written==0) delay(5);
   }
 
   // Playback: play decoded audio directly
-  size_t bytes_written = this->speaker_->play(temp_audio_buffer, output_len);
   ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from temp buffer", bytes_written);
 
   if (bytes_written != output_len) {
