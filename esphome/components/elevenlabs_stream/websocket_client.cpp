@@ -151,6 +151,3 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
 
 } // namespace elevenlabs_stream
 } // namespace esphome
-
-} // namespace elevenlabs_stream
-} // namespace esphome
