@@ -10,11 +10,13 @@ This is a fork of the Home Assistant Voice Preview Edition firmware that integra
 - **`modules/`**: Reusable hardware modules (Grove I2C, power management)
 
 ## Critical Development Workflows
-**CRITICAL:** Always use web search as much as you can for *any* request, before making any changes. This is to ensure you are using the latest information and best practices. For instance, if asked to solve an SSL error for ESPHome, research the web about that error first. This is just an example - be creative about web research in general.
+Always use web search as much as you can for *any* request, before making any changes. This is to ensure you are using the latest information and best practices. For instance, if asked to solve an SSL error for ESPHome, research the web about that error first. This is just an example - be creative about web research in general.
 
 Never write new documentation (`.md` files or similar) unless explicitly asked to.
 
-Never ask questions or ask for confirmation. Just do what is asked without hessitation. Make best-guess assumptions if needed, but always try to use web search first.
+Never ask questions or ask for confirmation. Just do what is asked without hesitation. Make best-guess assumptions if needed, but always try to use web search first.
+
+If asked to refactor or change something, always first read as many related files as possible to understand the context. Read the full files, not just fragments.
 
 After making changes, always test the code by running the `test-elevenlabs.bat` script. This script is designed to ensure that the code works correctly with the ESP32-S3 device and that all changes are properly integrated.
 

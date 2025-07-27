@@ -45,18 +45,7 @@ public:
 private:
   std::string agent_id_;
   std::string api_key_;
-  esp_websocket_client_handle_t websocket_client_ = nullptr;
-  bool websocket_connected_ = false;
-
-  // Internal event handlers
-  static void websocket_event_handler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
-
-  // Callbacks
-  std::function<void(const uint8_t*, size_t)> on_message_;
-  std::function<void()> on_connected_;
-  std::function<void()> on_disconnected_;
-  std::function<void(const std::string&)> on_error_;
-  WsBigReassembler reassembler_{512*1024};
+  std::unique_ptr<WebsocketClient> websocket_;
 };
 
 } // namespace elevenlabs_stream
