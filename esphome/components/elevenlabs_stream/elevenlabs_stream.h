@@ -75,7 +75,6 @@ class ElevenLabsStream : public Component {
   void send_websocket_message(const std::string &message);
   void handle_websocket_message(const uint8_t *buffer, size_t length);
   void parse_json_message_from_buffer(const uint8_t *buffer, size_t length);
-  void handle_websocket_binary(const uint8_t *data, size_t length);
   void handle_error(const std::string &error_message);
   void send_conversation_init();
   void capture_and_send_audio();
@@ -135,9 +134,6 @@ class ElevenLabsStream : public Component {
   uint32_t speaker_start_time_{0};  // When current audio playback started
   uint32_t speaker_end_time_{0};   // When current audio playback should end
   uint32_t speaker_silence_buffer_ms_{500};  // Wait time after speaker stops before enabling mic
-  
-  // Audio processing configuration
-  static constexpr size_t MAX_AUDIO_BUFFER_SIZE = 8192;      // 8KB
 
   // Last VAD score for tracking voice activity detection
   float last_vad_score_ = 0.0f;

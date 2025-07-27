@@ -37,9 +37,9 @@ esphome:
       - lambda: id(init_in_progress) = false;
 
 esp32:
-  board: esp32-s3-devkitc-1
-  cpu_frequency: 240MHz
+  board: esp32s3box
   variant: esp32s3
+  cpu_frequency: 240MHz
   flash_size: 16MB
   framework:
     type: esp-idf
@@ -48,6 +48,9 @@ esp32:
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
       CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+      CONFIG_COMPILER_OPTIMIZATION: "Performance"
 
       # Moves instructions and read only data from flash into PSRAM on boot.
       CONFIG_SPIRAM_RODATA: "y"
@@ -148,9 +151,9 @@ microphone:
     id: i2s_mics
     i2s_din_pin: GPIO15
     adc_type: external
-    pdm: false
+    pdm: true
     sample_rate: 16000  # ElevenLabs expects 16kHz mono PCM
-    bits_per_sample: 32bit
+    bits_per_sample: 16bit
     i2s_mode: secondary
     i2s_audio_id: i2s_input
     channel: stereo  # Use left channel for mono
@@ -226,7 +229,7 @@ media_player:
     internal: False
     volume_increment: 0.05
     volume_min: 0.4
-    volume_max: 0.85
+    volume_max: 0.95
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
@@ -295,23 +298,6 @@ media_player:
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
       - id: error_cloud_expired
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
-
-# Volume control for debugging
-number:
-  - platform: template
-    id: master_volume
-    name: "Master Volume"
-    optimistic: true
-    min_value: 0
-    max_value: 100
-    initial_value: 90
-    step: 5
-    on_value:
-      then:
-        - lambda: |-
-            float volume = x / 100.0;
-            id(i2s_audio_speaker)->set_volume(volume);
-            ESP_LOGI("volume", "Set master volume to %.2f%%", x);
 
 # Script to play sound files (from the original voice kit implementation)
 script:
@@ -804,6 +790,31 @@ power_supply:
   - id: led_power
     pin: GPIO45
 
+select:
+  - platform: template
+    name: "Wake word sensitivity"
+    optimistic: true
+    initial_option: Slightly sensitive
+    restore_value: true
+    entity_category: config
+    options:
+      - Slightly sensitive
+      - Moderately sensitive
+      - Very sensitive
+    on_value:
+      # Sets specific wake word probabilities computed for each particular model
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
+      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
+      lambda: |-
+        if (x == "Slightly sensitive") {
+          id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
+        } else if (x == "Moderately sensitive") {
+          id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
+        } else if (x == "Very sensitive") {
+          id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
+        }
+
 voice_assistant:
   id: va
   microphone:
@@ -860,16 +871,6 @@ voice_assistant:
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
-  on_intent_progress:
-    - if:
-        condition:
-          # A nonempty x variable means a streaming TTS url was sent to the media player
-          lambda: 'return !x.empty();'
-        then:
-          - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
-          - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
-          - script.execute: activate_stop_word_once
   on_tts_start:
     - if:
         condition:

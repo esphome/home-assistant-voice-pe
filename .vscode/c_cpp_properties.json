@@ -11,7 +11,10 @@
                 "_UNICODE",
                 "USE_ESP32"
             ],
-            "mergeConfigurations": true
+            "mergeConfigurations": true,
+            "compileCommands": [
+                "${workspaceFolder}/.esphome/build/hass-elevenlabs/.pioenvs/hass-elevenlabs/compile_commands.json"
+            ]
         }
     ],
     "version": 4
