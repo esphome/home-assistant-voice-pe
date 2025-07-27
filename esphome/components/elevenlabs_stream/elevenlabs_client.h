@@ -10,6 +10,7 @@
 #include <esp_event.h>
 #include <esp_tls.h>
 #include <esp_crt_bundle.h>
+#include <memory>
 
 namespace esphome {
 namespace elevenlabs_stream {
