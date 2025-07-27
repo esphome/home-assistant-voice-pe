@@ -106,9 +106,7 @@ class ElevenLabsStream : public Component {
   std::vector<uint8_t> response_audio_buffer_;
   
   // WebSocket message fragmentation handling
-#ifdef USE_ESP32
-  WsBigReassembler reassembler_;
-#endif
+  WebsocketMessageAssembler reassembler_;
   
   // Timing and configuration constants
   uint32_t last_audio_time_{0};

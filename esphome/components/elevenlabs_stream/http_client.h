@@ -11,7 +11,6 @@ public:
     // Performs a GET request to the given URL with optional headers and returns the response as a string.
     // Returns true on success, false on failure.
     static bool get(const std::string& url,
-                    const std::function<void(void*)>& config_callback, // Allows caller to set config fields
                     std::string& response_out);
 };
 
