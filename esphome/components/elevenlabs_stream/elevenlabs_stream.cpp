@@ -88,7 +88,7 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
 }
 
 // Sets the speaker's audio stream info based on the agent output format, if available.
-void ElevenLabsStream::set_speaker_stream_info_from_format() {
+void ElevenLabsStream::set_speaker_stream_info_to_elevenlabs_format() {
   // If agent_output_audio_format_ is set, configure the speaker accordingly.
   if (!this->agent_output_audio_format_.empty()) {
     // Example: parse format string and set speaker stream info
@@ -100,15 +100,9 @@ void ElevenLabsStream::set_speaker_stream_info_from_format() {
     else if (this->agent_output_audio_format_ == "pcm_44100") sample_rate = 44100;
     else if (this->agent_output_audio_format_ == "pcm_48000") sample_rate = 48000;
 
-    esphome::audio::AudioStreamInfo info = this->speaker_->get_audio_stream_info();
-    info.sample_rate_ = sample_rate;
-    // Optionally set other fields if needed (channels, format, etc.)
+    esphome::audio::AudioStreamInfo info(16, 1, sample_rate);
     this->speaker_->set_audio_stream_info(info);
     ESP_LOGD(TAG, "SET_SPKR_INFO: Set speaker stream info from agent_output_audio_format_='%s' (sample_rate=%d)", this->agent_output_audio_format_.c_str(), sample_rate);
-  } else if (this->initial_audio_stream_info_set_) {
-    // Fallback: use the initial audio stream info captured at setup
-    this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
-    ESP_LOGD(TAG, "SET_SPKR_INFO: Set speaker stream info from initial_audio_stream_info_");
   } else {
     ESP_LOGW(TAG, "SET_SPKR_INFO: No audio format info available to set speaker stream info");
   }
@@ -137,7 +131,7 @@ void ElevenLabsStream::setup() {
       ESP_LOGD(TAG, "Speaker finished");
       if(!this->speaker_is_active_) {
         // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
-        this->set_speaker_stream_info_from_format();
+        this->set_speaker_stream_info_to_elevenlabs_format();
         return;
       }
 

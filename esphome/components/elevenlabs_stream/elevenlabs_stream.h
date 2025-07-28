@@ -31,7 +31,7 @@ enum class StreamState {
 
 class ElevenLabsStream : public Component {
   // Sets the speaker's audio stream info based on the agent output format, if available.
-  void set_speaker_stream_info_from_format();
+  void set_speaker_stream_info_to_elevenlabs_format();
  public:
   void setup() override;
   void loop() override;
