@@ -212,13 +212,39 @@ bool ElevenLabsStream::start_stream() {
   ESP_LOGD(TAG, "START_STREAM: Connecting to ElevenLabs...");
   bool connected = this->client_->connect(
     this->signed_url_,
-    [this](const uint8_t* buffer, size_t length) { this->handle_websocket_message(buffer, length); },
-    [this]() { 
-      this->set_state(StreamState::ON); 
-      this->send_conversation_init();
+    [this](const uint8_t* buffer, size_t length) { 
+      this->parse_json_message_from_buffer(buffer, length); 
     },
-    [this]() { this->handle_websocket_disconnected(); },
-    [this](const std::string& err) { this->handle_error(err); }
+    [this]() { 
+      this->send_conversation_init();
+      
+      uint32_t current_time = millis();
+      uint32_t time_since_connect_start = current_time - this->connection_start_time_;
+      uint32_t grace_period = 3000;
+
+      ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
+
+      this->set_timeout(
+        "enable_microphone", 
+        std::max(1u, static_cast<unsigned int>(grace_period - time_since_connect_start)),
+        [this]() {
+          ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
+
+          ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
+          for (auto *trigger : this->on_start_triggers_) {
+            trigger->trigger();
+          }
+
+          this->set_state(StreamState::ON);
+          this->speaker_is_active_ = false; // Mark speaker as inactive
+        });
+    },
+    [this]() { 
+      this->handle_websocket_disconnected(); 
+    },
+    [this](const std::string& err) { 
+      this->handle_error(err); 
+    }
   );
   if (!connected) {
     ESP_LOGE(TAG, "START_STREAM: Failed to connect to ElevenLabs WebSocket");
@@ -295,20 +321,11 @@ void ElevenLabsStream::send_websocket_message(const std::string &message) {
   }
 }
 
-void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t length) {
-  if (!buffer || length == 0) {
-    ESP_LOGW(TAG, "HANDLE_WS_MSG: Received empty WebSocket message");
-    return;
-  }
-  this->parse_json_message_from_buffer(buffer, length);
-  ESP_LOGV(TAG, "HANDLE_WS_MSG: Message processing complete");
-}
-
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
   // Use new JsonDeserializer class
   auto json_doc = JsonDeserializer::parse(buffer, length);
   if (!json_doc) {
-    ESP_LOGE(TAG, "PARSE_JSON_BUF: Failed to parse JSON buffer");
+    ESP_LOGE(TAG, "PARSE_JSON_BUF: Failed to parse JSON buffer of length %zu", length);
     return;
   }
   JsonObject root = json_doc->as<JsonObject>();
@@ -612,7 +629,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
              data.empty() ? "YES" : "NO");
     return;
   }
-  
+
   // Block microphone input if speaker is active or agent audio is playing
   if (this->speaker_is_active_) {
     ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");

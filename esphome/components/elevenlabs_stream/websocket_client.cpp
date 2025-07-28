@@ -4,6 +4,7 @@
 namespace esphome {
 namespace elevenlabs_stream {
 
+    static const char* TAG = "WebsocketClient";
 
 // WebsocketMessageAssembler implementation
 WebsocketMessageAssembler::WebsocketMessageAssembler(size_t maxBytes)
@@ -44,11 +45,11 @@ bool WebsocketClient::connect(const std::string &url,
                               std::function<void()> on_disconnected,
                               std::function<void(const std::string &)> on_error) {
     if (url.empty()) {
-        ESP_LOGE("WebsocketClient", "No URL provided");
+        ESP_LOGE(TAG, "No URL provided");
         return false;
     }
-    if (websocket_client_) {
-        disconnect();
+    if (this->websocket_client_) {
+        this->disconnect();
     }
     on_message_ = on_message;
     on_connected_ = on_connected;
@@ -70,61 +71,63 @@ bool WebsocketClient::connect(const std::string &url,
     ws_cfg.use_global_ca_store = false;
     ws_cfg.skip_cert_common_name_check = false;
 
-    websocket_client_ = esp_websocket_client_init(&ws_cfg);
-    if (!websocket_client_) {
-        ESP_LOGE("WebsocketClient", "Failed to initialize WebSocket client");
+    this->websocket_client_ = esp_websocket_client_init(&ws_cfg);
+    if (!this->websocket_client_) {
+        ESP_LOGE(TAG, "Failed to initialize WebSocket client");
         return false;
     }
-    esp_err_t reg_err = esp_websocket_register_events(websocket_client_, WEBSOCKET_EVENT_ANY,
+    esp_err_t reg_err = esp_websocket_register_events(this->websocket_client_, WEBSOCKET_EVENT_ANY,
                                                      &WebsocketClient::websocket_event_handler, this);
     if (reg_err != ESP_OK) {
-        ESP_LOGE("WebsocketClient", "Failed to register WebSocket events");
-        esp_websocket_client_destroy(websocket_client_);
-        websocket_client_ = nullptr;
+        ESP_LOGE(TAG, "Failed to register WebSocket events");
+        esp_websocket_client_destroy(this->websocket_client_);
+        this->websocket_client_ = nullptr;
         return false;
     }
-    esp_err_t err = esp_websocket_client_start(websocket_client_);
+    esp_err_t err = esp_websocket_client_start(this->websocket_client_);
     if (err != ESP_OK) {
-        ESP_LOGE("WebsocketClient", "Failed to start WebSocket client");
-        esp_websocket_client_destroy(websocket_client_);
-        websocket_client_ = nullptr;
+        ESP_LOGE(TAG, "Failed to start WebSocket client");
+        esp_websocket_client_destroy(this->websocket_client_);
+        this->websocket_client_ = nullptr;
         return false;
     }
     return true;
 }
 void WebsocketClient::disconnect() {
-    if (websocket_client_) {
-        esp_websocket_client_stop(websocket_client_);
-        esp_websocket_client_destroy(websocket_client_);
-        websocket_client_ = nullptr;
-        websocket_connected_ = false;
+    if (this->websocket_client_) {
+        esp_websocket_client_stop(this->websocket_client_);
+        esp_websocket_client_destroy(this->websocket_client_);
+        this->websocket_client_ = nullptr;
+        this->websocket_connected_ = false;
     }
 }
 bool WebsocketClient::send_message(const std::string &message) {
-    if (!websocket_connected_ || !websocket_client_ || message.empty()) {
+    if (!this->websocket_connected_ || !this->websocket_client_ || message.empty()) {
         return false;
     }
-    int sent = esp_websocket_client_send_text(websocket_client_, message.c_str(), message.length(), portMAX_DELAY);
+    int sent = esp_websocket_client_send_text(this->websocket_client_, message.c_str(), message.length(), portMAX_DELAY);
     return sent >= 0;
 }
 bool WebsocketClient::send_binary(const uint8_t *data, size_t length) {
-    if (!websocket_connected_ || !websocket_client_ || !data || length == 0) {
+    if (!this->websocket_connected_ || !this->websocket_client_ || !data || length == 0) {
         return false;
     }
-    int sent = esp_websocket_client_send_bin(websocket_client_, (const char *) data, length, portMAX_DELAY);
+    int sent = esp_websocket_client_send_bin(this->websocket_client_, (const char *) data, length, portMAX_DELAY);
     return sent >= 0;
 }
-bool WebsocketClient::is_connected() const { return websocket_connected_; }
+bool WebsocketClient::is_connected() const { return this->websocket_connected_; }
 void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id,
                                               void *event_data) {
     WebsocketClient *client = static_cast<WebsocketClient *>(handler_args);
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "WebSocket connected");
             client->websocket_connected_ = true;
             if (client->on_connected_)
                 client->on_connected_();
             break;
         case WEBSOCKET_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "WebSocket disconnected");
             client->websocket_connected_ = false;
             if (client->on_disconnected_)
                 client->on_disconnected_();
@@ -135,6 +138,15 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
             break;
         case WEBSOCKET_EVENT_DATA:
         {
+            if (data->op_code == 0x08) { // Close frame
+                ESP_LOGW(TAG, "WS_EVENT: WebSocket close frame received");
+                ESP_LOGI(TAG, "WebSocket disconnected");
+                client->websocket_connected_ = false;
+                if (client->on_disconnected_)
+                    client->on_disconnected_();
+                break;
+            }
+
             esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
             if (client->reassembler_.add(data)) {
                 if (client->on_message_) {
