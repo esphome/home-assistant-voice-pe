@@ -1,3 +1,4 @@
+
 // Disconnects from ElevenLabs and resets protocol state.
 // See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
 #include "esphome/core/application.h"
@@ -64,25 +65,9 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   }
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", decoded_len);
 
-  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
-  uint32_t sample_rate = 44100; // Default to 44.1kHz
-  size_t underscore_pos = this->agent_output_audio_format_.find('_');
-  if (underscore_pos != std::string::npos) {
-    std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
-    sample_rate = std::stoul(rate_str);
-    ESP_LOGI(TAG, "PARSE_JSON_BUF: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
-  }
-
-  audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
-  ESP_LOGI(TAG, "PARSE_JSON_BUF: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
-            16, 1, sample_rate);
-
-
   size_t bytes_written = 0;
 
   for (int retry=0; retry<5 && bytes_written==0; ++retry) {
-    ESP_LOGD(TAG, "DECODE_B64: Attempting to play %zu bytes of audio (retry %d)", decoded_len, retry);
-    this->speaker_->set_audio_stream_info(input_stream_info);
     bytes_written = speaker_->play(decoded, decoded_len);
     if (bytes_written==0) delay(50);
   }
@@ -100,6 +85,33 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   }
 
   return true;
+}
+
+// Sets the speaker's audio stream info based on the agent output format, if available.
+void ElevenLabsStream::set_speaker_stream_info_from_format() {
+  // If agent_output_audio_format_ is set, configure the speaker accordingly.
+  if (!this->agent_output_audio_format_.empty()) {
+    // Example: parse format string and set speaker stream info
+    // Supported formats: "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "pcm_48000"
+    int sample_rate = 16000; // default
+    if (this->agent_output_audio_format_ == "pcm_16000") sample_rate = 16000;
+    else if (this->agent_output_audio_format_ == "pcm_22050") sample_rate = 22050;
+    else if (this->agent_output_audio_format_ == "pcm_24000") sample_rate = 24000;
+    else if (this->agent_output_audio_format_ == "pcm_44100") sample_rate = 44100;
+    else if (this->agent_output_audio_format_ == "pcm_48000") sample_rate = 48000;
+
+    esphome::audio::AudioStreamInfo info = this->speaker_->get_audio_stream_info();
+    info.sample_rate_ = sample_rate;
+    // Optionally set other fields if needed (channels, format, etc.)
+    this->speaker_->set_audio_stream_info(info);
+    ESP_LOGD(TAG, "SET_SPKR_INFO: Set speaker stream info from agent_output_audio_format_='%s' (sample_rate=%d)", this->agent_output_audio_format_.c_str(), sample_rate);
+  } else if (this->initial_audio_stream_info_set_) {
+    // Fallback: use the initial audio stream info captured at setup
+    this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
+    ESP_LOGD(TAG, "SET_SPKR_INFO: Set speaker stream info from initial_audio_stream_info_");
+  } else {
+    ESP_LOGW(TAG, "SET_SPKR_INFO: No audio format info available to set speaker stream info");
+  }
 }
 
 void ElevenLabsStream::setup() {
@@ -122,7 +134,10 @@ void ElevenLabsStream::setup() {
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
     this->set_timeout("audio_output_callback", 100, [this]() {
+      ESP_LOGD(TAG, "Speaker finished");
       if(!this->speaker_is_active_) {
+        // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
+        this->set_speaker_stream_info_from_format();
         return;
       }
 
@@ -130,8 +145,9 @@ void ElevenLabsStream::setup() {
           trigger->trigger();
       }
 
-      ESP_LOGD(TAG, "DECODE_B64: speaker finished");
+      // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
       this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
+
       this->speaker_->stop();
       this->speaker_is_active_ = false;
     });
