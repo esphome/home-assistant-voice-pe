@@ -138,6 +138,8 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
             break;
         case WEBSOCKET_EVENT_DATA:
         {
+            esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
+            
             if (data->op_code == 0x08) { // Close frame
                 ESP_LOGW(TAG, "WS_EVENT: WebSocket close frame received");
                 ESP_LOGI(TAG, "WebSocket disconnected");
@@ -147,7 +149,6 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
                 break;
             }
 
-            esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
             if (client->reassembler_.add(data)) {
                 if (client->on_message_) {
                     client->on_message_(client->reassembler_.getBuffer(), client->reassembler_.getSize());
