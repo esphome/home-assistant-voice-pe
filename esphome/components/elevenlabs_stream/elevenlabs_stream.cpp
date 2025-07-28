@@ -603,30 +603,6 @@ void ElevenLabsStream::send_ping() {
   this->send_websocket_message(message);
 }
 
-// Encodes and sends an audio chunk to ElevenLabs as base64.
-void ElevenLabsStream::send_audio_chunk(const std::vector<int16_t> &audio_data) {
-  if (!this->client_ || !this->client_->is_connected() || audio_data.empty()) {
-    ESP_LOGD(TAG, "SEND_AUDIO: Cannot send audio - client connected=%s, data_empty=%s",
-             this->client_ && this->client_->is_connected() ? "YES" : "NO",
-             audio_data.empty() ? "YES" : "NO");
-    return;
-  }
-  // Convert audio data to bytes
-  const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(audio_data.data());
-  size_t audio_size = audio_data.size() * sizeof(int16_t);
-  // Encode audio as base64 for WebSocket transmission
-  std::string audio_base64 = base64_encode(audio_bytes, audio_size);
-  if (audio_base64.empty()) {
-    ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
-    return;
-  }
-  // Send as user_audio_chunk according to protocol
-  std::string message = json::build_json([&audio_base64](JsonObject root) {
-    root["user_audio_chunk"] = audio_base64;
-  });
-  this->send_websocket_message(message);
-}
-
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
   // Only process microphone data if stream is ON, websocket is connected, and data is present
   if (this->state_ != StreamState::ON || !this->client_ || !this->client_->is_connected() || data.empty()) {
@@ -636,6 +612,7 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
              data.empty() ? "YES" : "NO");
     return;
   }
+  
   // Block microphone input if speaker is active or agent audio is playing
   if (this->speaker_is_active_) {
     ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
@@ -661,8 +638,22 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
     mono_samples.push_back(mono);
   }
 
-  // Send mono buffer to ElevenLabs pipeline
-  this->send_audio_chunk(mono_samples);
+  // Convert audio data to bytes
+  const uint8_t* audio_bytes = reinterpret_cast<const uint8_t*>(mono_samples.data());
+  size_t audio_size = mono_samples.size() * sizeof(int16_t);
+
+  // Encode audio as base64 for WebSocket transmission
+  std::string audio_base64 = base64_encode(audio_bytes, audio_size);
+  if (audio_base64.empty()) {
+    ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
+    return;
+  }
+
+  // Send as user_audio_chunk according to protocol
+  std::string message = json::build_json([&audio_base64](JsonObject root) {
+    root["user_audio_chunk"] = audio_base64;
+  });
+  this->send_websocket_message(message);
 }
 
 void ElevenLabsStream::set_state(StreamState new_state) {
