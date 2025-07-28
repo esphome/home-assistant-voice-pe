@@ -53,8 +53,12 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
   // Clear any previous signed URL
   ESP_LOGD(TAG, "GET_SIGNED_URL: Cleared previous signed URL");
 
+  std::map<std::string, std::string> headers;
+  if (!this->api_key_.empty()) {
+    headers["xi-api-key"] = this->api_key_;
+  }
   std::string response;
-  bool http_ok = HttpClient::get(url, response);
+  bool http_ok = HttpClient::get(url, headers, response);
   if (!http_ok) {
     ESP_LOGE(TAG, "GET_SIGNED_URL: HTTP request failed");
     ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
@@ -63,29 +67,35 @@ bool ElevenLabsClient::get_signed_url(std::string &signed_url_out) {
   if (!response.empty()) {
     ESP_LOGD(TAG, "GET_SIGNED_URL: Parsing JSON response...");
     ESP_LOGD(TAG, "GET_SIGNED_URL: Full response: %s", response.c_str());
-    std::string error_out;
-    JsonObject root = JsonDeserializer::parse(reinterpret_cast<const uint8_t*>(response.data()), response.size(), error_out);
-    if (!root) {
-      ESP_LOGE(TAG, "GET_SIGNED_URL: Failed to parse JSON response: %s", error_out.c_str());
+    auto json_doc = JsonDeserializer::parse(response.c_str());
+    if (!json_doc) {
+      ESP_LOGE(TAG, "GET_SIGNED_URL: Failed to parse JSON response");
       ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
       return false;
     }
-    const char *signed_url = root["signed_url"];
-    if (signed_url) {
-      signed_url_out = std::string(signed_url);
-      ESP_LOGI(TAG, "GET_SIGNED_URL: Extracted signed URL: %s", signed_url_out.c_str());
-      ESP_LOGI(TAG, "GET_SIGNED_URL: Got signed URL successfully");
-      ESP_LOGD(TAG, "=== GET_SIGNED_URL SUCCESS ===");
-      return true;
+    JsonObject root = json_doc->as<JsonObject>();
+    ESP_LOGD(TAG, "GET_SIGNED_URL: root.isNull() = %d", root.isNull());
+    ESP_LOGD(TAG, "GET_SIGNED_URL: root.size() = %d", root.size());
+    ESP_LOGD(TAG, "GET_SIGNED_URL: Available fields and values in root:");
+    for (JsonPair kv : root) {
+      ESP_LOGD(TAG, "GET_SIGNED_URL:   - %s: %s", kv.key().c_str(), kv.value().as<const char*>() ? kv.value().as<const char*>() : "<non-string>");
+    }
+    if (root.containsKey("signed_url")) {
+      const char *signed_url = root["signed_url"];
+      if (signed_url) {
+        signed_url_out = std::string(signed_url);
+        ESP_LOGI(TAG, "GET_SIGNED_URL: Extracted signed URL: %s", signed_url_out.c_str());
+        ESP_LOGI(TAG, "GET_SIGNED_URL: Got signed URL successfully");
+        ESP_LOGD(TAG, "=== GET_SIGNED_URL SUCCESS ===");
+        return true;
+      } else {
+        ESP_LOGE(TAG, "GET_SIGNED_URL: signed_url key exists but value is null");
+      }
     } else {
       ESP_LOGE(TAG, "GET_SIGNED_URL: signed_url field not found in response");
-      ESP_LOGD(TAG, "GET_SIGNED_URL: Available fields in response:");
-      for (JsonPair kv : root) {
-        ESP_LOGD(TAG, "GET_SIGNED_URL:   - %s", kv.key().c_str());
-      }
-      ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
-      return false;
     }
+    ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");
+    return false;
   } else {
     ESP_LOGE(TAG, "GET_SIGNED_URL: Response is empty");
     ESP_LOGE(TAG, "=== GET_SIGNED_URL FAILED ===");

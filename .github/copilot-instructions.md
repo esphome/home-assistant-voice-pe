@@ -5,7 +5,7 @@ This is a fork of the Home Assistant Voice Preview Edition firmware that integra
 
 ### Configuration Structure
 - **`home-assistant-voice.yaml`**: Main production configuration (1800+ lines) with full Home Assistant integration, LED controls, wake word detection, and ElevenLabs integration
-- **`home-assistant-voice.elevenlabs.yaml`**: Minimal test configuration for ElevenLabs component development - microphone/speaker optional for testing
+- **`home-assistant-voice.elevenlabs.yaml`**: Minimal test configuration for ElevenLabs component development
 - **`voice-kit.yaml`**: Legacy redirect to main config for backward compatibility
 - **`modules/`**: Reusable hardware modules (Grove I2C, power management)
 
@@ -18,10 +18,10 @@ Never ask questions or ask for confirmation. Just do what is asked without hesit
 
 If asked to refactor or change something, always first read as many related files as possible to understand the context. Read the full files, not just fragments.
 
-After making changes, always test the code by running the `test-elevenlabs.bat` script. This script is designed to ensure that the code works correctly with the ESP32-S3 device and that all changes are properly integrated.
+After making changes, always test the code by running the `.\test-elevenlabs.bat` script. This script is designed to ensure that the code works correctly with the ESP32-S3 device and that all changes are properly integrated.
 
 ### Build & Deploy Process
-Always use `test-elevenlabs.bat` script to ensure proper workflow for testing the application, including compilation and upload to the ESP32-S3 device. This script handles:
+Always use `.\test-elevenlabs.bat` script to ensure proper workflow for testing the application, including compilation and upload to the ESP32-S3 device. This script handles:
 - Compiling the ESPHome configuration
 - Uploading the firmware to the device
 - Running the test configuration

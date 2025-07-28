@@ -4,7 +4,6 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/network/ip_address.h"
-#include "esphome/components/json/json_util.h"
 #include "esphome/components/audio/audio.h"
 #include "elevenlabs_client.h"
 

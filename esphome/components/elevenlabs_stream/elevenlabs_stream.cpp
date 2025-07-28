@@ -1,19 +1,9 @@
 // Disconnects from ElevenLabs and resets protocol state.
 // See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
 #include "elevenlabs_stream.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
-#include "esphome/core/application.h"
-#include "esphome/components/json/json_util.h"
-#include "esphome/components/speaker/speaker.h"
-#include "esphome/components/microphone/microphone.h"
-#include "esphome/components/audio/audio.h"
-
-#include "elevenlabs_stream.h"
-#include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
-#include "esphome/core/application.h"
-#include "esphome/components/json/json_util.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/audio/audio.h"
@@ -282,8 +272,8 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
     if (this->state_ == StreamState::OFF) {
       std::string signed_url;
       if (this->client_->get_signed_url(signed_url)) {
-        this->signed_url_ = signed_url;
         this->last_signed_url_renewal_ = current_time;
+        this->signed_url_ = signed_url;
         ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
       } else {
         ESP_LOGW(TAG, "RENEW: Failed to renew signed URL");
@@ -316,12 +306,12 @@ void ElevenLabsStream::handle_websocket_message(const uint8_t *buffer, size_t le
 
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
   // Use new JsonDeserializer class
-  std::string error_out;
-  JsonObject root = JsonDeserializer::parse(buffer, length, error_out);
-  if (!root) {
-    ESP_LOGE(TAG, "PARSE_JSON_BUF: %s", error_out.c_str());
+  auto json_doc = JsonDeserializer::parse(buffer, length);
+  if (!json_doc) {
+    ESP_LOGE(TAG, "PARSE_JSON_BUF: Failed to parse JSON buffer");
     return;
   }
+  JsonObject root = json_doc->as<JsonObject>();
   const char* type = root["type"];
   if (!type) {
     ESP_LOGW(TAG, "PARSE_JSON_BUF: Message missing type field");

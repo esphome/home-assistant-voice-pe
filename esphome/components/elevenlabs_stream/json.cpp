@@ -1,35 +1,31 @@
 // json.cpp
 #include "json.h"
 #include <esp_heap_caps.h>
-#include <ArduinoJson.h>
+#include "esphome/core/log.h"
+#include <esphome/components/json/json_util.h>
 
 namespace esphome {
 namespace elevenlabs_stream {
 
-struct PSRAMAllocator {
-    void *allocate(size_t size) {
-        return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    void deallocate(void *pointer) {
-        heap_caps_free(pointer);
-    }
-    void *reallocate(void *ptr, size_t new_size) {
-        return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-};
+static const char *TAG = "json";
 
-JsonObject JsonDeserializer::parse(const uint8_t* buffer, size_t length, std::string& error_out) {
-    BasicJsonDocument<PSRAMAllocator> json_document(length + 1024); // Extra space for parsing overhead
-    if (json_document.overflowed()) {
-        error_out = "Could not allocate memory for JSON document!";
-        return JsonObject();
+
+std::unique_ptr<BasicJsonDocument<PSRAMAllocator>> JsonDeserializer::parse(const uint8_t* buffer, size_t length) {
+    auto json_document = std::make_unique<BasicJsonDocument<PSRAMAllocator>>(length + 1024 * 10); // Extra space for parsing overhead
+    if (json_document->overflowed()) {
+        ESP_LOGD(TAG, "parse: JSON document overflowed");
+        return nullptr;
     }
-    DeserializationError err = deserializeJson(json_document, (const char*)buffer, length);
+    DeserializationError err = deserializeJson(*json_document, (const char*)buffer, length);
     if (err != DeserializationError::Ok) {
-        error_out = err.c_str();
-        return JsonObject();
+        ESP_LOGD(TAG, "parse: JSON deserialization failed: %s", err.c_str());
+        return nullptr;
     }
-    return json_document.as<JsonObject>();
+    return json_document;
+}
+
+std::unique_ptr<BasicJsonDocument<PSRAMAllocator>> JsonDeserializer::parse(const char* cstr) {
+    return parse(reinterpret_cast<const uint8_t*>(cstr), strlen(cstr));
 }
 
 } // namespace elevenlabs_stream

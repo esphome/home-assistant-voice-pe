@@ -3,11 +3,14 @@
 #include <esp_http_client.h>
 #include <esp_task_wdt.h>
 #include <string>
+#include <map>
+#include "esp_crt_bundle.h"
 
 namespace esphome {
 namespace elevenlabs_stream {
 
 bool HttpClient::get(const std::string& url,
+                     const std::map<std::string, std::string>& headers,
                      std::string& response_out) {
     esp_http_client_config_t config = {};
     config.url = url.c_str();
@@ -50,6 +53,10 @@ bool HttpClient::get(const std::string& url,
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
         return false;
+    }
+    // Set headers
+    for (const auto& kv : headers) {
+        esp_http_client_set_header(client, kv.first.c_str(), kv.second.c_str());
     }
     esp_err_t err = esp_http_client_perform(client);
     esp_http_client_cleanup(client);
