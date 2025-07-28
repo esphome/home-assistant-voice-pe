@@ -31,4 +31,5 @@
     },
     "chat.agent.maxRequests": 1000,
     "C_Cpp.errorSquiggles": "enabledIfIncludesResolve",
+    "cmake.sourceDirectory": "D:/repos/home-assistant-voice-pe-elevenlabs/.esphome/build/hass-elevenlabs",
 }

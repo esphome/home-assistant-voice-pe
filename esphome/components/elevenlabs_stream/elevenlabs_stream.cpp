@@ -1,6 +1,5 @@
 // Disconnects from ElevenLabs and resets protocol state.
 // See ElevenLabs API docs: https://docs.elevenlabs.io/api-reference/convai
-#include "elevenlabs_stream.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -8,11 +7,13 @@
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/components/audio/audio.h"
 
-#include "elevenlabs_client.h"
+#include "elevenlabs_stream.h"
 #include "json.h"
+#include "base64.h"
+#include "elevenlabs_client.h"
+
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
-#include <mbedtls/base64.h>
 
 namespace esphome {
 namespace elevenlabs_stream {
@@ -30,33 +31,6 @@ static const char* stream_state_to_string(StreamState state) {
   }
 }
 
-// Base64 encoding function with better error handling
-std::string base64_encode(const uint8_t* data, size_t len) {
-  if (!data || len == 0) {
-    return "";
-  }
-  
-  size_t output_len = 0;
-  
-  // Calculate required buffer size
-  int ret = mbedtls_base64_encode(nullptr, 0, &output_len, data, len);
-  if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-    ESP_LOGE(TAG, "Failed to calculate base64 encode buffer size: %d", ret);
-    return "";
-  }
-  
-  // Allocate buffer and encode
-  std::string result(output_len, '\0');
-  ret = mbedtls_base64_encode(reinterpret_cast<unsigned char*>(&result[0]), output_len, &output_len, data, len);
-  if (ret != 0) {
-    ESP_LOGE(TAG, "Failed to encode base64: %d", ret);
-    return "";
-  }
-  
-  result.resize(output_len);
-  return result;
-}
-
 
 void ElevenLabsStream::handle_websocket_disconnected() {
   ESP_LOGI(TAG, "WS_EVENT: WEBSOCKET_EVENT_DISCONNECTED");
@@ -70,54 +44,60 @@ void ElevenLabsStream::handle_websocket_disconnected() {
 }
 
 bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
-  size_t input_len = strlen(base64_data);
-  if (!base64_data || input_len == 0) {
+
+  if (!base64_data) {
     ESP_LOGW(TAG, "DECODE_B64: No base64 data provided");
     return false;
   }
-
-  // Two-step base64 decode: first get required output length
-  size_t required_output_len = 0;
-  int ret = mbedtls_base64_decode(nullptr, 0, &required_output_len, (const unsigned char*)base64_data, input_len);
-  if (ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to get base64 output length: %d", ret);
+  size_t input_len = strlen(base64_data);
+  if (input_len == 0) {
+    ESP_LOGW(TAG, "DECODE_B64: Input base64 string is empty");
     return false;
   }
 
-  // Allocate temporary buffer in PSRAM
-  uint8_t* temp_audio_buffer = (uint8_t*)heap_caps_malloc(required_output_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!temp_audio_buffer) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to allocate temporary buffer in PSRAM");
+
+  size_t decoded_len = 0;
+  uint8_t* decoded = base64_decode(base64_data, decoded_len);
+  if (!decoded || decoded_len == 0) {
+    ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data (input len: %zu)", input_len);
     return false;
   }
+  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", decoded_len);
 
-  size_t output_len = 0;
-  ret = mbedtls_base64_decode(temp_audio_buffer, required_output_len, &output_len, (const unsigned char*)base64_data, input_len);
-  if (ret != 0) {
-    ESP_LOGE(TAG, "DECODE_B64: Failed to decode base64 audio data: %d", ret);
-    heap_caps_free(temp_audio_buffer);
-    return false;
+  // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
+  uint32_t sample_rate = 44100; // Default to 44.1kHz
+  size_t underscore_pos = this->agent_output_audio_format_.find('_');
+  if (underscore_pos != std::string::npos) {
+    std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
+    sample_rate = std::stoul(rate_str);
+    ESP_LOGI(TAG, "PARSE_JSON_BUF: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
   }
 
-  ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", output_len);
+  audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
+  ESP_LOGI(TAG, "PARSE_JSON_BUF: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
+            16, 1, sample_rate);
+
 
   size_t bytes_written = 0;
+
   for (int retry=0; retry<5 && bytes_written==0; ++retry) {
-    bytes_written = speaker_->play(temp_audio_buffer, output_len);
-    if (bytes_written==0) delay(5);
+    ESP_LOGD(TAG, "DECODE_B64: Attempting to play %zu bytes of audio (retry %d)", decoded_len, retry);
+    this->speaker_->set_audio_stream_info(input_stream_info);
+    bytes_written = speaker_->play(decoded, decoded_len);
+    if (bytes_written==0) delay(50);
   }
 
   // Playback: play decoded audio directly
-  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from temp buffer", bytes_written);
+  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer", bytes_written);
 
-  if (bytes_written != output_len) {
-    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", output_len, bytes_written);
-    heap_caps_free(temp_audio_buffer);
-    return false;
+  if (decoded) {
+    heap_caps_free(decoded);
   }
 
-  // Free temporary buffer
-  heap_caps_free(temp_audio_buffer);
+  if (bytes_written != decoded_len) {
+    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", decoded_len, bytes_written);
+    return false;
+  }
 
   return true;
 }
@@ -142,13 +122,17 @@ void ElevenLabsStream::setup() {
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
     this->set_timeout("audio_output_callback", 100, [this]() {
-      if(this->microphone_->is_running() && this->speaker_is_active_) {
-        for (auto *trigger : this->on_listening_triggers_) {
-            trigger->trigger();
-        }
+      if(!this->speaker_is_active_) {
+        return;
+      }
+
+      for (auto *trigger : this->on_listening_triggers_) {
+          trigger->trigger();
       }
 
       ESP_LOGD(TAG, "DECODE_B64: speaker finished");
+      this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
+      this->speaker_->stop();
       this->speaker_is_active_ = false;
     });
   });
@@ -194,6 +178,9 @@ bool ElevenLabsStream::start_stream() {
   ESP_LOGD(TAG, "START_STREAM: Current state=%s", stream_state_to_string(this->state_));
   ESP_LOGD(TAG, "START_STREAM: Agent ID='%s'", this->agent_id_.c_str());
   ESP_LOGD(TAG, "START_STREAM: Microphone=%p, Speaker=%p", this->microphone_, this->speaker_);
+
+  this->connection_start_time_ = millis();
+  ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
   
   if (this->state_ == StreamState::ON) {
     ESP_LOGW(TAG, "START_STREAM: Cannot start stream - already ON");
@@ -206,8 +193,6 @@ bool ElevenLabsStream::start_stream() {
   }
 
   ESP_LOGI(TAG, "START_STREAM: Starting ElevenLabs stream...");
-  this->connection_start_time_ = millis();
-  ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
 
   ESP_LOGD(TAG, "START_STREAM: Connecting to ElevenLabs...");
   bool connected = this->client_->connect(
@@ -220,7 +205,7 @@ bool ElevenLabsStream::start_stream() {
       
       uint32_t current_time = millis();
       uint32_t time_since_connect_start = current_time - this->connection_start_time_;
-      uint32_t grace_period = 3000;
+      uint32_t grace_period = 2000;
 
       ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
 
@@ -237,6 +222,9 @@ bool ElevenLabsStream::start_stream() {
 
           this->set_state(StreamState::ON);
           this->speaker_is_active_ = false; // Mark speaker as inactive
+          
+          ESP_LOGD(TAG, "SET_STATE: Starting microphone capture");
+          this->microphone_->start();
         });
     },
     [this]() { 
@@ -368,37 +356,19 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
           this->user_input_audio_format_ = user_input_format;
           ESP_LOGD(TAG, "PARSE_JSON_BUF: User input format: %s", user_input_format);
         }
-        
-        // Initialize speaker with correct audio format early for faster response
-        if (this->speaker_ && agent_output_format) {
-          // Parse sample rate from agent_output_audio_format (e.g., "pcm_44100")
-          uint32_t sample_rate = 44100; // Default to 44.1kHz
-          size_t underscore_pos = this->agent_output_audio_format_.find('_');
-          if (underscore_pos != std::string::npos) {
-            std::string rate_str = this->agent_output_audio_format_.substr(underscore_pos + 1);
-            sample_rate = std::stoul(rate_str);
-            ESP_LOGI(TAG, "PARSE_JSON_BUF: Parsed sample rate: %d Hz from format '%s'", sample_rate, this->agent_output_audio_format_.c_str());
-          }
           
-          // Set the input audio stream info for the resampler based on ElevenLabs format
-          esphome::audio::AudioStreamInfo input_stream_info(16, 1, sample_rate); // 16-bit, mono, parsed sample rate
-          ESP_LOGI(TAG, "PARSE_JSON_BUF: Setting input audio stream info: %d-bit, %d channels, %d Hz", 
-                   16, 1, sample_rate);
-          
-          // Configure the speaker with the correct input format
-          if (!this->initial_audio_stream_info_set_) {
-            this->initial_audio_stream_info_ = this->speaker_->get_audio_stream_info();
-            this->initial_audio_stream_info_set_ = true;
-          }
-          this->speaker_->set_audio_stream_info(input_stream_info);
-          ESP_LOGI(TAG, "PARSE_JSON_BUF: Audio stream info configured on speaker for faster playback");
-          
-          // Start the speaker early for immediate readiness
-          ESP_LOGI(TAG, "PARSE_JSON_BUF: Starting speaker early for faster audio response");
-          this->speaker_->start();
+        // Configure the speaker with the correct input format
+        if (!this->initial_audio_stream_info_set_) {
+          this->initial_audio_stream_info_ = this->speaker_->get_audio_stream_info();
+          this->initial_audio_stream_info_set_ = true;
         }
         
-        ESP_LOGD(TAG, "PARSE_JSON_BUF: Conversation initialized - already in ON state");
+        // Set the input audio stream info for the resampler based on ElevenLabs format
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: Audio stream info configured on speaker for faster playback");
+        
+        // Start the speaker early for immediate readiness
+        ESP_LOGI(TAG, "PARSE_JSON_BUF: Starting speaker early for faster audio response");
+        this->speaker_->start();
       } else {
         ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_id in metadata");
       }
@@ -540,12 +510,16 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     return;
   }
   
-  // Log unknown message types for debugging
-  ESP_LOGW(TAG, "PARSE_JSON_BUF: Unknown message type: '%s'", type);
-  ESP_LOGD(TAG, "PARSE_JSON_BUF: Available fields in unknown message:");
-  for (JsonPair kv : root) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF:   - %s", kv.key().c_str());
+  if (strcmp(type, "mcp_connection_status") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing MCP connection status");
+    JsonObject status = root["mcp_connection_status"];
+    //TODO: handle MCP processing
+    return;
   }
+  
+  // Log unknown message types for debugging
+  std::string json_str = JsonDeserializer::to_string(root);
+  ESP_LOGW(TAG, "PARSE_JSON_BUF: Unknown message type: '%s', JSON: %s", type, json_str.c_str());
 }
 
 // Handles errors, logs details, and triggers error automations.

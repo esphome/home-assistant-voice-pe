@@ -1,3 +1,4 @@
+
 // json.h
 
 #pragma once
@@ -28,6 +29,9 @@ public:
     // Parses a JSON buffer and returns a unique_ptr to the document. Returns nullptr on error.
     static std::unique_ptr<BasicJsonDocument<PSRAMAllocator>> parse(const uint8_t* buffer, size_t length);
     static std::unique_ptr<BasicJsonDocument<PSRAMAllocator>> parse(const char* cstr);
+    
+    // Serialize a JsonObject to a std::string
+    static std::string to_string(const JsonObject& obj);
 };
 
 } // namespace elevenlabs_stream

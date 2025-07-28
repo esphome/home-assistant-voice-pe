@@ -8,7 +8,6 @@
 #include <string>
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
-#include <mbedtls/base64.h>
 
 namespace esphome {
 namespace elevenlabs_stream {

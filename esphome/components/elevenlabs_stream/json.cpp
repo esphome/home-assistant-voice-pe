@@ -1,3 +1,4 @@
+
 // json.cpp
 #include "json.h"
 #include <esp_heap_caps.h>
@@ -9,6 +10,11 @@ namespace elevenlabs_stream {
 
 static const char *TAG = "json";
 
+std::string JsonDeserializer::to_string(const JsonObject& obj) {
+  std::string out;
+  serializeJson(obj, out);
+  return out;
+}
 
 std::unique_ptr<BasicJsonDocument<PSRAMAllocator>> JsonDeserializer::parse(const uint8_t* buffer, size_t length) {
     auto json_document = std::make_unique<BasicJsonDocument<PSRAMAllocator>>(length + 1024 * 10); // Extra space for parsing overhead
