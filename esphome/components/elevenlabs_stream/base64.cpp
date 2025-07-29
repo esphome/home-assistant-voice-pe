@@ -4,6 +4,7 @@
 #include <string>
 #include <cstring>
 #include <memory>
+#include <esp_heap_caps.h>
 
 namespace esphome {
 namespace elevenlabs_stream {
@@ -32,8 +33,6 @@ std::string base64_encode(const uint8_t* data, size_t len) {
 }
 
 // Base64 decoding function with error handling, using unique_ptr for large buffer efficiency
-
-#include <esp_heap_caps.h>
 
 // Returns nullptr on failure, otherwise buffer must be freed by caller with heap_caps_free
 uint8_t* base64_decode(const char* base64_data, size_t& out_len) {

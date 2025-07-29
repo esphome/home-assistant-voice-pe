@@ -56,7 +56,6 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
     return false;
   }
 
-
   size_t decoded_len = 0;
   uint8_t* decoded = base64_decode(base64_data, decoded_len);
   if (!decoded || decoded_len == 0) {
@@ -65,22 +64,31 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   }
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", decoded_len);
 
-  size_t bytes_written = 0;
-
-  for (int retry=0; retry<5 && bytes_written==0; ++retry) {
-    bytes_written = speaker_->play(decoded, decoded_len);
-    if (bytes_written==0) delay(50);
+  size_t total_written = 0;
+  int retry = 0;
+  const int max_retries = 5;
+  while (total_written < decoded_len && retry < max_retries) {
+    this->set_speaker_stream_info_to_elevenlabs_format();
+    size_t written = speaker_->play(decoded + total_written, decoded_len - total_written);
+    if (written + total_written != decoded_len) {
+      ESP_LOGW(TAG, "DECODE_B64: Playback failed at offset %zu, retrying...", total_written);
+      delay(250);
+      ++retry;
+      continue;
+    }
+    
+    total_written += written;
+    retry = 0; // reset retry counter after successful write
   }
 
-  // Playback: play decoded audio directly
-  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer", bytes_written);
+  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer (expected %zu)", total_written, decoded_len);
 
   if (decoded) {
     heap_caps_free(decoded);
   }
 
-  if (bytes_written != decoded_len) {
-    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", decoded_len, bytes_written);
+  if (total_written != decoded_len) {
+    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", decoded_len, total_written);
     return false;
   }
 
@@ -121,18 +129,17 @@ void ElevenLabsStream::setup() {
 
   this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
-    this->set_timeout("audio_output_callback", 1000, [this]() {
+    this->set_timeout("audio_output_callback", 500, [this]() {
+      if(!this->speaker_is_active_) {
+        // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
+        ESP_LOGD(TAG, "Speaker session ended, switching to ElevenLabs format");
+        return;
+      }
+
       this->speaker_->stop();
 
       for (auto *trigger : this->on_listening_triggers_) {
           trigger->trigger();
-      }
-
-      if(!this->speaker_is_active_) {
-        // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
-        ESP_LOGD(TAG, "Speaker session ended, switching to ElevenLabs format");
-        this->set_speaker_stream_info_to_elevenlabs_format();
-        return;
       }
 
       // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
@@ -370,9 +377,9 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
 
           ESP_LOGI(TAG, 
             "PARSE_JSON_BUF: Initial audio stream info set: %d Hz, %d channels, %d bits per sample", 
-            this->initial_audio_stream_info_->get_sample_rate(),
-            this->initial_audio_stream_info_->get_channels(),
-            this->initial_audio_stream_info_->get_bits_per_sample());
+            this->initial_audio_stream_info_.get_sample_rate(),
+            this->initial_audio_stream_info_.get_channels(),
+            this->initial_audio_stream_info_.get_bits_per_sample());
         }
         
         // Set the input audio stream info for the resampler based on ElevenLabs format
