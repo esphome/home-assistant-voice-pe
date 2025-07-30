@@ -64,31 +64,15 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   }
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", decoded_len);
 
-  size_t total_written = 0;
-  int retry = 0;
-  const int max_retries = 5;
-  while (total_written < decoded_len && retry < max_retries) {
-    this->set_speaker_stream_info_to_elevenlabs_format();
-    size_t written = speaker_->play(decoded + total_written, decoded_len - total_written);
-    if (written + total_written != decoded_len) {
-      ESP_LOGW(TAG, "DECODE_B64: Playback failed at offset %zu, retrying...", total_written);
-      delay(250);
-      ++retry;
-      continue;
-    }
-    
-    total_written += written;
-    retry = 0; // reset retry counter after successful write
-  }
-
-  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer (expected %zu)", total_written, decoded_len);
+  size_t written = speaker_->play(decoded, decoded_len);
+  ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer (expected %zu)", written, decoded_len);
 
   if (decoded) {
     heap_caps_free(decoded);
   }
 
-  if (total_written != decoded_len) {
-    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", decoded_len, total_written);
+  if (written != decoded_len) {
+    ESP_LOGE(TAG, "DECODE_B64: Played bytes mismatch: expected %zu, got %zu", decoded_len, written);
     return false;
   }
 
@@ -132,21 +116,25 @@ void ElevenLabsStream::setup() {
     this->set_timeout("audio_output_callback", 500, [this]() {
       if(!this->speaker_is_active_) {
         // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
-        ESP_LOGD(TAG, "Speaker session ended, switching to ElevenLabs format");
+        ESP_LOGI(TAG, "Speaker session ended, switching to ElevenLabs format");
+
+        this->speaker_->stop();
+        this->set_speaker_stream_info_to_elevenlabs_format();
+        this->speaker_->start();
         return;
       }
 
+      // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
+      ESP_LOGI(TAG, "Speaker session ended, resetting to wake word format");
       this->speaker_->stop();
+      this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
+      this->speaker_->start();
+
+      this->speaker_is_active_ = false;
 
       for (auto *trigger : this->on_listening_triggers_) {
           trigger->trigger();
       }
-
-      // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
-      ESP_LOGD(TAG, "Speaker session ended, resetting to wake word format");
-      this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
-
-      this->speaker_is_active_ = false;
     });
   });
   
@@ -218,7 +206,7 @@ bool ElevenLabsStream::start_stream() {
       
       uint32_t current_time = millis();
       uint32_t time_since_connect_start = current_time - this->connection_start_time_;
-      uint32_t grace_period = 2000;
+      uint32_t grace_period = 2500;
 
       ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
 
@@ -228,16 +216,16 @@ bool ElevenLabsStream::start_stream() {
         [this]() {
           ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
 
-          ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
-          for (auto *trigger : this->on_start_triggers_) {
-            trigger->trigger();
-          }
-
           this->set_state(StreamState::ON);
           this->speaker_is_active_ = false; // Mark speaker as inactive
           
           ESP_LOGD(TAG, "SET_STATE: Starting microphone capture");
           this->microphone_->start();
+
+          ESP_LOGD(TAG, "SET_STATE: Triggering start events (%zu triggers)", this->on_start_triggers_.size());
+          for (auto *trigger : this->on_start_triggers_) {
+            trigger->trigger();
+          }
         });
     },
     [this]() { 

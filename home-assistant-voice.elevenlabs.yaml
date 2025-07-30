@@ -191,34 +191,25 @@ speaker:
     timeout: never
     audio_dac: aic3204_dac
 
-  # Virtual speakers to combine the announcement and media streams together into one output
-  - platform: mixer
-    id: mixing_speaker
-    output_speaker: i2s_audio_speaker
-    num_channels: 2
-    source_speakers:
-      - id: announcement_mixing_input
-        timeout: never
-      - id: media_mixing_input
-        timeout: never
-
-  # Virtual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
+  # Virtual speaker for ElevenLabs audio (long buffer)
   - platform: resampler
     id: announcement_resampling_speaker
-    output_speaker: announcement_mixing_input
+    output_speaker: i2s_audio_speaker
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1  # ElevenLabs sends mono audio
     buffer_duration: 60000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
     task_stack_in_psram: true
-    # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for mixer
-    
+    # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for hardware
+
+  # Virtual speaker for sound file playback (short buffer)
   - platform: resampler
-    id: media_resampling_speaker
-    output_speaker: media_mixing_input
+    id: soundfile_resampling_speaker
+    output_speaker: i2s_audio_speaker
     sample_rate: 48000
     bits_per_sample: 16
-    num_channels: 1  
+    num_channels: 1
+    buffer_duration: 1000ms  # Default buffer for short sound files
     task_stack_in_psram: true
 
 # Media player with sound files for testing speaker functionality
@@ -231,14 +222,9 @@ media_player:
     volume_min: 0.4
     volume_max: 0.95
     announcement_pipeline:
-      speaker: announcement_resampling_speaker
+      speaker: soundfile_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 1  # Stereo audio is unnecessary for announcements
-      sample_rate: 48000
-    media_pipeline:
-      speaker: media_resampling_speaker
-      format: FLAC     # FLAC is the least processor intensive codec
-      num_channels: 1
       sample_rate: 48000
     on_mute:
       - script.execute: control_leds
@@ -246,25 +232,6 @@ media_player:
       - script.execute: control_leds
     on_volume:
       - script.execute: control_leds
-    on_announcement:
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 20
-          duration: 0.0s
-    on_state:
-      if:
-        condition:
-          and:
-            - switch.is_off: timer_ringing
-            - not:
-                elevenlabs_stream.is_running:
-            - not:
-                media_player.is_announcing:
-        then:
-          - mixer_speaker.apply_ducking:
-              id: media_mixing_input
-              decibel_reduction: 0
-              duration: 1.0s
     files:
       - id: center_button_press_sound
         file: sounds/greetings_how_can_I_help.mp3
@@ -857,11 +824,6 @@ voice_assistant:
               priority: true
               sound_file: !lambda return id(error_cloud_expired);
   # When the voice assistant starts: Play a wake up sound, duck audio.
-  on_start:
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -886,11 +848,6 @@ voice_assistant:
     - wait_until:
         not:
           voice_assistant.is_running:
-    # Stop ducking audio.
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 0
-        duration: 1.0s
     # If the end happened because of an error, let the error phase on for a second
     - if:
         condition:
@@ -968,19 +925,9 @@ switch:
           then:
             media_player.stop:
               announcement: true
-      # Set back ducking ratio to zero
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 0
-          duration: 1.0s
       # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
-      # Duck audio
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 20
-          duration: 0.0s
       # Enable stop wake word
       - micro_wake_word.enable_model: stop
       # Ring timer
@@ -1057,18 +1004,18 @@ elevenlabs_stream:
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics  # Direct microphone reference
-  speaker: announcement_resampling_speaker  # Use announcement resampler for proper audio format conversion
+  speaker: announcement_resampling_speaker  # Use announcement resampler for ElevenLabs only
   on_start:
+    - micro_wake_word.stop:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
     - logger.log: "ElevenLabs stream started - audio streaming ON"
-    - micro_wake_word.stop:
   on_end:
+    - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
     - logger.log: "ElevenLabs stream ended - audio streaming OFF"
-    - micro_wake_word.start:
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
