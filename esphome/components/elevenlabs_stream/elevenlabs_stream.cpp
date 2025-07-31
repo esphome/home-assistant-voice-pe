@@ -64,7 +64,7 @@ bool ElevenLabsStream::decode_and_play_base64_audio(const char* base64_data) {
   }
   ESP_LOGD(TAG, "DECODE_B64: Decoded %zu bytes of audio (PSRAM)", decoded_len);
 
-  size_t written = speaker_->play(decoded, decoded_len);
+  size_t written = elevenlabs_speaker_->play(decoded, decoded_len);
   ESP_LOGD(TAG, "DECODE_B64: Played %zu bytes from decoded buffer (expected %zu)", written, decoded_len);
 
   if (decoded) {
@@ -91,7 +91,7 @@ void ElevenLabsStream::set_speaker_stream_info_to_elevenlabs_format() {
   else if (this->agent_output_audio_format_ == "pcm_48000") sample_rate = 48000;
 
   esphome::audio::AudioStreamInfo info(16, 1, sample_rate);
-  this->speaker_->set_audio_stream_info(info);
+  elevenlabs_speaker_->set_audio_stream_info(info);
 }
 
 void ElevenLabsStream::setup() {
@@ -111,24 +111,29 @@ void ElevenLabsStream::setup() {
     this->client_ = new ElevenLabsClient(this->agent_id_, this->api_key_);
   }
 
-  this->speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
+    elevenlabs_speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
-    this->set_timeout("audio_output_callback", 500, [this]() {
+    this->set_timeout("audio_output_callback", 100, [this]() {
+      this->cancel_timeout("reset_speaker");
       if(!this->speaker_is_active_) {
         // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
         ESP_LOGI(TAG, "Speaker session ended, switching to ElevenLabs format");
 
-        this->speaker_->stop();
-        this->set_speaker_stream_info_to_elevenlabs_format();
-        this->speaker_->start();
+        this->set_timeout("reset_speaker", 1000, [this]() {
+          this->elevenlabs_speaker_->stop();
+          this->set_speaker_stream_info_to_elevenlabs_format();
+          this->elevenlabs_speaker_->start();
+        });
         return;
       }
 
       // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
       ESP_LOGI(TAG, "Speaker session ended, resetting to wake word format");
-      this->speaker_->stop();
-      this->speaker_->set_audio_stream_info(this->initial_audio_stream_info_);
-      this->speaker_->start();
+        this->set_timeout("reset_speaker", 1000, [this]() {
+        this->activation_speaker->stop();
+        this->activation_speaker->set_audio_stream_info(this->activation_speaker_audio_stream_info);
+        this->activation_speaker->start();
+      });
 
       this->speaker_is_active_ = false;
 
@@ -206,7 +211,7 @@ bool ElevenLabsStream::start_stream() {
       
       uint32_t current_time = millis();
       uint32_t time_since_connect_start = current_time - this->connection_start_time_;
-      uint32_t grace_period = 2500;
+      uint32_t grace_period = 1750;
 
       ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
 
@@ -359,15 +364,15 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         }
           
         // Configure the speaker with the correct input format
-        if (!this->initial_audio_stream_info_set_) {
-          this->initial_audio_stream_info_ = this->speaker_->get_audio_stream_info();
-          this->initial_audio_stream_info_set_ = true;
+        if (!this->activation_speaker_audio_stream_infoset_) {
+          this->activation_speaker_audio_stream_info = this->activation_speaker->get_audio_stream_info();
+          this->activation_speaker_audio_stream_infoset_ = true;
 
           ESP_LOGI(TAG, 
             "PARSE_JSON_BUF: Initial audio stream info set: %d Hz, %d channels, %d bits per sample", 
-            this->initial_audio_stream_info_.get_sample_rate(),
-            this->initial_audio_stream_info_.get_channels(),
-            this->initial_audio_stream_info_.get_bits_per_sample());
+            this->activation_speaker_audio_stream_info.get_sample_rate(),
+            this->activation_speaker_audio_stream_info.get_channels(),
+            this->activation_speaker_audio_stream_info.get_bits_per_sample());
         }
         
         // Set the input audio stream info for the resampler based on ElevenLabs format

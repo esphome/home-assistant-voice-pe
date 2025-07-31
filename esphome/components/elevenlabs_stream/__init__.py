@@ -18,7 +18,8 @@ CONF_API_KEY = "api_key"
 CONF_ON_START = "on_start"
 CONF_ON_END = "on_end"
 CONF_MICROPHONE = "microphone"
-CONF_SPEAKER = "speaker"
+CONF_ELEVENLABS_SPEAKER = "elevenlabs_speaker"
+CONF_ACTIVATION_SPEAKER = "activation_speaker"
 
 elevenlabs_stream_ns = cg.esphome_ns.namespace("elevenlabs_stream")
 ElevenLabsStream = elevenlabs_stream_ns.class_("ElevenLabsStream", cg.Component)
@@ -60,8 +61,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(ElevenLabsStream),
         cv.Required(CONF_AGENT_ID): cv.templatable(cv.string),
         cv.Optional(CONF_API_KEY): cv.templatable(cv.string),
-        cv.Optional(CONF_MICROPHONE): cv.use_id(cg.Parented),  # Back to direct microphone reference
-        cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),    # Use proper speaker type
+        cv.Optional(CONF_MICROPHONE): cv.use_id(cg.Parented),
+        cv.Optional(CONF_ELEVENLABS_SPEAKER): cv.use_id(speaker.Speaker),
+        cv.Optional(CONF_ACTIVATION_SPEAKER): cv.use_id(speaker.Speaker),
         cv.Optional(CONF_ON_START): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamStartTrigger),
@@ -77,7 +79,6 @@ CONFIG_SCHEMA = cv.Schema(
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamErrorTrigger),
             }
         ),
-        # New schema entries for additional triggers
         cv.Optional("on_listening"): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ElevenLabsStreamListeningTrigger),
@@ -115,10 +116,15 @@ async def to_code(config):
         mic = await cg.get_variable(config[CONF_MICROPHONE])
         cg.add(var.set_microphone(mic))
 
-    # Set speaker (if provided)
-    if CONF_SPEAKER in config:
-        speaker = await cg.get_variable(config[CONF_SPEAKER])
-        cg.add(var.set_speaker(speaker))
+    # Set ElevenLabs speaker (if provided)
+    if CONF_ELEVENLABS_SPEAKER in config:
+        elevenlabs_speaker = await cg.get_variable(config[CONF_ELEVENLABS_SPEAKER])
+        cg.add(var.set_elevenlabs_speaker(elevenlabs_speaker))
+
+    # Set activation speaker (if provided)
+    if CONF_ACTIVATION_SPEAKER in config:
+        activation_speaker = await cg.get_variable(config[CONF_ACTIVATION_SPEAKER])
+        cg.add(var.set_activation_speaker(activation_speaker))
 
     # Register triggers
     for conf in config.get(CONF_ON_START, []):

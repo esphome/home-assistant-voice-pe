@@ -198,7 +198,7 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1  # ElevenLabs sends mono audio
-    buffer_duration: 60000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
+    buffer_duration: 30000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
     task_stack_in_psram: true
     # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for hardware
 
@@ -209,7 +209,7 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1
-    buffer_duration: 1000ms  # Default buffer for short sound files
+    buffer_duration: 3000ms  # Default buffer for short sound files
     task_stack_in_psram: true
 
 # Media player with sound files for testing speaker functionality
@@ -675,28 +675,6 @@ script:
           }
           id(is_timer_active) = output;
 
-  # Script used activate the stop word if the TTS step is long.
-  # Why is this wrapped on a script?
-  #   Becasue we want to stop the sequence if the TTS step is faster than that.
-  #   This allows us to prevent having the deactivation of the stop word before its own activation.
-  - id: activate_stop_word_once
-    then:
-      - delay: 1s
-      # Enable stop wake word
-      - if:
-          condition:
-            switch.is_off: timer_ringing
-          then:
-            - micro_wake_word.enable_model: stop
-            - wait_until:
-                not:
-                  media_player.is_announcing:
-            - if:
-                condition:
-                  switch.is_off: timer_ringing
-                then:
-                  - micro_wake_word.disable_model: stop
-
 # Simple global variables for testing
 globals:
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
@@ -841,8 +819,6 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
-          - script.execute: activate_stop_word_once
   # When the voice assistant ends ...
   on_end:
     - wait_until:
@@ -916,7 +892,6 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_off:
       # Disable stop wake word
-      - micro_wake_word.disable_model: stop
       - script.execute: disable_repeat
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
@@ -928,8 +903,6 @@ switch:
       # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
-      # Enable stop wake word
-      - micro_wake_word.enable_model: stop
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED
@@ -955,9 +928,6 @@ micro_wake_word:
   models:
     - model: hey_jarvis
       id: hey_jarvis
-    - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
-      id: stop
-      internal: true
   vad:
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
@@ -1004,7 +974,8 @@ elevenlabs_stream:
   agent_id: ${elevenlabs_agent_id}
   api_key: ${elevenlabs_api_key}
   microphone: i2s_mics  # Direct microphone reference
-  speaker: announcement_resampling_speaker  # Use announcement resampler for ElevenLabs only
+  elevenlabs_speaker: announcement_resampling_speaker  # Use announcement resampler for ElevenLabs only
+  activation_speaker: soundfile_resampling_speaker  # Use the media resampler for activation sound
   on_start:
     - micro_wake_word.stop:
     - lambda: id(init_in_progress) = false;

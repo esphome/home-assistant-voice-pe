@@ -32,7 +32,7 @@ enum class StreamState {
 class ElevenLabsStream : public Component {
   // Sets the speaker's audio stream info based on the agent output format, if available.
   void set_speaker_stream_info_to_elevenlabs_format();
- public:
+public:
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -41,7 +41,8 @@ class ElevenLabsStream : public Component {
   void set_agent_id(const std::string &agent_id) { this->agent_id_ = agent_id; }
   void set_api_key(const std::string &api_key) { this->api_key_ = api_key; }
   void set_microphone(microphone::Microphone *microphone) { this->microphone_ = microphone; }
-  void set_speaker(speaker::Speaker *speaker) { this->speaker_ = speaker; }
+  void set_elevenlabs_speaker(speaker::Speaker *speaker) { this->elevenlabs_speaker_ = speaker; }
+  void set_activation_speaker(speaker::Speaker *speaker) { this->activation_speaker_ = speaker; }
 
   bool start_stream();
   void stop_stream();
@@ -79,12 +80,13 @@ class ElevenLabsStream : public Component {
   void send_ping();
   void send_audio_chunk(const std::vector<int16_t> &audio_data);
   void set_state(StreamState new_state);
-  bool decode_and_play_base64_audio(const char* base64_data);
+  bool decode_and_play_base64_audio(const char* base64_data, bool is_activation_audio = false);
 
   std::string agent_id_;
   std::string api_key_;
   microphone::Microphone *microphone_{nullptr};
-  speaker::Speaker *speaker_{nullptr};
+  speaker::Speaker *elevenlabs_speaker_{nullptr};
+  speaker::Speaker *activation_speaker_{nullptr};
   ElevenLabsClient* client_ = nullptr;
   StreamState state_{StreamState::OFF};
 
@@ -131,8 +133,8 @@ class ElevenLabsStream : public Component {
   float last_vad_score_ = 0.0f;
 
   // Initial audio stream info
-  esphome::audio::AudioStreamInfo initial_audio_stream_info_{};
-  bool initial_audio_stream_info_set_ = false;
+  esphome::audio::AudioStreamInfo activation_speaker_audio_stream_info{};
+  bool activation_speaker_audio_stream_infoset_ = false;
 };
 
 // Actions
