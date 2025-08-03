@@ -195,6 +195,14 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+  # Announcement Animation Switch.
+  - platform: template
+    id: announce_anim
+    name: Lights On Announcement
+    icon: "mdi:plus-circle-outline"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
@@ -1499,6 +1507,30 @@ media_player:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
+      # Play 'replying' ring animation during unprompted announcement
+      - if:
+          condition:
+            and:
+            - switch.is_on: announce_anim
+            - lambda: return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};
+          then:
+            # Avoid triggering during on_listening or stt_vad_start event
+            - delay: 1100ms
+            - if:
+                condition:
+                  and:
+                    - not:
+                        lambda: return id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id};
+                    - not:
+                        lambda: return id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id};
+                then:
+                  - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+                  - script.execute: control_leds
+                  - wait_until:
+                      not:
+                        media_player.is_announcing:
+                  - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+                  - script.execute: control_leds
     on_state:
       if:
         condition:
