@@ -80,7 +80,7 @@ public:
   void send_ping();
   void send_audio_chunk(const std::vector<int16_t> &audio_data);
   void set_state(StreamState new_state);
-  bool decode_and_play_base64_audio(const char* base64_data, bool is_activation_audio = false);
+  bool decode_and_play_base64_audio(const char* base64_data);
 
   std::string agent_id_;
   std::string api_key_;

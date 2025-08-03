@@ -111,29 +111,15 @@ void ElevenLabsStream::setup() {
     this->client_ = new ElevenLabsClient(this->agent_id_, this->api_key_);
   }
 
-    elevenlabs_speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
+  elevenlabs_speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
-    this->set_timeout("audio_output_callback", 100, [this]() {
-      this->cancel_timeout("reset_speaker");
+    this->set_timeout("audio_output_callback", 1000, [this]() {
       if(!this->speaker_is_active_) {
-        // If the speaker session that ended is from the wake sound, we need to switch to an ElevenLabs format.
-        ESP_LOGI(TAG, "Speaker session ended, switching to ElevenLabs format");
-
-        this->set_timeout("reset_speaker", 1000, [this]() {
-          this->elevenlabs_speaker_->stop();
-          this->set_speaker_stream_info_to_elevenlabs_format();
-          this->elevenlabs_speaker_->start();
-        });
         return;
       }
 
       // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
       ESP_LOGI(TAG, "Speaker session ended, resetting to wake word format");
-        this->set_timeout("reset_speaker", 1000, [this]() {
-        this->activation_speaker->stop();
-        this->activation_speaker->set_audio_stream_info(this->activation_speaker_audio_stream_info);
-        this->activation_speaker->start();
-      });
 
       this->speaker_is_active_ = false;
 
@@ -141,6 +127,7 @@ void ElevenLabsStream::setup() {
           trigger->trigger();
       }
     });
+
   });
   
   ESP_LOGD(TAG, "SETUP: Initial state set to %d (IDLE)", static_cast<int>(this->state_));
@@ -157,6 +144,20 @@ void ElevenLabsStream::loop() {
   static uint32_t last_watchdog_feed = 0;
   static uint32_t loop_count = 0;
   loop_count++;
+
+  if(this->speaker_is_active_) {
+    if (!this->activation_speaker_->is_running()) {
+      ESP_LOGD(TAG, "LOOP: Activation speaker not running, starting it now");
+      this->activation_speaker_->start();
+      return;
+    }
+
+    if (!this->elevenlabs_speaker_->is_running()) {
+      ESP_LOGD(TAG, "LOOP: ElevenLabs speaker not running, starting it now");
+      this->elevenlabs_speaker_->start();
+      return;
+    }
+  }
   
   if (millis() - last_watchdog_feed > 1000) { // Feed every second
     esp_task_wdt_reset();
@@ -166,7 +167,7 @@ void ElevenLabsStream::loop() {
   }
   
   // Send periodic heartbeat when connected
-  if (this->client_ && this->state_ == StreamState::ON) {
+  if (this->client_ && this->state_ == StreamState::ON && !this->speaker_is_active_) {
     uint32_t heartbeat_elapsed = millis() - this->last_heartbeat_;
     if (heartbeat_elapsed > 10000) {  // 10 seconds instead of 20
       ESP_LOGD(TAG, "LOOP: Sending heartbeat ping after %dms", heartbeat_elapsed);
@@ -183,7 +184,6 @@ bool ElevenLabsStream::start_stream() {
   ESP_LOGI(TAG, "=== START_STREAM CALLED ===");
   ESP_LOGD(TAG, "START_STREAM: Current state=%s", stream_state_to_string(this->state_));
   ESP_LOGD(TAG, "START_STREAM: Agent ID='%s'", this->agent_id_.c_str());
-  ESP_LOGD(TAG, "START_STREAM: Microphone=%p, Speaker=%p", this->microphone_, this->speaker_);
 
   this->connection_start_time_ = millis();
   ESP_LOGD(TAG, "START_STREAM: Connection start time set to %d", this->connection_start_time_);
@@ -210,14 +210,14 @@ bool ElevenLabsStream::start_stream() {
       this->send_conversation_init();
       
       uint32_t current_time = millis();
-      uint32_t time_since_connect_start = current_time - this->connection_start_time_;
-      uint32_t grace_period = 1750;
+      int time_since_connect_start = current_time - this->connection_start_time_;
+      int grace_period = 1750;
 
       ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
 
       this->set_timeout(
         "enable_microphone", 
-        std::max(1u, static_cast<unsigned int>(grace_period - time_since_connect_start)),
+        std::max(1, grace_period - time_since_connect_start),
         [this]() {
           ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
 
@@ -289,18 +289,14 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
   }
   if (should_renew) {
     ESP_LOGI(TAG, "RENEW: Renewing signed URL for fast connections...");
-    if (this->state_ == StreamState::OFF) {
-      std::string signed_url;
-      if (this->client_->get_signed_url(signed_url)) {
-        this->last_signed_url_renewal_ = current_time;
-        this->signed_url_ = signed_url;
-        ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
-      } else {
-        ESP_LOGW(TAG, "RENEW: Failed to renew signed URL");
-        this->signed_url_.clear();
-      }
+    std::string signed_url;
+    if (this->client_->get_signed_url(signed_url)) {
+      this->last_signed_url_renewal_ = current_time;
+      this->signed_url_ = signed_url;
+      ESP_LOGI(TAG, "RENEW: Signed URL renewed successfully");
     } else {
-      ESP_LOGD(TAG, "RENEW: Deferring renewal - stream is active (state=ON)");
+      ESP_LOGW(TAG, "RENEW: Failed to renew signed URL");
+      this->signed_url_.clear();
     }
   }
 }
@@ -365,7 +361,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
           
         // Configure the speaker with the correct input format
         if (!this->activation_speaker_audio_stream_infoset_) {
-          this->activation_speaker_audio_stream_info = this->activation_speaker->get_audio_stream_info();
+          this->activation_speaker_audio_stream_info = this->activation_speaker_->get_audio_stream_info();
           this->activation_speaker_audio_stream_infoset_ = true;
 
           ESP_LOGI(TAG, 
@@ -373,14 +369,19 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
             this->activation_speaker_audio_stream_info.get_sample_rate(),
             this->activation_speaker_audio_stream_info.get_channels(),
             this->activation_speaker_audio_stream_info.get_bits_per_sample());
+        
+          // while the speaker is running, do not change the audio stream info
+          while (this->activation_speaker_->is_running() || this->elevenlabs_speaker_->is_running() || this->activation_speaker_->has_buffered_data() || 
+                 this->elevenlabs_speaker_->has_buffered_data())
+          {
+            ESP_LOGD(TAG, "PARSE_JSON_BUF: Waiting for activation speaker to stop before changing audio stream info");
+            delay(100); // Wait until the speaker is stopped
+          }
+          
+          // Start the speaker early for immediate readiness
+          ESP_LOGI(TAG, "PARSE_JSON_BUF: Starting speaker early for faster audio response");
+          this->set_speaker_stream_info_to_elevenlabs_format();
         }
-        
-        // Set the input audio stream info for the resampler based on ElevenLabs format
-        ESP_LOGI(TAG, "PARSE_JSON_BUF: Audio stream info configured on speaker for faster playback");
-        
-        // Start the speaker early for immediate readiness
-        ESP_LOGI(TAG, "PARSE_JSON_BUF: Starting speaker early for faster audio response");
-        this->speaker_->start();
       } else {
         ESP_LOGW(TAG, "PARSE_JSON_BUF: No conversation_id in metadata");
       }
@@ -462,24 +463,24 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     JsonObject vad = root["vad_score_event"];
     if (vad) {
       float vad_score = vad["vad_score"] | 0.0f;
-      if(vad_score <= 0.0f && this->speaker_is_active_) {
+      if(this->speaker_is_active_) {
         return; // Skip invalid scores
       }
 
-      float led_threshold = 0.25f;
-      if(vad_score > led_threshold) {
-        if(this->last_vad_score_ <= led_threshold) {
-          for (auto *trigger : this->on_listening_triggers_) {
-              trigger->trigger();
-          }
-        }
-      } else {
-        if(this->last_vad_score_ > led_threshold) {
-          for (auto *trigger : this->on_processing_triggers_) {
-              trigger->trigger();
-          }
-        }
-      }
+      // float led_threshold = 0.25f;
+      // if(vad_score > led_threshold) {
+      //   if(this->last_vad_score_ <= led_threshold) {
+      //     for (auto *trigger : this->on_listening_triggers_) {
+      //         trigger->trigger();
+      //     }
+      //   }
+      // } else {
+      //   if(this->last_vad_score_ > led_threshold) {
+      //     for (auto *trigger : this->on_processing_triggers_) {
+      //         trigger->trigger();
+      //     }
+      //   }
+      // }
 
       this->last_vad_score_ = vad_score;
 
@@ -522,15 +523,28 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
     return;
   }
   
+  std::string json_str = JsonDeserializer::to_string(root);
   if (strcmp(type, "mcp_connection_status") == 0) {
-    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing MCP connection status");
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing MCP connection status: '%s'", json_str.c_str());
     JsonObject status = root["mcp_connection_status"];
     //TODO: handle MCP processing
     return;
   }
+
+  if(strcmp(type, "agent_tool_response") == 0) {
+    ESP_LOGD(TAG, "PARSE_JSON_BUF: Processing agent_tool_response: '%s'", json_str.c_str());
+    JsonObject tool_response = root["agent_tool_response"];
+    if (tool_response) {
+      const char* tool_name = tool_response["tool_name"];
+      ESP_LOGD(TAG, "PARSE_JSON_BUF: Tool response - Name: %s", 
+               tool_name ? tool_name : "NULL");
+    } else {
+      ESP_LOGW(TAG, "PARSE_JSON_BUF: No agent_tool_response_event found");
+    }
+    return;
+  }
   
   // Log unknown message types for debugging
-  std::string json_str = JsonDeserializer::to_string(root);
   ESP_LOGW(TAG, "PARSE_JSON_BUF: Unknown message type: '%s', JSON: %s", type, json_str.c_str());
 }
 

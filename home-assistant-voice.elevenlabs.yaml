@@ -198,8 +198,10 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1  # ElevenLabs sends mono audio
-    buffer_duration: 30000ms  # Increased from default 500ms to handle large ElevenLabs audio chunks
+    buffer_duration: 60000ms
     task_stack_in_psram: true
+    filters: 2
+    taps: 16   # Keep default for quality balance
     # Input will be 44.1kHz mono from ElevenLabs, output will be 48kHz mono for hardware
 
   # Virtual speaker for sound file playback (short buffer)
@@ -209,8 +211,10 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
     num_channels: 1
-    buffer_duration: 3000ms  # Default buffer for short sound files
+    buffer_duration: 3000ms
     task_stack_in_psram: true
+    filters: 2
+    taps: 16   # Keep default for quality balance
 
 # Media player with sound files for testing speaker functionality
 media_player:
@@ -981,35 +985,19 @@ elevenlabs_stream:
     - lambda: id(init_in_progress) = false;
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
-    - logger.log: "ElevenLabs stream started - audio streaming ON"
   on_end:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
-    - logger.log: "ElevenLabs stream ended - audio streaming OFF"
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
-    - logger.log: "ElevenLabs listening"
   on_processing:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
-    - logger.log: "ElevenLabs processing"
   on_replying:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: control_leds
-    - logger.log: "ElevenLabs replying"
-  on_error:
-    - lambda: |
-        if (!id(init_in_progress)) {
-          id(voice_assistant_phase) = 11;
-        }
-    - logger.log: 
-        format: "ElevenLabs error: %s"
-        args: ['error_message']
-    - delay: 1s
-    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-    - micro_wake_word.start:
 
 # Test button to trigger stream and test speaker
 binary_sensor:
