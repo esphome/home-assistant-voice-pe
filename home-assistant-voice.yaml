@@ -1511,8 +1511,8 @@ media_player:
       - if:
           condition:
             and:
-            - switch.is_on: announce_anim
-            - lambda: return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};
+              - switch.is_on: announce_anim
+              - lambda: return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};
           then:
             # Avoid triggering during on_listening or stt_vad_start event
             - delay: 1100ms
