@@ -195,6 +195,20 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+
+  # New: Option to play processing sound when assistant is thinking
+  - platform: template
+    id: play_processing_sound
+    name: "Play processing sound"
+    icon: "mdi:music-note"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: control_leds
+    on_turn_off:
+      - script.execute: control_leds
+
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
@@ -1705,7 +1719,6 @@ voice_assistant:
   on_start:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
-        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
         duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
@@ -1716,6 +1729,16 @@ voice_assistant:
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+    # Play optional processing sound if enabled
+    - if:
+        condition:
+          lambda: 'return id(play_processing_sound).state;'
+        then:
+          - script.execute:
+              id: play_sound
+              parameters:
+                priority: true
+                sound_file: "sounds/processing.wav"
   on_intent_progress:
     - if:
         condition:
