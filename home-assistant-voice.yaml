@@ -1560,6 +1560,8 @@ media_player:
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
       - id: error_cloud_expired
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
+      - id: processing_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav
 
 voice_kit:
   id: voice_kit_component
@@ -1719,6 +1721,7 @@ voice_assistant:
   on_start:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
+        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
         duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
@@ -1738,7 +1741,7 @@ voice_assistant:
               id: play_sound
               parameters:
                 priority: true
-                sound_file: "sounds/processing.wav"
+                sound_file: !lambda return id(processing_sound);
   on_intent_progress:
     - if:
         condition:
