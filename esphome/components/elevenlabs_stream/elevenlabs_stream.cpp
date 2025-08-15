@@ -113,7 +113,7 @@ void ElevenLabsStream::setup() {
 
   elevenlabs_speaker_->add_audio_output_callback([this](uint32_t _a, int64_t _b) {
     this->cancel_timeout("audio_output_callback");
-    this->set_timeout("audio_output_callback", 1000, [this]() {
+    this->set_timeout("audio_output_callback", 100, [this]() {
       if(!this->speaker_is_active_) {
         return;
       }
@@ -121,6 +121,7 @@ void ElevenLabsStream::setup() {
       // If the speaker session that ended is from ElevenLabs, we need to reset the speaker stream info to the wake sound format.
       ESP_LOGI(TAG, "Speaker session ended, resetting to wake word format");
 
+      ESP_LOGI(TAG, "SPEAKER_CALLBACK: Setting speaker_is_active_ = false");
       this->speaker_is_active_ = false;
 
       for (auto *trigger : this->on_listening_triggers_) {
@@ -207,17 +208,23 @@ bool ElevenLabsStream::start_stream() {
       this->parse_json_message_from_buffer(buffer, length); 
     },
     [this]() { 
-      this->send_conversation_init();
+      this->set_timeout(
+        "send_conversation_init", 
+        1,
+        [this]() {
+          this->send_conversation_init();
+        });
       
-      uint32_t current_time = millis();
+      int current_time = millis();
       int time_since_connect_start = current_time - this->connection_start_time_;
       int grace_period = 1750;
+      int timeout_duration = std::max(1, grace_period - time_since_connect_start);
 
-      ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms", grace_period - time_since_connect_start);
+      ESP_LOGD(TAG, "WS_EVENT: Starting microphone enable timeout: %u ms, %u ms grace period, %u ms since connection start, %u ms current time", timeout_duration, grace_period, time_since_connect_start, current_time);
 
       this->set_timeout(
         "enable_microphone", 
-        std::max(1, grace_period - time_since_connect_start),
+        timeout_duration,
         [this]() {
           ESP_LOGD(TAG, "WS_EVENT: Setting state to ON");
 
@@ -252,19 +259,30 @@ bool ElevenLabsStream::start_stream() {
 void ElevenLabsStream::stop_stream() {
   ESP_LOGI(TAG, "=== STOP_STREAM CALLED ===");
   ESP_LOGI(TAG, "STOP_STREAM: Stopping ElevenLabs stream...");
+  
+  // Cancel any pending timeouts to prevent issues on restart
+  this->cancel_timeout("enable_microphone");
+  this->cancel_timeout("audio_output_callback");
+  
+  // Stop microphone first to prevent any interference during cleanup
   if (this->microphone_ && this->microphone_->is_running()) {
     ESP_LOGD(TAG, "STOP_STREAM: Stopping microphone capture");
     this->microphone_->stop();
     ESP_LOGD(TAG, "STOP_STREAM: Microphone stopped");
   }
+  
+  // Reset speaker state completely
   this->speaker_is_active_ = false;
   this->speaker_start_time_ = 0;
   this->speaker_end_time_ = 0;
   this->accumulated_duration_ms_ = 0;
   ESP_LOGD(TAG, "STOP_STREAM: Speaker activity tracking reset");
+  
+  // Disconnect WebSocket client
   if (this->client_) {
     this->client_->disconnect();
   }
+  
   this->set_state(StreamState::OFF);
   ESP_LOGD(TAG, "STOP_STREAM: Triggering end events (%zu triggers)", this->on_end_triggers_.size());
   for (auto *trigger : this->on_end_triggers_) {
@@ -301,14 +319,16 @@ void ElevenLabsStream::renew_signed_url_if_needed() {
   }
 }
 
-void ElevenLabsStream::send_websocket_message(const std::string &message) {
+bool ElevenLabsStream::send_websocket_message(const std::string &message) {
   if (!this->client_ || !this->client_->is_connected() || message.empty()) {
     ESP_LOGW(TAG, "SEND_WS_MSG: Cannot send message - WebSocket not connected or message empty");
-    return;
+    return false;
   }
   if (!this->client_->send_message(message)) {
     ESP_LOGE(TAG, "SEND_WS_MSG: Failed to send WebSocket message");
+    return false;
   }
+  return true;
 }
 
 void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, size_t length) {
@@ -405,6 +425,7 @@ void ElevenLabsStream::parse_json_message_from_buffer(const uint8_t *buffer, siz
         this->last_audio_response_time_ = millis();
 
         if(!this->speaker_is_active_) {
+          ESP_LOGI(TAG, "AUDIO_EVENT: Setting speaker_is_active_ = true");
           this->speaker_is_active_ = true;
           
           for (auto *trigger : this->on_replying_triggers_) {
@@ -621,10 +642,21 @@ void ElevenLabsStream::send_ping() {
 }
 
 void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) {
+  // Periodic logging to debug microphone state
+  static uint32_t last_debug_log = 0;
+  if (millis() - last_debug_log > 5000) { // Log every 5 seconds
+    ESP_LOGD(TAG, "HANDLE_MIC: Debug - state=%s, speaker_is_active_=%s, activation_speaker_running=%s",
+             this->state_ == StreamState::ON ? "ON" : "OFF",
+             this->speaker_is_active_ ? "true" : "false",
+             (this->activation_speaker_ && this->activation_speaker_->is_running()) ? "true" : "false");
+    last_debug_log = millis();
+  }
+
   // Only process microphone data if stream is ON, websocket is connected, and data is present
   if (this->state_ != StreamState::ON || !this->client_ || !this->client_->is_connected() || data.empty()) {
-    ESP_LOGV(TAG, "HANDLE_MIC: Skipping - state=%s, client connected=%s, data_empty=%s",
+    ESP_LOGD(TAG, "HANDLE_MIC: Skipping - state=%s, client=%s, client connected=%s, data_empty=%s",
              this->state_ == StreamState::ON ? "ON" : "OFF",
+             this->client_ ? "EXISTS" : "NULL",
              this->client_ && this->client_->is_connected() ? "YES" : "NO",
              data.empty() ? "YES" : "NO");
     return;
@@ -632,27 +664,62 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
 
   // Block microphone input if speaker is active or agent audio is playing
   if (this->speaker_is_active_) {
-    ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active or agent audio playing");
+    ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - speaker is active (speaker_is_active_=%s)", 
+             this->speaker_is_active_ ? "true" : "false");
+    return;
+  }
+
+  // Block microphone input if media player is announcing (wake sounds, etc.)
+  // This prevents audio interference during sound playback
+  if (this->activation_speaker_ && this->activation_speaker_->has_buffered_data()) {
+    ESP_LOGV(TAG, "HANDLE_MIC: Microphone blocked - activation speaker is running");
+    return;
+  }
+
+  // Validate input data size (must be multiple of 4 for 32-bit samples)
+  if (data.size() % 4 != 0) {
+    ESP_LOGW(TAG, "HANDLE_MIC: Invalid data size %zu, not multiple of 4", data.size());
     return;
   }
 
   size_t num_samples_32bit = data.size() / 4;
   const int32_t* samples_32bit = reinterpret_cast<const int32_t*>(data.data());
+  
+  // Pre-allocate or reuse buffers to avoid repeated allocations
   std::vector<int16_t> audio_samples;
   audio_samples.reserve(num_samples_32bit);
+  
+  // Convert 32-bit samples to 16-bit
   for (size_t i = 0; i < num_samples_32bit; i++) {
     int16_t sample16 = static_cast<int16_t>(samples_32bit[i] >> 16);
     audio_samples.push_back(sample16);
   }
 
   // Convert stereo to mono by averaging each left/right sample pair
+  // Handle odd number of samples safely
   std::vector<int16_t> mono_samples;
-  mono_samples.reserve(audio_samples.size() / 2);
-  for (size_t i = 0; i + 1 < audio_samples.size(); i += 2) {
-    int16_t left = audio_samples[i];
-    int16_t right = audio_samples[i + 1];
-    int16_t mono = (left + right) / 2;
+  size_t stereo_pairs = audio_samples.size() / 2;
+  mono_samples.reserve(stereo_pairs);
+  
+  for (size_t i = 0; i < stereo_pairs; i++) {
+    int16_t left = audio_samples[i * 2];
+    int16_t right = audio_samples[i * 2 + 1];
+    
+    // Prevent overflow in addition by using int32_t for intermediate calculation
+    int32_t sum = static_cast<int32_t>(left) + static_cast<int32_t>(right);
+    int16_t mono = static_cast<int16_t>(sum / 2);
     mono_samples.push_back(mono);
+  }
+
+  // Log warning if we had odd number of samples (data loss)
+  if (audio_samples.size() % 2 != 0) {
+    ESP_LOGW(TAG, "HANDLE_MIC: Odd number of samples (%zu), last sample dropped", audio_samples.size());
+  }
+
+  // Validate we have processed samples
+  if (mono_samples.empty()) {
+    ESP_LOGW(TAG, "HANDLE_MIC: No mono samples produced from %zu input samples", audio_samples.size());
+    return;
   }
 
   // Convert audio data to bytes
@@ -662,15 +729,21 @@ void ElevenLabsStream::handle_microphone_data(const std::vector<uint8_t> &data) 
   // Encode audio as base64 for WebSocket transmission
   std::string audio_base64 = base64_encode(audio_bytes, audio_size);
   if (audio_base64.empty()) {
-    ESP_LOGE(TAG, "SEND_AUDIO: Failed to encode audio data to base64");
+    ESP_LOGE(TAG, "HANDLE_MIC: Failed to encode %zu bytes of audio data to base64", audio_size);
     return;
   }
+
+  ESP_LOGV(TAG, "HANDLE_MIC: Encoded %zu mono samples (%zu bytes) to base64 (%zu chars)", 
+           mono_samples.size(), audio_size, audio_base64.length());
 
   // Send as user_audio_chunk according to protocol
   std::string message = json::build_json([&audio_base64](JsonObject root) {
     root["user_audio_chunk"] = audio_base64;
   });
-  this->send_websocket_message(message);
+  
+  if (!this->send_websocket_message(message)) {
+    ESP_LOGW(TAG, "HANDLE_MIC: Failed to send audio message via websocket");
+  }
 }
 
 void ElevenLabsStream::set_state(StreamState new_state) {

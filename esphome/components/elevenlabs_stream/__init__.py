@@ -190,5 +190,5 @@ async def elevenlabs_stream_stop_to_code(config, action_id, template_arg, args):
 async def elevenlabs_stream_is_running_to_code(config, condition_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     # Accept & ignore any Ts... from the surrounding trigger
-    lambda_code = f"[=](auto&&...) -> bool {{ return {parent}->is_connected(); }}"
+    lambda_code = f"[=](auto&&...) -> bool {{ return {parent}->is_running(); }}"
     return cg.new_Pvariable(condition_id, template_arg, cg.RawExpression(lambda_code))

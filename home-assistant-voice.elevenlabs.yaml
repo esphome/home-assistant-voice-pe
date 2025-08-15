@@ -210,8 +210,8 @@ speaker:
     output_speaker: i2s_audio_speaker
     sample_rate: 48000
     bits_per_sample: 16
-    num_channels: 1
-    buffer_duration: 3000ms
+    num_channels: 2
+    buffer_duration: 6000ms
     task_stack_in_psram: true
     filters: 2
     taps: 16   # Keep default for quality balance
@@ -809,12 +809,6 @@ voice_assistant:
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
-  on_stt_vad_start:
-    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
-    - script.execute: control_leds
-  on_stt_vad_end:
-    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
-    - script.execute: control_leds
   on_tts_start:
     - if:
         condition:
@@ -932,45 +926,17 @@ micro_wake_word:
   models:
     - model: hey_jarvis
       id: hey_jarvis
-  vad:
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
           switch.is_off: master_mute_switch
-        then:
-          # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
-          - if:
-              condition:
-                switch.is_on: timer_ringing
-              then:
-                - switch.turn_off: timer_ringing
-              # Stop voice assistant if running
-              else:
-                - if:
-                    condition:
-                      elevenlabs_stream.is_running:
-                    then:
-                    # Stop any other media player announcement
-                    else:
-                      - if:
-                          condition:
-                            media_player.is_announcing:
-                          then:
-                            - media_player.stop:
-                                announcement: true
-                          # Start the voice assistant and play the wake sound, if enabled
-                          else:
-                            - if:
-                                condition:
-                                  switch.is_on: wake_sound
-                                then:
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: center_button_press_sound
-                                    
-                            - elevenlabs_stream.start: {}
+        then: 
+          - elevenlabs_stream.start: {}
+          - script.execute:
+              id: play_sound
+              priority: false
+              sound_file: center_button_press_sound
 
 # ElevenLabs Conversational AI Stream
 elevenlabs_stream:
@@ -1031,54 +997,16 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed);
+                elevenlabs_stream.is_running:
               then:
-                - if:
-                    condition:
-                      switch.is_on: timer_ringing
-                    then:
-                      - switch.turn_off: timer_ringing
-                    else:
-                      - if:
-                          condition:
-                            elevenlabs_stream.is_running:
-                          then:
-                            - elevenlabs_stream.stop:
-                          else:
-                            - if:
-                                condition:
-                                  media_player.is_announcing:
-                                then:
-                                  media_player.stop:
-                                    announcement: true
-                                else:
-                                  - if:
-                                      condition:
-                                        media_player.is_playing:
-                                      then:
-                                        - media_player.pause:
-                                      else:
-                                        - if:
-                                            condition:
-                                              and:
-                                                - switch.is_off: master_mute_switch
-                                                - not:
-                                                    elevenlabs_stream.is_running
-                                            then:
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: center_button_press_sound
-                                                
-                                              - if:
-                                                  condition:
-                                                    elevenlabs_stream.is_running: {}
-                                                  then:
-                                                    - elevenlabs_stream.stop: {}
-                                                    - logger.log: "Stopping ElevenLabs stream via button"
-                                                  else:
-                                                    - elevenlabs_stream.start: {}
-                                                    - logger.log: "Starting ElevenLabs stream via button"
+                - elevenlabs_stream.stop:
+              else:
+                - logger.log: "Starting ElevenLabs stream via button"
+                - elevenlabs_stream.start: {}
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: center_button_press_sound
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1136,47 +1064,6 @@ binary_sensor:
                 - event.trigger:
                     id: button_press_event
                     event_type: "long_press"
-      # Very important do not remove. Trust me :D
-      - timing:
-          # H ....
-          - ON for at most 0.2s
-          - OFF for 0s to 2s
-          - ON for at most 0.2s
-          - OFF for 0s to 2s
-          - ON for at most 0.2s
-          - OFF for 0s to 2s
-          - ON for at most 0.2s
-          - OFF for 0.5s to 2s
-          # A ._
-          - ON for at most 0.2s
-          - OFF for 0s to 2s
-          - ON for 0.2s to 2s
-        then:
-          - if:
-              condition:
-                lambda: return !id(init_in_progress);
-              then:
-                - light.turn_on:
-                    brightness: 100%
-                    id: voice_assistant_leds
-                    effect: "Tick"
-                - script.execute:
-                    id: play_sound
-                    priority: true
-                    sound_file: !lambda return id(easter_egg_tick_sound);
-                - delay: 4s
-                - light.turn_off: voice_assistant_leds
-                - script.execute:
-                    id: play_sound
-                    priority: true
-                    sound_file: !lambda return id(easter_egg_tada_sound);
-                - light.turn_on:
-                    brightness: 100%
-                    id: voice_assistant_leds
-                    effect: "Rainbow"
-                - event.trigger:
-                    id: button_press_event
-                    event_type: "easter_egg_press"
       # Factory Reset Warning
       #  . Audible and Visible warning.
       - timing:
@@ -1264,11 +1151,6 @@ binary_sensor:
     on_press:
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
-      - delay: 200ms
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_connected_sound);
       - delay: 800ms
       - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
@@ -1278,11 +1160,6 @@ binary_sensor:
     on_release:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
-      - delay: 200ms
-      - script.execute:
-          id: play_sound
-          priority: false
-          sound_file: !lambda return id(jack_disconnected_sound);
       - delay: 800ms
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds

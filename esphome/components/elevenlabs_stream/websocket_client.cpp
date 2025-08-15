@@ -1,5 +1,6 @@
 
 #include "websocket_client.h"
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace elevenlabs_stream {
@@ -115,7 +116,22 @@ bool WebsocketClient::send_binary(const uint8_t *data, size_t length) {
     int sent = esp_websocket_client_send_bin(this->websocket_client_, (const char *) data, length, portMAX_DELAY);
     return sent >= 0;
 }
-bool WebsocketClient::is_connected() const { return this->websocket_connected_; }
+bool WebsocketClient::is_connected() const { 
+    bool result = this->websocket_connected_ && this->websocket_client_ != nullptr;
+    
+    // Add periodic logging to debug connection state issues
+    static uint32_t last_log_time = 0;
+    uint32_t now = millis();
+    if (now - last_log_time > 5000) { // Log every 5 seconds
+        ESP_LOGD(TAG, "WebSocket connection state: internal_flag=%s, client_exists=%s, result=%s",
+                 this->websocket_connected_ ? "connected" : "disconnected",
+                 this->websocket_client_ ? "yes" : "no",
+                 result ? "connected" : "disconnected");
+        last_log_time = now;
+    }
+    
+    return result;
+}
 void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id,
                                               void *event_data) {
     WebsocketClient *client = static_cast<WebsocketClient *>(handler_args);
@@ -123,18 +139,22 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "WebSocket connected");
             client->websocket_connected_ = true;
+            ESP_LOGI(TAG, "WebSocket connected state set to: %s", client->websocket_connected_ ? "true" : "false");
             if (client->on_connected_)
                 client->on_connected_();
             break;
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "WebSocket disconnected");
             client->websocket_connected_ = false;
+            ESP_LOGI(TAG, "WebSocket connected state set to: %s", client->websocket_connected_ ? "true" : "false");
             if (client->on_disconnected_)
                 client->on_disconnected_();
             break;
         case WEBSOCKET_EVENT_ERROR:
+            ESP_LOGE(TAG, "WebSocket error occurred");
             if (client->on_error_)
                 client->on_error_("WebSocket connection error");
+            // Don't set disconnected here - let explicit disconnect events handle it
             break;
         case WEBSOCKET_EVENT_DATA:
         {
@@ -142,8 +162,9 @@ void WebsocketClient::websocket_event_handler(void *handler_args, esp_event_base
             
             if (data->op_code == 0x08) { // Close frame
                 ESP_LOGW(TAG, "WS_EVENT: WebSocket close frame received");
-                ESP_LOGI(TAG, "WebSocket disconnected");
+                ESP_LOGI(TAG, "WebSocket disconnected (close frame)");
                 client->websocket_connected_ = false;
+                ESP_LOGI(TAG, "WebSocket connected state set to: %s (close frame)", client->websocket_connected_ ? "true" : "false");
                 if (client->on_disconnected_)
                     client->on_disconnected_();
                 break;

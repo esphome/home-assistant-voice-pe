@@ -71,7 +71,7 @@ public:
 
   // Internal methods
   void renew_signed_url_if_needed();
-  void send_websocket_message(const std::string &message);
+  bool send_websocket_message(const std::string &message);
   void handle_websocket_message(const uint8_t *buffer, size_t length);
   void parse_json_message_from_buffer(const uint8_t *buffer, size_t length);
   void handle_error(const std::string &error_message);

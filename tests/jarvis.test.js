@@ -10,30 +10,38 @@ test('test', async t => {
         apiKey: apiKey,
     });
     const agentId = process.env.ELEVENLABS_AGENT_ID;
-    const response = await elevenlabs.conversationalAi.agents.simulateConversation(agentId, {
-        simulationSpecification: {
-            simulatedUserConfig: {
-                prompt: {
-                    prompt: `Hey, Jarvis. Could you check my calendar for me for today?`,
-                },
-            },
-            toolMockConfig: {
-                "calendar_agent": {
-                    defaultIsError: false,
-                    defaultReturnValue: "Your calendar is clear for today."
-                }
-            }
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}/simulate-conversation`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'xi-api-key': apiKey,
         },
-        extraEvaluationCriteria: [
-            {
-                id: 'calendar_agent',
-                name: 'Calendar agent check',
-                conversationGoalPrompt: 'The agent checked the calendar using the calendar_agent tool.',
+        body: JSON.stringify({
+            simulation_specification: {
+                simulated_user_config: {
+                    prompt: {
+                        mcp_server_ids: ['Ti8dOqqWh2D7FPwXHiBF'],
+                        llm: 'gemini-2.5-flash',
+                        temperature: 0,
+                        tool_ids: [],
+                    }
+                },
+                partial_conversation_history: [
+                    {
+                        "role": "user",
+                        "message": "Hello!  I'd like to check my calendar.",
+                        "time_in_call_secs": 0,
+                    },
+                ]
             },
-        ],
+            new_turns_limit: 3
+        })
     });
 
-    console.log(JSON.stringify(response, null, 4));
+    const content = await response.json();
 
-    t.assert.equal(response.analysis.callSuccessful, 'success');
+    console.log(JSON.stringify(content, null, 2));
+
+    t.assert.equal(content.analysis.call_successful, 'success');
 })
