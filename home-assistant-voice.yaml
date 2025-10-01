@@ -282,12 +282,12 @@ binary_sensor:
             switch.is_off: lock_buttons
           then:
             - script.execute: control_leds
-            # If a factory reset is requested, factory reset on release
-            - if:
-                condition:
-                  lambda: return id(factory_reset_requested);
-                then:
-                  - button.press: factory_reset_button
+      # If a factory reset is requested, factory reset on release
+      - if:
+          condition:
+            lambda: return id(factory_reset_requested);
+          then:
+            - button.press: factory_reset_button
     on_multi_click:
       # Simple Click:
       #   - Abort "things" in order
@@ -447,7 +447,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(dial_touched) && !id(lock_buttons).state;
+                lambda: return !id(dial_touched);
               then:
                 - light.turn_on:
                     brightness: 100%
@@ -476,7 +476,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(dial_touched) && !id(lock_buttons).state;
+                lambda: return !id(dial_touched);
               then:
                 - script.execute:
                     id: play_sound
