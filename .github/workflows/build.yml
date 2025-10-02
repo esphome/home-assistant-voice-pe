@@ -27,7 +27,7 @@ jobs:
       release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
   comment:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'esphome/home-assistant-voice-pe'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.owner == 'esphome'
     name: Comment on PR
     runs-on: ubuntu-latest
     needs:
@@ -78,7 +78,7 @@ jobs:
         run: |-
           echo "## Firmware built successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[Install here](https://esphome.github.io/home-assistant-voice-pe/?version=${{ github.event.release.tag_name }}) and test **before** approving deployment to beta or production." >> $GITHUB_STEP_SUMMARY
+          echo "[Install here](https://esphome.github.io/${{ github.event.repository.name }}/?version=${{ github.event.release.tag_name }}) and test **before** approving deployment to beta or production." >> $GITHUB_STEP_SUMMARY
 
   upload-to-release:
     name: Upload to Release
@@ -97,7 +97,7 @@ jobs:
       - upload-to-r2
     with:
       version: ${{ github.event.release.tag_name }}
-      directory: home-assistant-voice-pe
+      directory: ${{ github.event.repository.name }}
       channel: beta
       manifest-filename: manifest-beta.json
     secrets: inherit
@@ -110,7 +110,7 @@ jobs:
       - upload-to-r2
     with:
       version: ${{ github.event.release.tag_name }}
-      directory: home-assistant-voice-pe
+      directory: ${{ github.event.repository.name }}
       channel: production
       manifest-filename: manifest.json
     secrets: inherit
