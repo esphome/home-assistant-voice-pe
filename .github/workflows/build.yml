@@ -64,7 +64,7 @@ jobs:
       - build-firmware
     uses: esphome/workflows/.github/workflows/upload-to-r2.yml@2025.8.1
     with:
-      directory: home-assistant-voice-pe
+      directory: ${{ github.event.repository.name }}
     secrets: inherit
 
   summary:
