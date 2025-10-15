@@ -27,7 +27,7 @@ jobs:
       release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
   comment:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.owner == 'esphome'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.owner.login == 'esphome'
     name: Comment on PR
     runs-on: ubuntu-latest
     needs:
