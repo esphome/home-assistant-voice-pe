@@ -16,12 +16,23 @@ substitutions:
   voice_assist_error_phase_id: '11'
   # Change this to true in case you ahve a hidden SSID at home.
   hidden_ssid: "false"
+  # Substitutions for audio files
+  jack_connected_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
+  jack_disconnected_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac
+  mute_switch_on_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_on.flac
+  mute_switch_off_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_off.flac
+  timer_finished_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
+  wake_word_triggered_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+  center_button_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_press.flac
+  center_button_double_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_double_press.flac
+  center_button_triple_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_triple_press.flac
+  center_button_long_press_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_long_press.flac
 
 esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2025.7.2
+  min_version: 2025.9.3
   on_boot:
     priority: 375
     then:
@@ -86,6 +97,7 @@ api:
     - script.execute: control_leds
   on_client_disconnected:
     - script.execute: control_leds
+  encryption:   # Uses key set by Home Assistant
 
 ota:
   - platform: esphome
@@ -1529,13 +1541,13 @@ media_player:
               duration: 1.0s
     files:
       - id: center_button_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_press.flac
+        file: ${center_button_press_sound_file}
       - id: center_button_double_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_double_press.flac
+        file: ${center_button_double_press_sound_file}
       - id: center_button_triple_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_triple_press.flac
+        file: ${center_button_triple_press_sound_file}
       - id: center_button_long_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_long_press.flac
+        file: ${center_button_long_press_sound_file}
       - id: factory_reset_initiated_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_initiated.mp3
       - id: factory_reset_cancelled_sound
@@ -1543,17 +1555,17 @@ media_player:
       - id: factory_reset_confirmed_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_confirmed.mp3
       - id: jack_connected_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
+        file: ${jack_connected_sound_file}
       - id: jack_disconnected_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac
+        file: ${jack_disconnected_sound_file}
       - id: mute_switch_on_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_on.flac
+        file: ${mute_switch_on_sound_file}
       - id: mute_switch_off_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_off.flac
+        file: ${mute_switch_off_sound_file}
       - id: timer_finished_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
+        file: ${timer_finished_sound_file}
       - id: wake_word_triggered_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+        file: ${wake_word_triggered_sound_file}
       - id: easter_egg_tick_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
       - id: easter_egg_tada_sound
