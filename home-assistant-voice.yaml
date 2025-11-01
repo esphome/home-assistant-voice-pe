@@ -1741,13 +1741,11 @@ voice_assistant:
         else:
           - voice_assistant.start_continuous:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-    
   on_client_disconnected:
     - voice_assistant.stop:
     - micro_wake_word.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
-    
   on_error:
     - if:
         condition:
@@ -1766,25 +1764,20 @@ voice_assistant:
               id: play_sound
               priority: true
               sound_file: !lambda return id(error_cloud_expired);
-              
   on_start:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
         decibel_reduction: 20
         duration: 0.0s
-        
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
-    
   on_stt_vad_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
-    
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
-    
   on_intent_progress:
     - if:
         condition:
@@ -1793,7 +1786,6 @@ voice_assistant:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
           - script.execute: activate_stop_word_once
-          
   on_tts_start:
     - if:
         condition:
@@ -1802,8 +1794,6 @@ voice_assistant:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
           - script.execute: activate_stop_word_once
-
-  # ✅ New section: reset LEDs after TTS playback ends
   on_tts_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
@@ -1834,7 +1824,6 @@ voice_assistant:
     - script.execute: control_leds
   on_timer_tick:
     - script.execute: control_leds
-    
   on_wake_word_detected:
     - if:
         condition:
@@ -1844,7 +1833,6 @@ voice_assistant:
               id: play_sound
               priority: false
               sound_file: !lambda return id(wake_word_triggered_sound);
-
 button:
   - platform: factory_reset
     id: factory_reset_button
