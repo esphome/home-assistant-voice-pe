@@ -1,4 +1,7 @@
 substitutions:
+  name: home-assistant-voice-0a38ec
+  wifi_ssid: !secret wifi_ssid
+  wifi_password: !secret wifi_password
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -76,12 +79,29 @@ esp32:
 
 wifi:
   id: wifi_id
-  fast_connect: ${hidden_ssid}
+  fast_connect: false
   on_connect:
-    - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
+    then:
+      - lambda: |-
+          id(improv_ble_in_progress) = false;
+      - script.execute:
+          id: control_leds
   on_disconnect:
-    - script.execute: control_leds
+    then:
+      - script.execute:
+          id: control_leds
+  domain: .local
+  reboot_timeout: 15min
+  power_save_mode: LIGHT
+  enable_btm: false
+  enable_rrm: false
+  passive_scan: false
+  enable_on_boot: true
+  networks:
+    - ssid: ${wifi_ssid}
+      password: ${wifi_password}
+      priority: 0.0
+  use_address: ${name}.local
 
 network:
   enable_ipv6: true
@@ -97,7 +117,6 @@ api:
     - script.execute: control_leds
   on_client_disconnected:
     - script.execute: control_leds
-  encryption:   # Uses key set by Home Assistant
 
 ota:
   - platform: esphome
@@ -167,6 +186,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: wake_word_engine
+    type: std::string
+    restore_value: true
+    initial_value: '"micro_wake_word"'
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -324,7 +347,15 @@ binary_sensor:
                                                   priority: true
                                                   sound_file: !lambda return id(center_button_press_sound);
                                               - delay: 300ms
-                                              - voice_assistant.start:
+                                              # Start based on selected engine
+                                              - if:
+                                                  condition:
+                                                    lambda: return id(wake_word_engine) == "open_wake_word";
+                                                  then:
+                                                    - voice_assistant.start:
+                                                  else:
+                                                    - voice_assistant.start:
+                                                        wake_word: "button_press"
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1671,6 +1702,40 @@ select:
           id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
           id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
         }
+  - platform: template
+    name: "Wake Word Engine"
+    id: wake_word_engine_select
+    options:
+      - "micro_wake_word"
+      - "open_wake_word"
+    restore_value: true
+    initial_option: "micro_wake_word"
+    entity_category: config
+    optimistic: true
+    on_value:
+      then:
+        - lambda: |-
+            id(wake_word_engine) = x;
+        - logger.log:
+            format: "Wake word engine changed to: %s"
+            args: [x.c_str()]
+            level: INFO
+        # Stop both engines
+        - if:
+            condition:
+              lambda: return id(mww).is_running();
+            then:
+              - micro_wake_word.stop:
+        - voice_assistant.stop:
+        - delay: 500ms
+        # Start the selected engine
+        - if:
+            condition:
+              lambda: return x == "micro_wake_word";
+            then:
+              - micro_wake_word.start:
+            else:
+              - voice_assistant.start_continuous:
 
 voice_assistant:
   id: va
@@ -1679,22 +1744,30 @@ voice_assistant:
     channels: 0
   media_player: external_media_player
   micro_wake_word: mww
-  use_wake_word: false
+  use_wake_word: true
   noise_suppression_level: 0
   auto_gain: 0 dbfs
   volume_multiplier: 1
+  
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
-    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    - if:
+        condition:
+          lambda: return id(wake_word_engine) == "micro_wake_word";
+        then:
+          - micro_wake_word.start:
+        else:
+          - voice_assistant.start_continuous:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    
   on_client_disconnected:
     - voice_assistant.stop:
+    - micro_wake_word.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
+    
   on_error:
-    # Only set the error phase if the error code is different than duplicate_wake_up_detected or stt-no-text-recognized
-    # These two are ignored for a better user experience
     - if:
         condition:
           and:
@@ -1704,7 +1777,6 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
-    # If the error code is cloud-auth-failed, serve a local audio file guiding the user.
     - if:
         condition:
           - lambda: return code == "cloud-auth-failed";
@@ -1713,60 +1785,64 @@ voice_assistant:
               id: play_sound
               priority: true
               sound_file: !lambda return id(error_cloud_expired);
-  # When the voice assistant starts: Play a wake up sound, duck audio.
+              
   on_start:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
-        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s         # The duration of the transition (default is no transition)
+        decibel_reduction: 20
+        duration: 0.0s
+        
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
+    
   on_stt_vad_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
+    
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+    
   on_intent_progress:
     - if:
         condition:
-          # A nonempty x variable means a streaming TTS url was sent to the media player
           lambda: 'return !x.empty();'
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
+          
   on_tts_start:
     - if:
         condition:
-          # The intent_progress trigger didn't start the TTS Reponse
           lambda: 'return id(voice_assistant_phase) != ${voice_assist_replying_phase_id};'
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
-  # When the voice assistant ends ...
+
+  # ✅ New section: reset LEDs after TTS playback ends
+  on_tts_end:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
+          
   on_end:
     - wait_until:
         not:
           voice_assistant.is_running:
-    # Stop ducking audio.
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
         decibel_reduction: 0
         duration: 1.0s
-    # If the end happened because of an error, let the error phase on for a second
     - if:
         condition:
           lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
         then:
           - delay: 1s
-    # Reset the voice assistant phase id and reset the LED animations.
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
@@ -1777,6 +1853,16 @@ voice_assistant:
     - script.execute: control_leds
   on_timer_tick:
     - script.execute: control_leds
+    
+  on_wake_word_detected:
+    - if:
+        condition:
+          switch.is_on: wake_sound
+        then:
+          - script.execute:
+              id: play_sound
+              priority: false
+              sound_file: !lambda return id(wake_word_triggered_sound);
 
 button:
   - platform: factory_reset
