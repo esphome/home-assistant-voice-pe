@@ -1757,7 +1757,7 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
-      # If the error code is cloud-auth-failed, serve a local audio file guiding the user.
+    # If the error code is cloud-auth-failed, serve a local audio file guiding the user.
     - if:
         condition:
           - lambda: return code == "cloud-auth-failed";
