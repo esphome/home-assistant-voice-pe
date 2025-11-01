@@ -1,7 +1,4 @@
 substitutions:
-  name: home-assistant-voice-0a38ec
-  wifi_ssid: !secret wifi_ssid
-  wifi_password: !secret wifi_password
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -79,29 +76,12 @@ esp32:
 
 wifi:
   id: wifi_id
-  fast_connect: false
+  fast_connect: ${hidden_ssid}
   on_connect:
-    then:
-      - lambda: |-
-          id(improv_ble_in_progress) = false;
-      - script.execute:
-          id: control_leds
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
   on_disconnect:
-    then:
-      - script.execute:
-          id: control_leds
-  domain: .local
-  reboot_timeout: 15min
-  power_save_mode: LIGHT
-  enable_btm: false
-  enable_rrm: false
-  passive_scan: false
-  enable_on_boot: true
-  networks:
-    - ssid: ${wifi_ssid}
-      password: ${wifi_password}
-      priority: 0.0
-  use_address: ${name}.local
+    - script.execute: control_leds
 
 network:
   enable_ipv6: true
@@ -117,6 +97,7 @@ api:
     - script.execute: control_leds
   on_client_disconnected:
     - script.execute: control_leds
+  encryption:   # Uses key set by Home Assistant
 
 ota:
   - platform: esphome
