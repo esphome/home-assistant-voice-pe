@@ -1770,8 +1770,8 @@ voice_assistant:
   on_start:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
-        decibel_reduction: 20 # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s # The duration of the transition (default is no transition)
+        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
+        duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -1794,11 +1794,14 @@ voice_assistant:
   on_tts_start:
     - if:
         condition:
+          # The intent_progress trigger didn't start the TTS Reponse
           lambda: 'return id(voice_assistant_phase) != ${voice_assist_replying_phase_id};'
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
+          # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
+  # When the voice assistant ends ...
   on_tts_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
