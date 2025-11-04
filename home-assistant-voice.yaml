@@ -210,8 +210,8 @@ switch:
 
   # New: Option to play processing sound when assistant is thinking
   - platform: template
-    id: play_processing_sound
-    name: "Play processing sound"
+    id: thinking_sound
+    name: "Thinking sound"
     icon: "mdi:music-note"
     entity_category: config
     optimistic: true
@@ -1747,7 +1747,7 @@ voice_assistant:
     # Play optional processing sound if enabled
     - if:
         condition:
-          lambda: 'return id(play_processing_sound).state;'
+          lambda: 'return id(thinking_sound).state;'
         then:
           - script.execute:
               id: play_sound
