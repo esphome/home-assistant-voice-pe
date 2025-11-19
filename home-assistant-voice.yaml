@@ -32,7 +32,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2025.9.3
+  min_version: 2025.11.0
   on_boot:
     priority: 375
     then:
@@ -112,6 +112,7 @@ i2c:
 psram:
   mode: octal
   speed: 80MHz
+  ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
