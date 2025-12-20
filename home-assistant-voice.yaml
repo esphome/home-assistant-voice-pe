@@ -1552,6 +1552,8 @@ sendspin:
   task_stack_in_psram: true
   kalman_process_error: 0.01
 
+http_request:
+
 media_source:
   - platform: sendspin
     id: sendspin_source
