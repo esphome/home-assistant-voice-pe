@@ -1691,13 +1691,13 @@ external_components:
       # https://github.com/esphome/esphome/pull/12284
       type: git
       url: https://github.com/esphome/esphome
-      ref: 742560efb62c373c3142bb096c0d79c0d70ac344
+      ref: a064ee8fbdda9ef7f5c6a402b19bdb2d6160464f
     components: [mdns, sendspin]
   - source:
       # https://github.com/esphome/esphome/pull/12429
       type: git
       url: https://github.com/esphome/esphome
-      ref: 6a452138fbd5263a1343e7992cdb7eabcd9734a0
+      ref: 627572d9aa0c372f4ca8adcbdaf68c1c2e65b84c
     refresh: 0s
     components: [file, http_request, media_source, speaker_source]
 
