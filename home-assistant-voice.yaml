@@ -180,6 +180,64 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+
+  # -----------------------------
+  # Remote (device-local) timer
+  # -----------------------------
+  - id: remote_timer_total_seconds
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: remote_timer_remaining_seconds
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: remote_timer_running
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: return id(remote_timer_running);
+          then:
+            - lambda: |-
+                if (id(remote_timer_remaining_seconds) > 0) {
+                  id(remote_timer_remaining_seconds) -= 1;
+                }
+            - script.execute: control_leds
+            - if:
+                condition:
+                  lambda: return id(remote_timer_running) && (id(remote_timer_remaining_seconds) <= 0);
+                then:
+                  - lambda: |-
+                      id(remote_timer_running) = false;
+                  - switch.turn_on: timer_ringing
+                  - script.execute: control_leds
+
+number:
+  - platform: template
+    id: remote_timer_seconds
+    name: "VoicePE Remote Timer Seconds"
+    icon: mdi:timer
+    min_value: 0
+    max_value: 7200
+    step: 1
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: |-
+          int v = (int) x;
+          if (v < 0) v = 0;
+          id(remote_timer_total_seconds) = v;
+          id(remote_timer_remaining_seconds) = v;
+          id(control_leds).execute();
+
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
   - platform: template
@@ -550,6 +608,13 @@ binary_sensor:
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
 
+
+  - platform: template
+    id: voicepe_remote_timer_running
+    name: "VoicePE Remote Timer Running"
+    device_class: running
+    lambda: |-
+      return id(remote_timer_running);
 light:
   # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
@@ -846,6 +911,37 @@ light:
               it[10] = Color::BLACK;
             }
             id(global_led_animation_index) = (12 + id(global_led_animation_index) - 1) % 12;
+      - addressable_lambda:
+          name: "Remote Timer tick"
+          update_interval: 100ms
+          lambda: |-
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            Color muted_color(255, 0, 0);
+
+            float total = max((float) id(remote_timer_total_seconds), 1.0f);
+            float left = max((float) id(remote_timer_remaining_seconds), 0.0f);
+            float timer_ratio = 12.0f * left / total;
+
+            uint8_t last_led_on = static_cast<uint8_t>(ceil(timer_ratio)) - 1;
+            for (uint8_t i = 0; i < 12; i++) {
+              float brightness_dip = ( i == id(global_led_animation_index) % 12 && i != last_led_on ) ? 0.9f : 1.0f ;
+              if (i <= timer_ratio) {
+                it[i] = color * min(255.0f * brightness_dip * (timer_ratio - i) , 255.0f * brightness_dip) ;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            if (id(master_mute_switch).state) {
+              it[2] = Color::BLACK;
+              it[3] = muted_color;
+              it[4] = Color::BLACK;
+              it[8] = Color::BLACK;
+              it[9] = muted_color;
+              it[10] = Color::BLACK;
+            }
+            id(global_led_animation_index) = (12 + id(global_led_animation_index) - 1) % 12;
       - addressable_rainbow:
           name: "Rainbow"
           width: 12
@@ -1009,6 +1105,16 @@ sensor:
                       id: control_hue
                       increase_hue: false
 
+
+  - platform: template
+    id: voicepe_remote_timer_remaining_seconds
+    name: "VoicePE Remote Timer Remaining Seconds"
+    icon: mdi:timer-sand
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      return id(remote_timer_remaining_seconds);
 event:
   # Event entity exposed to the user to automate on complex center button presses.
   # The simple press is not exposed as it is used to control the device itself.
@@ -1054,6 +1160,8 @@ script:
             id(control_leds_dial_touched).execute();
           } else if (id(timer_ringing).state) {
             id(control_leds_timer_ringing).execute();
+          } else if (id(remote_timer_running)) {
+            id(control_leds_remote_timer_ticking).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
             id(control_leds_voice_assistant_waiting_for_command_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
@@ -1270,6 +1378,12 @@ script:
           effect: "Timer tick"
 
   # Script executed when the volume is increased/decreased from the dial
+
+  - id: control_leds_remote_timer_ticking
+    then:
+      - light.turn_on:
+          id: voice_assistant_leds
+          effect: "Remote Timer tick"
   - id: control_volume
     mode: restart
     parameters:
@@ -1917,5 +2031,29 @@ button:
     disabled_by_default: true
     icon: "mdi:restart"
 
+
+  - platform: template
+    id: voicepe_remote_timer_start
+    name: "VoicePE Remote Timer Start"
+    icon: mdi:play
+    on_press:
+      - lambda: |-
+          // Start/reset the device-local timer
+          id(remote_timer_remaining_seconds) = id(remote_timer_total_seconds);
+          id(remote_timer_running) = (id(remote_timer_remaining_seconds) > 0);
+      - switch.turn_off: timer_ringing
+      - script.execute: control_leds
+
+  - platform: template
+    id: voicepe_remote_timer_cancel
+    name: "VoicePE Remote Timer Cancel"
+    icon: mdi:stop
+    on_press:
+      - lambda: |-
+          id(remote_timer_running) = false;
+          id(remote_timer_total_seconds) = 0;
+          id(remote_timer_remaining_seconds) = 0;
+      - switch.turn_off: timer_ringing
+      - script.execute: control_leds
 debug:
   update_interval: 5s
