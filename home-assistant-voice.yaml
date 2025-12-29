@@ -1702,7 +1702,7 @@ external_components:
       # https://github.com/esphome/esphome/pull/12429
       type: git
       url: https://github.com/esphome/esphome
-      ref: 9b3625da70532c752eca8be9f86b911a7f2cebc8
+      ref: f5c1a8111df78e32d07d7a7bb800018808cdc0e7
     refresh: 0s
     components: [file, http_request, media_source, speaker_source]
 
