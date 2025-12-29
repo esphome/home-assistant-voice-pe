@@ -1464,6 +1464,11 @@ script:
   #   This allows us to prevent having the deactivation of the stop word before its own activation.
   - id: activate_stop_word_once
     then:
+      - wait_until:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          timeout: 5s
       - delay: 1s
       # Enable stop wake word
       - if:
