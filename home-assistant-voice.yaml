@@ -62,7 +62,7 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
-    version: 5.5.1
+    version: 5.5.2
     sdkconfig_options:
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
