@@ -1663,7 +1663,7 @@ voice_kit:
 external_components:
   - source:
       type: git
-      url: https://github.com/esphome/home-assistant-voice-pe
+      url: https://github.com/kobioneil/home-assistant-voice-pe.git
       ref: dev
     components:
       - voice_kit
@@ -1719,6 +1719,8 @@ micro_wake_word:
     gain_factor: 4
   stop_after_detection: false
   models:
+    - model: https://github.com/kobioneil/micro-wake-word-models/releases/download/listen_too_meeh/listen_too_meeh.json
+      id: listen_too_meeh
     - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
       id: okay_nabu
     - model: hey_jarvis
