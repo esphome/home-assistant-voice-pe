@@ -1719,10 +1719,14 @@ micro_wake_word:
     gain_factor: 4
   stop_after_detection: false
   models:
-
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
+      id: okay_nabu
+    - model: hey_jarvis
+      id: hey_jarvis
+    - model: hey_mycroft
+      id: hey_mycroft
     - model: https://github.com/kobioneil/micro-wake-word-models/releases/download/listen_too_meeh/listen_too_meeh.json
-      id: listen_too_meeh
-
+      id: listen_too_meeh     
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
