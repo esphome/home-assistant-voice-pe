@@ -1663,7 +1663,7 @@ voice_kit:
 external_components:
   - source:
       type: git
-      url: https://github.com/kobioneil/home-assistant-voice-pe.git
+      url: https://github.com/kobioneil/home-assistant-voice-pe
       ref: dev
     components:
       - voice_kit
