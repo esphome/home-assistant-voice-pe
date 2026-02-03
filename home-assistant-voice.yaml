@@ -229,7 +229,7 @@ switch:
       # Disable stop wake word
       - micro_wake_word.disable_model: stop
       - script.execute: disable_repeat
-      # Stop any current annoucement (ie: stop the timer ring mid playback)
+      # Stop any current announcement (ie: stop the timer ring mid playback)
       - if:
           condition:
             media_player.is_announcing:
