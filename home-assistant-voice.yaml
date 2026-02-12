@@ -1669,16 +1669,16 @@ external_components:
       - voice_kit
     refresh: 0s
   - source:
-      # https://github.com/esphome/esphome/pull/12253
+      # https://github.com/esphome/esphome/pull/12253 (merged into upstream ESPHome, will be available in ESPHome 2025.2.0)
       type: git
       url: https://github.com/esphome/esphome
-      ref: 7f34908569650e5a8b8c83e6bf89fea561218880
+      ref: c28c97fbaf15c4ce353317e873054fb00a1d7a6d  # ESPHome dev branch commit hash
     components: [mixer]
   - source:
-      # https://github.com/esphome/esphome/pull/12254
+      # https://github.com/esphome/esphome/pull/12254 (merged into upstream ESPHome, will be available in ESPHome 2025.2.0)
       type: git
       url: https://github.com/esphome/esphome
-      ref: 6006b896a691ad38d8045ac67564c168973d1a1d
+      ref: 298efb53400852a09e2f8bdf16feac9a58422059  # ESPHome dev branch commit hash
     components: [resampler]
   - source:
       # https://github.com/esphome/esphome/pull/12256
