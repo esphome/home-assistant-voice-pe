@@ -1670,25 +1670,31 @@ external_components:
       # https://github.com/esphome/esphome/pull/12256
       type: git
       url: https://github.com/esphome/esphome
-      ref: 9148832ea4e54907bad71a24d4ced1ce6c862433
+      ref: a2d98e1d5e020200db8f3caf27a74a939a661dc4
     components: [audio]
   - source:
       # https://github.com/esphome/esphome/pull/12258
       type: git
       url: https://github.com/esphome/esphome
-      ref: bff22983a390352360796f8e1363127e0cd1f898
+      ref: b4b7c5b25ebe0f2ab988f700219fa3c57b2377b7
     components: [media_player]
   - source:
       # https://github.com/esphome/esphome/pull/12284
       type: git
       url: https://github.com/esphome/esphome
-      ref: 3cc894763b05ac8ffd9fdd15bcb549d47cadf6eb
-    components: [mdns, sendspin]
+      ref: d48058e140c98f5c2d902661d851a6b712d62434
+    components: [sendspin]
+  - source:
+      # https://github.com/esphome/esphome/pull/14013
+      type: git
+      url: https://github.com/esphome/esphome
+      ref: 51dcce3d1f22865ebb458a5447bbc877ac946b5a
+    components: [mdns]
   - source:
       # https://github.com/esphome/esphome/pull/12429
       type: git
       url: https://github.com/esphome/esphome
-      ref: 32708a2ee74f5ea4107448f62755004ad3e879c5
+      ref: b49b09b6ae56502aa3ce51be86f90d732d019b2c
     refresh: 0s
     components: [file, http_request, media_source, speaker_source]
 
