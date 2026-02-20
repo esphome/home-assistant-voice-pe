@@ -301,6 +301,9 @@ binary_sensor:
               condition:
                 lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed);
               then:
+                - event.trigger:
+                    id: button_press_event
+                    event_type: "single_press"
                 - if:
                     condition:
                       switch.is_on: timer_ringing
@@ -324,24 +327,35 @@ binary_sensor:
                                 else:
                                   - if:
                                       condition:
-                                        media_player.is_playing:
-                                          id: external_media_player
+                                        lambda: return id(center_button_control).state == "Assistant";
                                       then:
-                                        - media_player.pause:
-                                            id: external_media_player
-                                      else:
                                         - if:
                                             condition:
-                                              and:
-                                                - switch.is_off: master_mute_switch
-                                                - not: voice_assistant.is_running
+                                              media_player.is_playing:
+                                                id: external_media_player
                                             then:
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: "center_button_press_sound"
-                                              - delay: 300ms
-                                              - voice_assistant.start:
+                                              - media_player.pause:
+                                                  id: external_media_player
+                                            else:
+                                              - if:
+                                                  condition:
+                                                    and:
+                                                      - switch.is_off: master_mute_switch
+                                                      - not: voice_assistant.is_running
+                                                  then:
+                                                    - script.execute:
+                                                        id: play_sound
+                                                        priority: true
+                                                        sound_file: "center_button_press_sound"
+                                                    - delay: 300ms
+                                                    - voice_assistant.start:
+                                  - if:
+                                      condition:
+                                        lambda: return id(center_button_control).state == "Media";
+                                      then:
+                                          - media_player.toggle:
+                                              id: external_media_player
+
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1011,17 +1025,30 @@ sensor:
 
 event:
   # Event entity exposed to the user to automate on complex center button presses.
-  # The simple press is not exposed as it is used to control the device itself.
   - platform: template
     id: button_press_event
     name: "Button press"
     icon: mdi:button-pointer
     device_class: button
     event_types:
+      - single_press
       - double_press
       - triple_press
       - long_press
       - easter_egg_press
+
+select:
+  - platform: template
+    name: "Center Button action"
+    optimistic: true
+    initial_option: Assistant
+    restore_value: true
+    entity_category: config
+    id: center_button_control
+    options:
+      - Assistant
+      - Media
+      - Nothing
 
 script:
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
