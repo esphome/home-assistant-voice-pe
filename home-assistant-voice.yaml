@@ -349,12 +349,6 @@ binary_sensor:
                                                         sound_file: "center_button_press_sound"
                                                     - delay: 300ms
                                                     - voice_assistant.start:
-                                  - if:
-                                      condition:
-                                        lambda: return id(center_button_control).state == "Media";
-                                      then:
-                                          - media_player.toggle:
-                                              id: external_media_player
 
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
@@ -1047,8 +1041,7 @@ select:
     id: center_button_control
     options:
       - Assistant
-      - Media
-      - Nothing
+      - Event
 
 script:
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
