@@ -6,6 +6,7 @@
 #include "esphome/core/log.h"
 
 #include <cinttypes>
+#include <cstring>
 
 namespace esphome {
 namespace voice_kit {
@@ -252,7 +253,7 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
 }
 
 uint32_t VoiceKit::load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t offset) {
-  if (offset > this->firmware_bin_length_) {
+  if (offset >= this->firmware_bin_length_) {
     ESP_LOGE(TAG, "Invalid offset");
     return 0;
   }
@@ -262,9 +263,7 @@ uint32_t VoiceKit::load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t
     buf_len = max_len;
   }
 
-  for (uint8_t i = 0; i < max_len; i++) {
-    buf[i] = this->firmware_bin_[offset + i];
-  }
+  memcpy(buf, &this->firmware_bin_[offset], buf_len);
   return buf_len;
 }
 
