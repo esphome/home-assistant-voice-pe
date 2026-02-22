@@ -328,9 +328,9 @@ bool VoiceKit::dfu_get_version_() {
 }
 
 bool VoiceKit::dfu_reboot_() {
-  const uint8_t reboot_req[] = {DFU_CONTROLLER_SERVICER_RESID, DFU_CONTROLLER_SERVICER_RESID_DFU_REBOOT, 1};
+  const uint8_t reboot_req[] = {DFU_CONTROLLER_SERVICER_RESID, DFU_CONTROLLER_SERVICER_RESID_DFU_REBOOT, 1, 0};
 
-  auto error_code = this->write(reboot_req, 4);
+  auto error_code = this->write(reboot_req, sizeof(reboot_req));
   if (error_code != i2c::ERROR_OK) {
     ESP_LOGE(TAG, "Reboot request failed");
     return false;
