@@ -117,7 +117,7 @@ void VoiceKit::write_pipeline_stages() {
 
   auto error_code = this->write(stage_set, sizeof(stage_set));
   if (error_code != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Failed to write chanenl 0 stage");
+    ESP_LOGE(TAG, "Failed to write channel 0 stage");
   }
 
   // Write channel 1 stage
