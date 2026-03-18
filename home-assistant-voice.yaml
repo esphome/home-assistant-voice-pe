@@ -220,7 +220,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
 
-  # New: Option to play processing sound when assistant is thinking
+  # Thinking Sound Switch.
   - platform: template
     id: thinking_sound
     name: "Thinking sound"
@@ -228,10 +228,6 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-      - script.execute: control_leds
-    on_turn_off:
-      - script.execute: control_leds
 
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
@@ -1612,6 +1608,8 @@ media_source:
         file: ${easter_egg_tada_sound_file}
       - id: error_cloud_expired
         file: ${error_cloud_expired_sound_file}
+      - id: processing_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav        
 
 media_player:
   - platform: sendspin
@@ -1661,41 +1659,6 @@ media_player:
               id: media_mixing_input
               decibel_reduction: 0
               duration: 1.0s
-    files:
-      - id: center_button_press_sound
-        file: ${center_button_press_sound_file}
-      - id: center_button_double_press_sound
-        file: ${center_button_double_press_sound_file}
-      - id: center_button_triple_press_sound
-        file: ${center_button_triple_press_sound_file}
-      - id: center_button_long_press_sound
-        file: ${center_button_long_press_sound_file}
-      - id: factory_reset_initiated_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_initiated.mp3
-      - id: factory_reset_cancelled_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_cancelled.mp3
-      - id: factory_reset_confirmed_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_confirmed.mp3
-      - id: jack_connected_sound
-        file: ${jack_connected_sound_file}
-      - id: jack_disconnected_sound
-        file: ${jack_disconnected_sound_file}
-      - id: mute_switch_on_sound
-        file: ${mute_switch_on_sound_file}
-      - id: mute_switch_off_sound
-        file: ${mute_switch_off_sound_file}
-      - id: timer_finished_sound
-        file: ${timer_finished_sound_file}
-      - id: wake_word_triggered_sound
-        file: ${wake_word_triggered_sound_file}
-      - id: easter_egg_tick_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
-      - id: easter_egg_tada_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
-      - id: error_cloud_expired
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
-      - id: processing_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav
 
 voice_kit:
   id: voice_kit_component
