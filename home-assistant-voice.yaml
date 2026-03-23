@@ -1657,7 +1657,7 @@ voice_kit:
     version: "1.3.1"
     md5: 964635c5bf125529dab14a2472a15401
 
-# Sendspin related components are pinned to specific commits for reproducible builds
+# Components are pinned to specific commits for reproducible builds
 external_components:
   - source:
       type: git
@@ -1684,12 +1684,6 @@ external_components:
       url: https://github.com/esphome/esphome
       ref: d48058e140c98f5c2d902661d851a6b712d62434
     components: [sendspin]
-  - source:
-      # https://github.com/esphome/esphome/pull/14013
-      type: git
-      url: https://github.com/esphome/esphome
-      ref: 51dcce3d1f22865ebb458a5447bbc877ac946b5a
-    components: [mdns]
   - source:
       # https://github.com/esphome/esphome/pull/12429
       type: git
