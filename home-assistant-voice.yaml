@@ -33,6 +33,7 @@ substitutions:
   easter_egg_tick_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
   easter_egg_tada_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
   error_cloud_expired_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
+  processing_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav  
 
 esphome:
   name: home-assistant-voice
@@ -1616,6 +1617,8 @@ audio_file:
     file: ${easter_egg_tada_sound_file}
   - id: error_cloud_expired
     file: ${error_cloud_expired_sound_file}
+  - id: processing_sound
+    file: ${processing_sound_file}      
 
 media_source:
   - platform: audio_file
@@ -1662,7 +1665,7 @@ media_source:
       - id: error_cloud_expired
         file: ${error_cloud_expired_sound_file}
       - id: processing_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav        
+        file: ${processing_sound_file}        
   - platform: sendspin
     id: sendspin_media_source
     fixed_delay: 480 microseconds  # The AIC3204 DAC used, as configured, on the VPE delays audio by 480 microseconds
