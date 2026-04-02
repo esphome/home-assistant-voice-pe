@@ -38,7 +38,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2026.2.0
+  min_version: 2026.3.0
   on_boot:
     priority: 375
     then:
@@ -86,6 +86,14 @@ wifi:
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
+    # Enable/disable Sendspin static adjustment delay if the jack is plugged in or not
+    - if:
+        condition:
+          - binary_sensor.is_on: jack_plugged
+        then:
+          - sendspin.media_source.enable_static_delay_adjustment:
+        else:
+          - sendspin.media_source.disable_static_delay_adjustment:
   on_disconnect:
     - script.execute: control_leds
 
@@ -523,9 +531,11 @@ binary_sensor:
       number: GPIO17
     # When the jack is plugged in:
     #  - LED animation
+    #  - Enable Sendspin static delay adjustment to apply the persisted delay when using the external audio output
     #  - Sound played
     on_press:
       - lambda: id(jack_plugged_recently) = true;
+      - sendspin.media_source.enable_static_delay_adjustment:
       - script.execute: control_leds
       - delay: 200ms
       - script.execute:
@@ -537,10 +547,12 @@ binary_sensor:
       - script.execute: control_leds
     # When the jack is unplugged:
     #  - LED animation
+    #  - Disable Sendspin static delay adjustment when using the internal speaker
     #  - Sound played
     on_release:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
+      - sendspin.media_source.disable_static_delay_adjustment:
       - delay: 200ms
       - script.execute:
           id: play_sound
@@ -1391,12 +1403,14 @@ script:
   # Script executed when the timer is ringing, to repeat the timer finished sound.
   - id: enable_repeat_one
     then:
+      # Turn on the repeat mode and pause for 500 ms between playlist items/repeats
       - media_player.repeat_one:
           id: external_media_player
           announcement: true
-      # Turn on the repeat mode and pause for 500 ms between playlist items/repeats
-      - lambda: |-
-            id(external_media_player)->set_playlist_delay_ms(1, 500);
+      - speaker_source.set_playlist_delay:
+          id: external_media_player
+          pipeline: announcement
+          delay: 500ms
 
   # Script execute when the timer is done ringing, to disable repeat mode.
   - id: disable_repeat
@@ -1405,8 +1419,10 @@ script:
       - media_player.repeat_off:
           id: external_media_player
           announcement: true
-      - lambda: |-
-            id(external_media_player)->set_playlist_delay_ms(1, 0);
+      - speaker_source.set_playlist_delay:
+          id: external_media_player
+          pipeline: announcement
+          delay: 0ms
 
   # Script executed when we want to play sounds on the device.
   - id: play_sound
@@ -1425,7 +1441,7 @@ script:
           if ( (id(external_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
             id(external_media_player)
               ->make_call()
-              .set_media_url("file://" + sound_file)
+              .set_media_url("audio-file://" + sound_file)
               .set_announcement(true)
               .perform();
           }
@@ -1552,52 +1568,57 @@ speaker:
 
 sendspin:
   id: sendspin_hub
-  task_stack_in_psram: true
-  kalman_process_error: 0.01
+  task_stack_in_psram: false
 
 http_request:
+  buffer_size_rx: 2048  # Reduces CPU load when streaming audio
+
+audio_file:
+  - id: center_button_press_sound
+    file: ${center_button_press_sound_file}
+  - id: center_button_double_press_sound
+    file: ${center_button_double_press_sound_file}
+  - id: center_button_triple_press_sound
+    file: ${center_button_triple_press_sound_file}
+  - id: center_button_long_press_sound
+    file: ${center_button_long_press_sound_file}
+  - id: factory_reset_initiated_sound
+    file: ${factory_reset_initiated_sound_file}
+  - id: factory_reset_cancelled_sound
+    file: ${factory_reset_cancelled_sound_file}
+  - id: factory_reset_confirmed_sound
+    file: ${factory_reset_confirmed_sound_file}
+  - id: jack_connected_sound
+    file: ${jack_connected_sound_file}
+  - id: jack_disconnected_sound
+    file: ${jack_disconnected_sound_file}
+  - id: mute_switch_on_sound
+    file: ${mute_switch_on_sound_file}
+  - id: mute_switch_off_sound
+    file: ${mute_switch_off_sound_file}
+  - id: timer_finished_sound
+    file: ${timer_finished_sound_file}
+  - id: wake_word_triggered_sound
+    file: ${wake_word_triggered_sound_file}
+  - id: easter_egg_tick_sound
+    file: ${easter_egg_tick_sound_file}
+  - id: easter_egg_tada_sound
+    file: ${easter_egg_tada_sound_file}
+  - id: error_cloud_expired
+    file: ${error_cloud_expired_sound_file}
 
 media_source:
-  - platform: sendspin
-    id: sendspin_source
+  - platform: audio_file
+    id: audio_file_announcement_source
   - platform: http_request
-    id: http_source
+    id: http_announcement_source
+    buffer_size: 250000
+  - platform: http_request
+    id: http_media_source
     buffer_size: 500000
-  - platform: file
-    id: file_source
-    files:
-      - id: center_button_press_sound
-        file: ${center_button_press_sound_file}
-      - id: center_button_double_press_sound
-        file: ${center_button_double_press_sound_file}
-      - id: center_button_triple_press_sound
-        file: ${center_button_triple_press_sound_file}
-      - id: center_button_long_press_sound
-        file: ${center_button_long_press_sound_file}
-      - id: factory_reset_initiated_sound
-        file: ${factory_reset_initiated_sound_file}
-      - id: factory_reset_cancelled_sound
-        file: ${factory_reset_cancelled_sound_file}
-      - id: factory_reset_confirmed_sound
-        file: ${factory_reset_confirmed_sound_file}
-      - id: jack_connected_sound
-        file: ${jack_connected_sound_file}
-      - id: jack_disconnected_sound
-        file: ${jack_disconnected_sound_file}
-      - id: mute_switch_on_sound
-        file: ${mute_switch_on_sound_file}
-      - id: mute_switch_off_sound
-        file: ${mute_switch_off_sound_file}
-      - id: timer_finished_sound
-        file: ${timer_finished_sound_file}
-      - id: wake_word_triggered_sound
-        file: ${wake_word_triggered_sound_file}
-      - id: easter_egg_tick_sound
-        file: ${easter_egg_tick_sound_file}
-      - id: easter_egg_tada_sound
-        file: ${easter_egg_tada_sound_file}
-      - id: error_cloud_expired
-        file: ${error_cloud_expired_sound_file}
+  - platform: sendspin
+    id: sendspin_media_source
+    fixed_delay: 480 microseconds  # The AIC3204 DAC used, as configured, on the VPE delays audio by 480 microseconds
 
 media_player:
   - platform: sendspin
@@ -1605,23 +1626,25 @@ media_player:
   - platform: speaker_source
     id: external_media_player
     name: Media Player
-    announcement_speaker: announcement_resampling_speaker
-    media_speaker: media_resampling_speaker
     announcement_pipeline:
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 1  # Stereo audio is unnecessary for announcements
       sample_rate: 48000
+      speaker: announcement_resampling_speaker
+      sources:
+        - audio_file_announcement_source
+        - http_announcement_source
     media_pipeline:
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 2
       sample_rate: 48000
+      speaker: media_resampling_speaker
+      sources:
+        - http_media_source
+        - sendspin_media_source
     volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.85
-    sources:
-      - file_source
-      - http_source
-      - sendspin_source
     on_mute:
       - script.execute: control_leds
     on_unmute:
@@ -1667,36 +1690,18 @@ external_components:
       - voice_kit
     refresh: 0s
   - source:
-      # https://github.com/esphome/esphome/pull/12256
+      # https://github.com/esphome/esphome/pull/14933
       type: git
-      url: https://github.com/esphome/esphome
-      ref: a2d98e1d5e020200db8f3caf27a74a939a661dc4
-    components: [audio]
-  - source:
-      # https://github.com/esphome/esphome/pull/12258
-      type: git
-      url: https://github.com/esphome/esphome
-      ref: b4b7c5b25ebe0f2ab988f700219fa3c57b2377b7
-    components: [media_player]
-  - source:
-      # https://github.com/esphome/esphome/pull/12284
-      type: git
-      url: https://github.com/esphome/esphome
-      ref: d48058e140c98f5c2d902661d851a6b712d62434
-    components: [sendspin]
-  - source:
-      # https://github.com/esphome/esphome/pull/14013
-      type: git
-      url: https://github.com/esphome/esphome
-      ref: 51dcce3d1f22865ebb458a5447bbc877ac946b5a
-    components: [mdns]
+      url: https://github.com/kahrendt/esphome
+      ref: 7a6cf5c8472b7e2fa18ee0fc314f66a80d249e32
+    components: [const, media_source, sendspin]
   - source:
       # https://github.com/esphome/esphome/pull/12429
       type: git
       url: https://github.com/esphome/esphome
-      ref: b49b09b6ae56502aa3ce51be86f90d732d019b2c
+      ref: ff8ce89556748509d7ee8724e12d9d43d3c8c1e8
     refresh: 0s
-    components: [file, http_request, media_source, speaker_source]
+    components: [http_request]
 
 audio_dac:
   - platform: aic3204
@@ -1767,6 +1772,7 @@ micro_wake_word:
 select:
   - platform: template
     name: "Wake word sensitivity"
+    id: wake_word_sensitivity
     optimistic: true
     initial_option: Slightly sensitive
     restore_value: true
