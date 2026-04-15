@@ -9,4 +9,4 @@ updates:
     groups:
       shared-workflows:
         patterns:
-          - "esphome/workflows"
+          - "esphome/workflows*"
