@@ -1790,8 +1790,6 @@ voice_assistant:
   microphone:
     - microphone: i2s_mics
       channels: 0
-    - microphone: i2s_mics
-      channels: 1
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
