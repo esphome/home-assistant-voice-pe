@@ -319,7 +319,7 @@ binary_sensor:
                           condition:
                             voice_assistant.is_running:
                           then:
-                            - voice_assistant.stop:
+                            - script.execute: interrupt_voice_assistant
                           else:
                             - if:
                                 condition:
@@ -1500,6 +1500,99 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
+  # Starts idle wake word detection according to the selected engine location.
+  # microWakeWord always runs: it detects the wake word on-device in "On device" mode, and
+  # provides the on-device "stop" word during playback/timers in both modes. In "In Home
+  # Assistant" mode the device additionally streams audio continuously so Home Assistant can
+  # detect the wake word.
+  - id: start_idle_wake_word
+    # restart mode so a rapid second interaction re-arms cleanly instead of being dropped
+    mode: restart
+    then:
+      - if:
+          condition:
+            not:
+              micro_wake_word.is_running:
+          then:
+            - micro_wake_word.start:
+      - if:
+          condition:
+            lambda: 'return id(wake_word_engine_location).current_option() == "In Home Assistant";'
+          then:
+            - lambda: id(va).set_use_wake_word(true);
+            # Wait for the voice assistant to come to rest, then (re)start continuous
+            # streaming if it isn't already running. After a "stop"/barge-in/abort the
+            # voice assistant clears continuous mode and settles in IDLE, so this re-arms
+            # it. During a normal response it auto-resumes streaming (is_running stays
+            # true), the wait times out, and start_continuous is correctly skipped.
+            - wait_until:
+                condition:
+                  not:
+                    voice_assistant.is_running:
+                timeout: 2s
+            - if:
+                condition:
+                  not:
+                    voice_assistant.is_running:
+                then:
+                  - voice_assistant.start_continuous:
+          else:
+            - lambda: id(va).set_use_wake_word(false);
+
+  # Single end-of-interaction cleanup, shared by on_end (normal completion) and
+  # interrupt_voice_assistant (aborts): un-duck media, return to the idle phase, refresh the
+  # LEDs, and re-arm idle wake word detection (which restarts continuous streaming in streaming
+  # mode). Keeping ALL "interaction finished" handling here ensures both paths behave the same.
+  # mode: restart so overlapping callers collapse to a single run.
+  - id: return_to_idle
+    mode: restart
+    then:
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
+          decibel_reduction: 0
+          duration: 1.0s
+      - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+      - script.execute: control_leds
+      - script.execute: start_idle_wake_word
+
+  # Interrupts an in-progress voice interaction (the "stop" word during a response, a barge-in,
+  # or the center button) and returns to idle. on_end runs only on a RUN_END event from Home
+  # Assistant, and aborting a *streaming* TTS mid-stream produces no RUN_END (the voice
+  # assistant reaches IDLE locally via RESPONSE_FINISHED), so we must not depend on on_end here:
+  # run the cleanup ourselves once the voice assistant has actually stopped. If on_end also
+  # fires (e.g. on-device, where RUN_END is sent), return_to_idle is idempotent.
+  - id: interrupt_voice_assistant
+    mode: restart
+    then:
+      - voice_assistant.stop:
+      - wait_until:
+          condition:
+            not:
+              voice_assistant.is_running:
+          timeout: 5s
+      - script.execute: return_to_idle
+
+interval:
+  # Self-healing re-arm for streaming mode. If we are in "In Home Assistant" mode, connected to
+  # Home Assistant, idle, and the voice assistant is not running (continuous streaming dropped
+  # for any reason), restart it. return_to_idle re-arms immediately in the normal cases; this is
+  # a safety net so streaming can never get stuck off. Once armed, is_running is true and this
+  # becomes a no-op until streaming next drops.
+  - interval: 3s
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: 'return !id(init_in_progress);'
+              - lambda: 'return id(api_id).is_connected();'
+              - lambda: 'return id(wake_word_engine_location).current_option() == "In Home Assistant";'
+              - lambda: 'return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};'
+              - not:
+                  voice_assistant.is_running:
+          then:
+            - lambda: id(va).set_use_wake_word(true);
+            - voice_assistant.start_continuous:
+
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1658,8 +1751,10 @@ media_player:
         condition:
           and:
             - switch.is_off: timer_ringing
-            - not:
-                voice_assistant.is_running:
+            # Use the phase, not voice_assistant.is_running: in streaming mode the voice
+            # assistant reports "running" continuously, so is_running would never let media
+            # un-duck. The idle phase means no active interaction (including idle streaming).
+            - lambda: 'return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};'
             - not:
                 media_player.is_announcing: external_media_player
         then:
@@ -1714,7 +1809,18 @@ micro_wake_word:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          and:
+            - switch.is_off: master_mute_switch
+            # In "In Home Assistant" (streaming) mode, Home Assistant detects the wake word
+            # from the continuous audio stream, so on-device detections must be ignored while
+            # idle. microWakeWord keeps running so the on-device "stop" word still works: only
+            # act on a detection while audio is playing or a timer is ringing (the only times
+            # the "stop" model is enabled), or whenever we are in "On device" mode.
+            - or:
+                - lambda: 'return id(wake_word_engine_location).current_option() == "On device";'
+                - switch.is_on: timer_ringing
+                - media_player.is_announcing: external_media_player
+                - lambda: 'return id(voice_assistant_phase) == ${voice_assist_replying_phase_id};'
         then:
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
@@ -1728,7 +1834,7 @@ micro_wake_word:
                     condition:
                       voice_assistant.is_running:
                     then:
-                      voice_assistant.stop:
+                      script.execute: interrupt_voice_assistant
                     # Stop any other media player announcement
                     else:
                       - if:
@@ -1785,6 +1891,50 @@ select:
           id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
         }
 
+  # Selects where the wake word is detected: on-device (microWakeWord) or in Home Assistant
+  # (continuous audio streaming). The on-device "stop" word works in both modes.
+  - platform: template
+    name: "Wake word engine location"
+    id: wake_word_engine_location
+    icon: "mdi:account-voice"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    options:
+      - In Home Assistant
+      - On device
+    initial_option: On device
+    on_value:
+      - if:
+          condition:
+            lambda: return !id(init_in_progress);
+          then:
+            # Wait until any in-progress interaction finishes before switching engines
+            - wait_until:
+                lambda: 'return id(voice_assistant_phase) == ${voice_assist_idle_phase_id};'
+            - if:
+                condition:
+                  lambda: 'return x == "In Home Assistant";'
+                then:
+                  - lambda: id(va).set_use_wake_word(true);
+                  - if:
+                      condition:
+                        not:
+                          voice_assistant.is_running:
+                      then:
+                        - voice_assistant.start_continuous:
+                else:
+                  # On device: stop continuous streaming; microWakeWord (below) does detection
+                  - lambda: id(va).set_use_wake_word(false);
+                  - voice_assistant.stop:
+            # microWakeWord runs in both modes (on-device detection and/or the "stop" word)
+            - if:
+                condition:
+                  not:
+                    micro_wake_word.is_running:
+                then:
+                  - micro_wake_word.start:
+
 voice_assistant:
   id: va
   microphone:
@@ -1800,13 +1950,42 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    - script.execute: start_idle_wake_word
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
+  # Wake word detected by Home Assistant (streaming mode). In "On device" mode the chime is
+  # played by the micro_wake_word on_wake_word_detected handler instead; that mode sets no
+  # wake-word flag on the pipeline, so Home Assistant never sends this event there and the
+  # chime is never played twice.
+  on_wake_word_detected:
+    - if:
+        condition:
+          switch.is_on: timer_ringing
+        then:
+          # Wake word while a timer is ringing: stop the alarm, matching "On device" mode
+          # (whose handler turns the timer off first and never reaches the chime). We must NOT
+          # play the wake chime here - the alarm puts the announcement pipeline in repeat-one,
+          # so another announcement gets caught in the repeat and loops forever, which also
+          # leaves the pipeline stuck so no later audio plays. Turning the timer off runs
+          # disable_repeat. Then abort the run Home Assistant started on detecting the wake
+          # word, so we return to idle exactly like on-device (which starts no interaction).
+          - switch.turn_off: timer_ringing
+          - script.execute: interrupt_voice_assistant
+        else:
+          # Play the wake chime if enabled (it ducks media via on_announcement); the
+          # interaction's media ducking is handled in on_listening.
+          - if:
+              condition:
+                switch.is_on: wake_sound
+              then:
+                - script.execute:
+                    id: play_sound
+                    priority: true
+                    sound_file: "wake_word_triggered_sound"
   on_error:
     # Only set the error phase if the error code is different than duplicate_wake_up_detected or stt-no-text-recognized
     # These two are ignored for a better user experience
@@ -1828,13 +2007,15 @@ voice_assistant:
               id: play_sound
               priority: true
               sound_file: "error_cloud_expired"
-  # When the voice assistant starts: Play a wake up sound, duck audio.
-  on_start:
+  # Command listening has started (fires after the wake word in both modes). Duck media here -
+  # this is the mode-agnostic "interaction begins" point. on_start can't be used: in streaming
+  # mode it fires during the idle wake-word wait, which would duck media continuously. The wake
+  # chime, if enabled, already ducks earlier via on_announcement.
+  on_listening:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
-        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s         # The duration of the transition (default is no transition)
-  on_listening:
+        decibel_reduction: 20
+        duration: 0.0s
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_start:
@@ -1865,23 +2046,25 @@ voice_assistant:
           - script.execute: activate_stop_word_once
   # When the voice assistant ends ...
   on_end:
+    # Wait for any TTS/announcement to begin, then for it to finish, before resetting.
+    # Note: we cannot wait on `voice_assistant.is_running` here because in streaming mode
+    # the voice assistant reports "running" continuously, so that wait would never complete.
+    - wait_until:
+        condition:
+          media_player.is_announcing: external_media_player
+        timeout: 0.5s
     - wait_until:
         not:
-          voice_assistant.is_running:
-    # Stop ducking audio.
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 0
-        duration: 1.0s
-    # If the end happened because of an error, let the error phase on for a second
+          media_player.is_announcing: external_media_player
+    # If the end happened because of an error, let the error phase show for a second
     - if:
         condition:
           lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
         then:
           - delay: 1s
-    # Reset the voice assistant phase id and reset the LED animations.
-    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-    - script.execute: control_leds
+    # Un-duck, return to idle, refresh LEDs, and re-arm idle wake word detection (shared with
+    # the interrupt path so normal completion and aborts end up in the same state).
+    - script.execute: return_to_idle
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
