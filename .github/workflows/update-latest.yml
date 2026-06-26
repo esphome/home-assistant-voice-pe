@@ -3,13 +3,26 @@ name: Update latest build
 on:
   release:
     types: [edited]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to publish as latest (e.g. 26.6.0)"
+        required: true
+        type: string
 
 jobs:
   update-latest:
     name: Update latest build version
     runs-on: ubuntu-latest
     environment: production
-    if: ${{ !contains(github.event.release.tag_name, 'beta') && github.event.changes.make_latest && github.event.changes.make_latest.to == 'true' }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+          || (!contains(github.event.release.tag_name, 'beta')
+              && github.event.changes.make_latest
+              && (github.event.changes.make_latest.to == true
+                  || github.event.changes.make_latest.to == 'true')) }}
+    env:
+      VERSION: ${{ github.event.release.tag_name || inputs.version }}
     strategy:
       matrix:
         device:
@@ -17,12 +30,11 @@ jobs:
           - ha-voice-8mb
     steps:
       - name: Download version manifest from R2
-        run: curl -o manifest.json https://firmware.esphome.io/home-assistant-voice-pe/${{ matrix.device }}/${{ github.event.release.tag_name }}/manifest.json
+        run: curl -o manifest.json "https://firmware.esphome.io/home-assistant-voice-pe/${{ matrix.device }}/${VERSION}/manifest.json"
       - name: Update paths
         run: |
           mkdir output
-          version="${{ github.event.release.tag_name }}"
-          jq --arg version "$version" \
+          jq --arg version "$VERSION" \
               '.builds[].ota.path |= $version + "/" + . | (.builds[].parts // [])[].path |= $version + "/" + .' \
               manifest.json > output/manifest.json
       - name: Upload updated manifest to R2
