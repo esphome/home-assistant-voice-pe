@@ -6,6 +6,7 @@
 #include "esphome/core/log.h"
 
 #include <cinttypes>
+#include <cstring>
 
 namespace esphome {
 namespace voice_kit {
@@ -117,7 +118,7 @@ void VoiceKit::write_pipeline_stages() {
 
   auto error_code = this->write(stage_set, sizeof(stage_set));
   if (error_code != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Failed to write chanenl 0 stage");
+    ESP_LOGE(TAG, "Failed to write channel 0 stage");
   }
 
   // Write channel 1 stage
@@ -252,7 +253,7 @@ VoiceKitUpdaterStatus VoiceKit::dfu_update_send_block_() {
 }
 
 uint32_t VoiceKit::load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t offset) {
-  if (offset > this->firmware_bin_length_) {
+  if (offset >= this->firmware_bin_length_) {
     ESP_LOGE(TAG, "Invalid offset");
     return 0;
   }
@@ -262,9 +263,7 @@ uint32_t VoiceKit::load_buf_(uint8_t *buf, const uint8_t max_len, const uint32_t
     buf_len = max_len;
   }
 
-  for (uint8_t i = 0; i < max_len; i++) {
-    buf[i] = this->firmware_bin_[offset + i];
-  }
+  memcpy(buf, &this->firmware_bin_[offset], buf_len);
   return buf_len;
 }
 
@@ -328,9 +327,9 @@ bool VoiceKit::dfu_get_version_() {
 }
 
 bool VoiceKit::dfu_reboot_() {
-  const uint8_t reboot_req[] = {DFU_CONTROLLER_SERVICER_RESID, DFU_CONTROLLER_SERVICER_RESID_DFU_REBOOT, 1};
+  const uint8_t reboot_req[] = {DFU_CONTROLLER_SERVICER_RESID, DFU_CONTROLLER_SERVICER_RESID_DFU_REBOOT, 1, 0};
 
-  auto error_code = this->write(reboot_req, 4);
+  auto error_code = this->write(reboot_req, sizeof(reboot_req));
   if (error_code != i2c::ERROR_OK) {
     ESP_LOGE(TAG, "Reboot request failed");
     return false;
