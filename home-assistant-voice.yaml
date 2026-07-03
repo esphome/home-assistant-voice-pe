@@ -227,6 +227,15 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+  # Timer LED remaining time off switch
+  - platform: template
+    id: timer_led_off
+    name: Timer LED off
+    icon: "mdi:led-off"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    disabled_by_default: true
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
@@ -1078,7 +1087,7 @@ script:
             id(control_leds_voice_assistant_error_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
             id(control_leds_voice_assistant_not_ready_phase).execute();
-          } else if (id(is_timer_active)) {
+          } else if (id(is_timer_active) && !id(timer_led_off).state) {
             id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
