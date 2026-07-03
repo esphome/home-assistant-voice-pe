@@ -6,3 +6,7 @@ updates:
     schedule:
       interval: daily
       time: "06:00"
+    groups:
+      shared-workflows:
+        patterns:
+          - "esphome/workflows*"
