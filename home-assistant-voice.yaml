@@ -227,6 +227,17 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+  # Child lock. When on, a simple press of the center button will not start a
+  # voice assistant session (it still silences a ringing timer and stops/pauses
+  # the assistant, announcements and media). The wake word is unaffected. Useful
+  # to prevent accidental or child button presses from starting the assistant.
+  - platform: template
+    id: child_lock
+    name: Child lock
+    icon: "mdi:account-lock"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
     id: timer_ringing
@@ -342,6 +353,7 @@ binary_sensor:
                                             condition:
                                               and:
                                                 - switch.is_off: master_mute_switch
+                                                - switch.is_off: child_lock
                                                 - not: voice_assistant.is_running
                                             then:
                                               - script.execute:
