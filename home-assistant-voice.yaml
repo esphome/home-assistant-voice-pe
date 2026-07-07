@@ -227,10 +227,10 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
-  # Timer LED remaining time off switch
+  # Disable physical controls switch
   - platform: template
-    id: lock_buttons
-    name: Lock buttons
+    id: disable_buttons
+    name: Disable physical controls
     icon: "mdi:button-pointer"
     entity_category: config
     optimistic: true
@@ -295,13 +295,13 @@ binary_sensor:
     on_press:
       - if:
           condition:
-            switch.is_off: lock_buttons
+            switch.is_off: disable_buttons
           then:
             - script.execute: control_leds
     on_release:
       - if:
           condition:
-            switch.is_off: lock_buttons
+            switch.is_off: disable_buttons
           then:
             - script.execute: control_leds
       # If a factory reset is requested, factory reset on release
@@ -324,7 +324,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(lock_buttons).state;
+                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
               then:
                 - if:
                     condition:
@@ -377,7 +377,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(lock_buttons).state;
+                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
               then:
                 - script.execute:
                     id: play_sound
@@ -398,7 +398,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(lock_buttons).state;
+                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
               then:
                 - script.execute:
                     id: play_sound
@@ -414,7 +414,7 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(lock_buttons).state;
+                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
               then:
                 - script.execute:
                     id: play_sound
@@ -999,7 +999,7 @@ sensor:
           condition:
             and:
               - binary_sensor.is_off: center_button
-              - switch.is_off: lock_buttons
+              - switch.is_off: disable_buttons
           then:
             - script.execute:
                 id: control_volume
@@ -1023,7 +1023,7 @@ sensor:
           condition:
             and:
               - binary_sensor.is_off: center_button
-              - switch.is_off: lock_buttons
+              - switch.is_off: disable_buttons
           then:
             - script.execute:
                 id: control_volume
