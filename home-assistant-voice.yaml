@@ -33,6 +33,7 @@ substitutions:
   easter_egg_tick_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
   easter_egg_tada_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
   error_cloud_expired_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/error_cloud_expired.mp3
+  processing_sound_file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/processing.wav  
 
 esphome:
   name: home-assistant-voice
@@ -227,6 +228,16 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+
+  # Thinking Sound Switch.
+  - platform: template
+    id: thinking_sound
+    name: "Thinking sound"
+    icon: "mdi:music-note"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
   # Disable physical controls switch
   - platform: template
     id: disable_buttons
@@ -1624,6 +1635,8 @@ audio_file:
     file: ${easter_egg_tada_sound_file}
   - id: error_cloud_expired
     file: ${error_cloud_expired_sound_file}
+  - id: processing_sound
+    file: ${processing_sound_file}      
 
 media_source:
   - platform: audio_file
@@ -1634,6 +1647,43 @@ media_source:
   - platform: audio_http
     id: http_media_source
     buffer_size: 500000
+  - platform: file
+    id: file_source
+    files:
+      - id: center_button_press_sound
+        file: ${center_button_press_sound_file}
+      - id: center_button_double_press_sound
+        file: ${center_button_double_press_sound_file}
+      - id: center_button_triple_press_sound
+        file: ${center_button_triple_press_sound_file}
+      - id: center_button_long_press_sound
+        file: ${center_button_long_press_sound_file}
+      - id: factory_reset_initiated_sound
+        file: ${factory_reset_initiated_sound_file}
+      - id: factory_reset_cancelled_sound
+        file: ${factory_reset_cancelled_sound_file}
+      - id: factory_reset_confirmed_sound
+        file: ${factory_reset_confirmed_sound_file}
+      - id: jack_connected_sound
+        file: ${jack_connected_sound_file}
+      - id: jack_disconnected_sound
+        file: ${jack_disconnected_sound_file}
+      - id: mute_switch_on_sound
+        file: ${mute_switch_on_sound_file}
+      - id: mute_switch_off_sound
+        file: ${mute_switch_off_sound_file}
+      - id: timer_finished_sound
+        file: ${timer_finished_sound_file}
+      - id: wake_word_triggered_sound
+        file: ${wake_word_triggered_sound_file}
+      - id: easter_egg_tick_sound
+        file: ${easter_egg_tick_sound_file}
+      - id: easter_egg_tada_sound
+        file: ${easter_egg_tada_sound_file}
+      - id: error_cloud_expired
+        file: ${error_cloud_expired_sound_file}
+      - id: processing_sound
+        file: ${processing_sound_file}        
   - platform: sendspin
     id: sendspin_media_source
     fixed_delay: 480 microseconds  # The AIC3204 DAC used, as configured, on the VPE delays audio by 480 microseconds
@@ -1864,6 +1914,16 @@ voice_assistant:
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+    # Play optional processing sound if enabled
+    - if:
+        condition:
+          lambda: 'return id(thinking_sound).state;'
+        then:
+          - script.execute:
+              id: play_sound
+              parameters:
+                priority: true
+                sound_file: !lambda return id(processing_sound);
   on_intent_progress:
     - if:
         condition:
