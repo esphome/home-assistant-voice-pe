@@ -1590,6 +1590,7 @@ speaker:
 sendspin:
   id: sendspin_hub
   task_stack_in_psram: false
+  static_delay_adjustable: true
 
 audio_file:
   - id: center_button_press_sound
