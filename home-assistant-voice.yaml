@@ -589,6 +589,10 @@ light:
     num_leds: 12
     rgb_order: GRB
     rmt_symbols: 192
+    # Without DMA the RMT peripheral is refilled from an interrupt, and WS2812 is
+    # a bit-timing protocol: under audio load a late refill corrupts the stream
+    # from that point down the chain, so the ring flickers during playback.
+    use_dma: true
     default_transition_length: 0ms
     power_supply: led_power
 
