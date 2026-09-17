@@ -21,10 +21,11 @@ jobs:
       files: |
         home-assistant-voice.factory.yaml
         home-assistant-voice.8mb.yaml
-      esphome-version: 2026.6.0
+      esphome-version: 2026.9.0
       release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
       release-url: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
-      release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+      # Downgrade protection needs a dotted-numeric version on every build
+      release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '0.0.0' }}
 
   comment:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.owner.login == 'esphome'

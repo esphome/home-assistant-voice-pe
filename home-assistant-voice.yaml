@@ -38,7 +38,7 @@ esphome:
   name: home-assistant-voice
   friendly_name: Home Assistant Voice
   name_add_mac_suffix: true
-  min_version: 2026.6.0
+  min_version: 2026.9.0
   on_boot:
     priority: 375
     then:
@@ -63,6 +63,9 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
+    advanced:
+      nvs_encryption:
+        key_id: 0
     sdkconfig_options:
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"

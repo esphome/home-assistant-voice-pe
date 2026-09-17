@@ -1,3 +1,8 @@
+# Release version stamped by CI; local builds default to 0.0.0
+# (downgrade protection requires dotted-numeric).
+substitutions:
+  fw_version: !env_var FW_VERSION 0.0.0
+
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
   # It must appear before the actual package so it becomes the orignal config and the
@@ -16,13 +21,28 @@ packages:
 esphome:
   project:
     name: Nabu Casa.Home Assistant Voice PE
-    version: dev
+    version: ${fw_version}
+
+esp32:
+  framework:
+    advanced:
+      # Compiled-in OTA trust anchor; key digests are derived from KMS and
+      # written to secrets.yaml by CI (see .github/workflows/build.yml).
+      signed_ota_verification:
+        signing_scheme: rsa3072
+        verification_keys:
+          - !secret fw_key_digest_gcp
+          - !secret fw_key_digest_aws
+      enable_ota_downgrade_protection: true
 
 ota:
   - platform: http_request
     id: ota_http_request
 
 http_request:
+
+provisioning:
+  timeout: 15min
 
 update:
   - platform: http_request

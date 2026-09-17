@@ -5,7 +5,7 @@ esphome:
   name: ha-voice-8mb
   project:
     name: Nabu Casa.Home Assistant Voice PE
-    version: dev
+    version: ${fw_version}
 
 esp32:
   flash_size: 8MB
