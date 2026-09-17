@@ -584,7 +584,12 @@ light:
   - platform: esp32_rmt_led_strip
     id: leds_internal
     pin: GPIO21
-    chipset: WS2812
+    bit0_high: 300ns
+    bit0_low: 975ns
+    bit1_high: 650ns
+    bit1_low: 650ns
+    reset_low: 300us
+    reset_high: 0us
     max_refresh_rate: 15ms
     num_leds: 12
     rgb_order: GRB
