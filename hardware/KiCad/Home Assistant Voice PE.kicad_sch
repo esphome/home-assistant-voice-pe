@@ -1,0 +1,289 @@
+(kicad_sch
+	(version 20250114)
+	(generator "eeschema")
+	(generator_version "9.0")
+	(uuid "349ed1f3-025e-4f39-9714-d91e135a7151")
+	(paper "A3")
+	(title_block
+		(comment 1 "Licensed under CERN-OHL-P v2")
+	)
+	(lib_symbols)
+	(text "Copyright Nabu Casa 2025.\nThis project and the files contained within describe Open Hardware and is licensed under the CERN-OHL-P v2.\nYou may redistribute and modify this documentation and make products using it under the\nterms of the CERN-OHL-P v2 (https://cern.ch/cern-ohl). This documentation is distributed\nWITHOUT ANY EXPRESS OR IMPLIED WARRANTY, INCLUDING OF MERCHANTABILITY, SATISFACTORY QUALITY\nAND FITNESS FOR A PARTICULAR PURPOSE. Please see the CERN-OHL-P v2 for applicable conditions."
+		(exclude_from_sim no)
+		(at 86.36 146.558 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f895ee2c-f1a8-4004-bbae-c30165791289")
+	)
+	(sheet
+		(at 122.682 88.646)
+		(size 28.702 13.97)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "61d4d449-df96-4e92-9537-f531556a04d7")
+		(property "Sheetname" "DAC"
+			(at 122.682 87.9344 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "DAC.kicad_sch"
+			(at 122.682 103.2006 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(property "字段 2" ""
+			(at 122.682 88.646 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(hide yes)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "7")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 87.122 88.392)
+		(size 28.702 16.764)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "643364e4-8361-4170-9de2-28483fec4f8f")
+		(property "Sheetname" "XMOS"
+			(at 87.122 87.6804 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "XMOS.kicad_sch"
+			(at 87.122 105.7406 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "6")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 121.92 43.18)
+		(size 27.94 15.24)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "89144710-8928-461c-8427-ba88a175dedf")
+		(property "Sheetname" "Block"
+			(at 121.92 42.4684 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Block.kicad_sch"
+			(at 121.92 58.9538 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 121.92 66.04)
+		(size 27.94 15.24)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "a7f78799-685f-4ce7-bb9e-2518ac1a1bda")
+		(property "Sheetname" "ESP32"
+			(at 121.92 65.3284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "ESP32S3.kicad_sch"
+			(at 121.92 81.8138 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "5")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 86.36 113.284)
+		(size 28.448 13.97)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "b2f39dc0-ac44-4186-8be9-d62f5b177e00")
+		(property "Sheetname" "LED & Connector"
+			(at 86.36 112.5724 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "LED & Connector.kicad_sch"
+			(at 86.36 127.8386 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "8")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 86.36 66.04)
+		(size 27.94 15.24)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "cee6f4f6-7555-4cac-941e-fc825fe0305c")
+		(property "Sheetname" "Power"
+			(at 86.36 65.3284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Power.kicad_sch"
+			(at 86.36 81.8138 0)
+			(effects
+				(font
+					(size 1.143 1.143)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "Home Assistant Voice PE"
+				(path "/349ed1f3-025e-4f39-9714-d91e135a7151"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)
