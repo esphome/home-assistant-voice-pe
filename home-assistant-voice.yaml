@@ -1688,7 +1688,7 @@ media_source:
       - id: error_cloud_expired
         file: ${error_cloud_expired_sound_file}
       - id: processing_sound
-        file: ${processing_sound_file}    
+        file: ${processing_sound_file}
   - platform: sendspin
     id: sendspin_media_source
     codecs: [FLAC, PCM]  # Prefer FLAC for Sendspin
