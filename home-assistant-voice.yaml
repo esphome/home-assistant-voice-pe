@@ -1922,9 +1922,7 @@ voice_assistant:
               timeout: 3s
           - if:
               condition:
-                and:
-                  - switch.is_off: master_mute_switch
-                  - binary_sensor.is_off: hardware_mute_switch
+                binary_sensor.is_off: hardware_mute_switch
               then:
                 - microphone.unmute: i2s_mics
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
