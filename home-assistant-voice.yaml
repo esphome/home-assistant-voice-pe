@@ -1809,25 +1809,8 @@ micro_wake_word:
                             - media_player.stop:
                                 announcement: true
                                 id: external_media_player
-                          # Start the voice assistant and play the wake sound, if enabled
+                          # Start the voice assistant; on_listening plays the ready sound.
                           else:
-                            - if:
-                                condition:
-                                  switch.is_on: wake_sound
-                                then:
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: "wake_word_triggered_sound"
-                                  - wait_until:
-                                      condition:
-                                        media_player.is_announcing: external_media_player
-                                      timeout: 1s
-                                  - wait_until:
-                                      condition:
-                                        not:
-                                          media_player.is_announcing: external_media_player
-                                      timeout: 3s
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
 
@@ -1919,6 +1902,31 @@ voice_assistant:
         decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
         duration: 0.0s         # The duration of the transition (default is no transition)
   on_listening:
+    - if:
+        condition:
+          switch.is_on: wake_sound
+        then:
+          - microphone.mute: i2s_mics
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: wake_word_triggered_sound
+          - wait_until:
+              condition:
+                media_player.is_announcing: external_media_player
+              timeout: 1s
+          - wait_until:
+              condition:
+                not:
+                  media_player.is_announcing: external_media_player
+              timeout: 3s
+          - if:
+              condition:
+                and:
+                  - switch.is_off: master_mute_switch
+                  - binary_sensor.is_off: hardware_mute_switch
+              then:
+                - microphone.unmute: i2s_mics
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_start:
