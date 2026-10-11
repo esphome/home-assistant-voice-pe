@@ -1,4 +1,6 @@
 substitutions:
+  dialog_timer_entity: sensor.dialog_custom_ui_timers
+  dialog_timer_device_id: ""
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -130,6 +132,18 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  - id: dialog_timer_active
+    type: bool
+    initial_value: 'false'
+  - id: dialog_timer_remaining
+    type: uint32_t
+    initial_value: '0'
+  - id: dialog_timer_total
+    type: uint32_t
+    initial_value: '1'
+  - id: dialog_timer_last_update
+    type: uint32_t
+    initial_value: '0'
   - id: command_processed
     type: bool
     restore_value: no
@@ -200,6 +214,45 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+
+json:
+
+text_sensor:
+  - platform: homeassistant
+    id: dialog_timer_payload
+    entity_id: ${dialog_timer_entity}
+    attribute: payload
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(dialog_timer_active) = false;
+            json::parse_json(x, [](JsonObject root) -> bool {
+              const std::string device_id = "${dialog_timer_device_id}";
+              const std::string lookup = device_id.empty() ? App.get_name().str() : device_id;
+              JsonObject timer = root[lookup.c_str()];
+              if (timer.isNull() || !timer["remaining_seconds"].is<uint32_t>() ||
+                  !timer["total_seconds"].is<uint32_t>()) return false;
+              const uint32_t remaining = timer["remaining_seconds"];
+              const uint32_t total = timer["total_seconds"];
+              if (total == 0 || remaining == 0) return false;
+              id(dialog_timer_remaining) = std::min(remaining, total);
+              id(dialog_timer_total) = total;
+              id(dialog_timer_last_update) = millis();
+              id(dialog_timer_active) = true;
+              return true;
+            });
+        - script.execute: control_leds
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: return id(dialog_timer_active) && millis() - id(dialog_timer_last_update) > 15000;
+          then:
+            - lambda: id(dialog_timer_active) = false;
+            - script.execute: control_leds
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -1515,7 +1568,13 @@ script:
   - id: fetch_first_active_timer
     then:
       - lambda: |
+          if (id(dialog_timer_active)) {
+            id(first_active_timer).total_seconds = id(dialog_timer_total);
+            id(first_active_timer).seconds_left = id(dialog_timer_remaining);
+            return;
+          }
           const auto &timers = id(va).get_timers();
+          if (timers.empty()) return;
           auto output_timer = *timers.begin();
           for (const auto &timer : timers) {
             if (timer.is_active && timer.seconds_left <= output_timer.seconds_left) {
@@ -1529,7 +1588,7 @@ script:
     then:
       - lambda: |
           const auto &timers = id(va).get_timers();
-          bool output = false;
+          bool output = id(dialog_timer_active);
           for (const auto &timer : timers) {
             if (timer.is_active) {
               output = true;
