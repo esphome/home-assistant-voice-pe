@@ -138,6 +138,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: response_has_speech
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
   - id: global_led_animation_index
     type: int
@@ -1464,7 +1468,7 @@ script:
     then:
       - if:
           condition:
-            lambda: return id(command_processed) && !id(command_failed);
+            lambda: return id(command_processed) && !id(command_failed) && !id(response_has_speech);
           then:
             - wait_until:
                 condition:
@@ -1478,7 +1482,7 @@ script:
                         voice_assistant.is_running:
                     - not:
                         media_player.is_announcing: external_media_player
-                    - lambda: return id(command_processed) && !id(command_failed);
+                    - lambda: return id(command_processed) && !id(command_failed) && !id(response_has_speech);
                 then:
                   - script.execute:
                       id: play_sound
@@ -1909,6 +1913,7 @@ voice_assistant:
     - lambda: |-
         id(command_processed) = false;
         id(command_failed) = false;
+        id(response_has_speech) = false;
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
         decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
@@ -1928,6 +1933,7 @@ voice_assistant:
           # A nonempty x variable means a streaming TTS url was sent to the media player
           lambda: 'return !x.empty();'
         then:
+          - lambda: id(response_has_speech) = true;
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
           # Start a script that would potentially enable the stop word if the response is longer than a second
@@ -1935,6 +1941,10 @@ voice_assistant:
   on_intent_end:
     - lambda: id(command_processed) = true;
   on_tts_start:
+    - lambda: |-
+        if (x.find_first_not_of(" \t\r\n") != std::string::npos) {
+          id(response_has_speech) = true;
+        }
     - if:
         condition:
           # The intent_progress trigger didn't start the TTS Reponse
