@@ -223,7 +223,7 @@ text_sensor:
   - platform: homeassistant
     id: dialog_alarm_state
     entity_id: ${dialog_alarm_entity}
-    attribute: payload
+    attribute: payload_json
     internal: true
     on_value:
       then:
@@ -246,7 +246,7 @@ text_sensor:
   - platform: homeassistant
     id: dialog_timer_payload
     entity_id: ${dialog_timer_entity}
-    attribute: payload
+    attribute: payload_json
     internal: true
     on_value:
       then:
