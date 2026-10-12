@@ -1,4 +1,5 @@
 substitutions:
+  dialog_alarm_entity: sensor.dialog_custom_ui_alarm
   dialog_timer_entity: sensor.dialog_custom_ui_timers
   dialog_timer_device_id: ""
   # Phases of the Voice Assistant
@@ -218,6 +219,12 @@ globals:
 json:
 
 text_sensor:
+  - platform: homeassistant
+    id: dialog_alarm_state
+    entity_id: ${dialog_alarm_entity}
+    internal: true
+    on_value:
+      - script.execute: control_leds
   - platform: homeassistant
     id: dialog_timer_payload
     entity_id: ${dialog_timer_entity}
@@ -1241,15 +1248,22 @@ script:
           effect: "Twinkle"
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
-  # Nothing (Either LED ring off or LED ring on if the user decided to turn the user facing LED ring on)
+  # Solid ring at 30% when Dialog Custom UI has enabled alarms; otherwise off.
   - id: control_leds_voice_assistant_idle_phase
     then:
-      - light.turn_off: voice_assistant_leds
       - if:
           condition:
-            light.is_on: led_ring
+            lambda: return id(dialog_alarm_state).state == "on";
           then:
-            light.turn_on: led_ring
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 30%
+                red: !lambda return id(led_ring).current_values.get_red();
+                green: !lambda return id(led_ring).current_values.get_green();
+                blue: !lambda return id(led_ring).current_values.get_blue();
+                effect: "None"
+          else:
+            - light.turn_off: voice_assistant_leds
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
   # Slow clockwise spin of the LED ring.
