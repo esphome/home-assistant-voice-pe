@@ -134,6 +134,70 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  - id: dialog_payload_to_json
+    type: std::function<std::string(const std::string &)>
+    restore_value: no
+    initial_value: |-
+      [](const std::string &input) -> std::string {
+        std::string output;
+        output.reserve(input.size());
+        char quote = 0;
+        auto hex = [](char c) -> int {
+          if (c >= '0' && c <= '9') return c - '0';
+          if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+          if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+          return -1;
+        };
+        auto unicode = [&output](uint32_t value) {
+          const char *digits = "0123456789abcdef";
+          output += "\\u";
+          for (int shift = 12; shift >= 0; shift -= 4) output += digits[(value >> shift) & 15];
+        };
+        for (size_t i = 0; i < input.size(); ++i) {
+          char c = input[i];
+          if (quote) {
+            if (c == quote) { output += '"'; quote = 0; continue; }
+            if (c == '"') { output += "\\\""; continue; }
+            if (c == '\\') {
+              if (++i == input.size()) return {};
+              char escaped = input[i];
+              if (escaped == '\'') { output += '\''; continue; }
+              if (escaped == '"') { output += "\\\""; continue; }
+              if (escaped == '\\') { output += "\\\\"; continue; }
+              if (escaped == 'x' || escaped == 'u' || escaped == 'U') {
+                size_t count = escaped == 'x' ? 2 : (escaped == 'u' ? 4 : 8);
+                if (input.size() - i - 1 < count) return {};
+                uint32_t value = 0;
+                for (size_t n = 0; n < count; ++n) {
+                  int digit = hex(input[++i]);
+                  if (digit < 0) return {};
+                  value = (value << 4) | digit;
+                }
+                if (value > 0x10ffff) return {};
+                if (value <= 0xffff) unicode(value);
+                else { value -= 0x10000; unicode(0xd800 + (value >> 10)); unicode(0xdc00 + (value & 1023)); }
+                continue;
+              }
+              if (escaped == 'a' || escaped == 'v') { unicode(escaped == 'a' ? 7 : 11); continue; }
+              if (escaped == 'b' || escaped == 'f' || escaped == 'n' || escaped == 'r' || escaped == 't' || escaped == '/') {
+                output += '\\'; output += escaped; continue;
+              }
+              return {};
+            }
+            if (static_cast<unsigned char>(c) < 32) { unicode(static_cast<unsigned char>(c)); continue; }
+            output += c;
+          } else if (c == '\'' || c == '"') {
+            quote = c; output += '"';
+          } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+            size_t start = i;
+            while (i + 1 < input.size() && ((input[i + 1] >= 'A' && input[i + 1] <= 'Z') ||
+                   (input[i + 1] >= 'a' && input[i + 1] <= 'z'))) ++i;
+            const std::string token = input.substr(start, i - start + 1);
+            output += token == "True" ? "true" : token == "False" ? "false" : token == "None" ? "null" : token;
+          } else output += c;
+        }
+        return quote ? std::string{} : output;
+      }
   - id: dialog_alarm_active
     type: bool
     initial_value: 'false'
@@ -223,13 +287,13 @@ text_sensor:
   - platform: homeassistant
     id: dialog_alarm_state
     entity_id: ${dialog_alarm_entity}
-    attribute: payload_json
+    attribute: payload
     internal: true
     on_value:
       then:
         - lambda: |-
             id(dialog_alarm_active) = false;
-            auto document = json::parse_json(x);
+            auto document = json::parse_json(id(dialog_payload_to_json)(x));
             if (document.is<JsonArray>()) {
               for (JsonObject alarm : document.as<JsonArray>()) {
                 const std::string device_id = "${dialog_timer_device_id}";
@@ -246,13 +310,13 @@ text_sensor:
   - platform: homeassistant
     id: dialog_timer_payload
     entity_id: ${dialog_timer_entity}
-    attribute: payload_json
+    attribute: payload
     internal: true
     on_value:
       then:
         - lambda: |-
             id(dialog_timer_active) = false;
-            auto document = json::parse_json(x);
+            auto document = json::parse_json(id(dialog_payload_to_json)(x));
             if (document.is<JsonArray>()) {
               for (JsonObject timer : document.as<JsonArray>()) {
                 const std::string device_id = "${dialog_timer_device_id}";
