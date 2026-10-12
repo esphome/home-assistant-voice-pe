@@ -1,7 +1,8 @@
 substitutions:
   dialog_alarm_entity: sensor.dialog_custom_ui_alarm
   dialog_timer_entity: sensor.dialog_custom_ui_timers
-  dialog_timer_device_id: ""
+  dialog_timer_device_id: "f78b84553b463617269c25293950bb55"
+  dialog_timer_media_entity: "media_player.home_assistant_voice_0ab77d_media_player_2"
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -133,6 +134,9 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  - id: dialog_alarm_active
+    type: bool
+    initial_value: 'false'
   - id: dialog_timer_active
     type: bool
     initial_value: 'false'
@@ -142,9 +146,6 @@ globals:
   - id: dialog_timer_total
     type: uint32_t
     initial_value: '1'
-  - id: dialog_timer_last_update
-    type: uint32_t
-    initial_value: '0'
   - id: command_processed
     type: bool
     restore_value: no
@@ -222,9 +223,26 @@ text_sensor:
   - platform: homeassistant
     id: dialog_alarm_state
     entity_id: ${dialog_alarm_entity}
+    attribute: payload
     internal: true
     on_value:
-      - script.execute: control_leds
+      then:
+        - lambda: |-
+            id(dialog_alarm_active) = false;
+            auto document = json::parse_json(x);
+            if (document.is<JsonArray>()) {
+              for (JsonObject alarm : document.as<JsonArray>()) {
+                const std::string device_id = "${dialog_timer_device_id}";
+                const std::string media = "${dialog_timer_media_entity}";
+                const bool matches = (!device_id.empty() && device_id == (alarm["device_id"] | "")) ||
+                                     (!media.empty() && media == (alarm["media"] | ""));
+                if (matches && std::string(alarm["status"] | "") == "on") {
+                  id(dialog_alarm_active) = true;
+                  break;
+                }
+              }
+            }
+        - script.execute: control_leds
   - platform: homeassistant
     id: dialog_timer_payload
     entity_id: ${dialog_timer_entity}
@@ -234,21 +252,24 @@ text_sensor:
       then:
         - lambda: |-
             id(dialog_timer_active) = false;
-            json::parse_json(x, [](JsonObject root) -> bool {
-              const std::string device_id = "${dialog_timer_device_id}";
-              const std::string lookup = device_id.empty() ? App.get_name().str() : device_id;
-              JsonObject timer = root[lookup.c_str()];
-              if (timer.isNull() || !timer["remaining_seconds"].is<uint32_t>() ||
-                  !timer["total_seconds"].is<uint32_t>()) return false;
-              const uint32_t remaining = timer["remaining_seconds"];
-              const uint32_t total = timer["total_seconds"];
-              if (total == 0 || remaining == 0) return false;
-              id(dialog_timer_remaining) = std::min(remaining, total);
-              id(dialog_timer_total) = total;
-              id(dialog_timer_last_update) = millis();
-              id(dialog_timer_active) = true;
-              return true;
-            });
+            auto document = json::parse_json(x);
+            if (document.is<JsonArray>()) {
+              for (JsonObject timer : document.as<JsonArray>()) {
+                const std::string device_id = "${dialog_timer_device_id}";
+                const std::string media = "${dialog_timer_media_entity}";
+                const bool matches = (!device_id.empty() && device_id == (timer["device_id"] | "")) ||
+                                     (!media.empty() && media == (timer["media"] | ""));
+                if (!matches || !timer["remaining_seconds"].is<uint32_t>() ||
+                    !timer["total_seconds"].is<uint32_t>()) continue;
+                const uint32_t remaining = timer["remaining_seconds"];
+                const uint32_t total = timer["total_seconds"];
+                if (total == 0 || remaining == 0) continue;
+                id(dialog_timer_remaining) = std::min(remaining, total);
+                id(dialog_timer_total) = total;
+                id(dialog_timer_active) = true;
+                break;
+              }
+            }
         - script.execute: control_leds
 
 interval:
@@ -256,9 +277,11 @@ interval:
     then:
       - if:
           condition:
-            lambda: return id(dialog_timer_active) && millis() - id(dialog_timer_last_update) > 15000;
+            lambda: return !id(api_id).is_connected() && (id(dialog_timer_active) || id(dialog_alarm_active));
           then:
-            - lambda: id(dialog_timer_active) = false;
+            - lambda: |-
+                id(dialog_timer_active) = false;
+                id(dialog_alarm_active) = false;
             - script.execute: control_leds
 
 switch:
@@ -1253,7 +1276,7 @@ script:
     then:
       - if:
           condition:
-            lambda: return id(dialog_alarm_state).state == "on";
+            lambda: return id(dialog_alarm_active);
           then:
             - light.turn_on:
                 id: voice_assistant_leds
