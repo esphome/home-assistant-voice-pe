@@ -45,20 +45,20 @@ esphome:
   name_add_mac_suffix: true
   min_version: 2026.9.0
   on_boot:
-    priority: 375
-    then:
-      # Run the script to refresh the LED status
-      - script.execute: control_leds
-      - delay: 1s
-      - switch.turn_on: internal_speaker_amp
-      # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
-      - delay: 10min
-      - if:
-          condition:
-            lambda: return id(init_in_progress);
-          then:
-            - lambda: id(init_in_progress) = false;
-            - script.execute: control_leds
+    - priority: 375
+      then:
+        # Run the script to refresh the LED status
+        - script.execute: control_leds
+        - delay: 1s
+        - switch.turn_on: internal_speaker_amp
+        # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
+        - delay: 10min
+        - if:
+            condition:
+              lambda: return id(init_in_progress);
+            then:
+              - lambda: id(init_in_progress) = false;
+              - script.execute: control_leds
 
 esp32:
   board: esp32-s3-devkitc-1
