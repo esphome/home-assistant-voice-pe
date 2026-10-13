@@ -1,0 +1,228 @@
+# Optional display package for a MAX7219 directly wired to Voice PE.
+substitutions:
+  max7219_din_pin: GPIO40
+  max7219_clk_pin: GPIO41
+  max7219_cs_pin: GPIO42
+  max7219_num_chips: "3"
+
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            id(max7219_matrix).intensity(static_cast<int>(id(max7219_brightness).state));
+
+number:
+  - platform: template
+    name: "Яркость часов"
+    id: max7219_brightness
+    icon: mdi:brightness-6
+    min_value: 0
+    max_value: 15
+    step: 1
+    initial_value: 3
+    restore_value: true
+    optimistic: true
+    set_action:
+      - lambda: |-
+          id(max7219_matrix).intensity(static_cast<int>(x));
+          id(max7219_matrix).update();
+
+text_sensor:
+  - platform: homeassistant
+    id: max7219_ha_time
+    entity_id: sensor.time
+    internal: true
+    on_value:
+      - component.update: max7219_matrix
+
+spi:
+  - id: max7219_spi
+    clk_pin: ${max7219_clk_pin}
+    mosi_pin: ${max7219_din_pin}
+
+display:
+  - platform: max7219digit
+    id: max7219_matrix
+    spi_id: max7219_spi
+    cs_pin: ${max7219_cs_pin}
+    num_chips: ${max7219_num_chips}
+    intensity: 3
+    scroll_enable: false
+    update_interval: 250ms
+    lambda: |-
+      it.clear();
+
+      std::string text = "";
+      bool showing_timer = false;
+
+      // 1. ВЫЧИСЛЕНИЕ ОБРАТНОГО ОТСЧЁТА
+      if (id(dialog_timer_active)) {
+        int64_t remaining = id(dialog_timer_remaining);
+
+        if (!id(dialog_timer_paused)) {
+          uint32_t elapsed =
+            (millis() - id(dialog_timer_received_at)) / 1000;
+
+          remaining -= elapsed;
+        }
+
+        if (remaining > 0) {
+          showing_timer = true;
+
+          int minutes = remaining / 60;
+          int seconds = remaining % 60;
+
+          char buffer[16];
+
+          snprintf(
+            buffer,
+            sizeof(buffer),
+            "%d:%02d",
+            minutes,
+            seconds
+          );
+
+          text = buffer;
+        }
+      }
+
+      // 2. ЕСЛИ ТАЙМЕРА НЕТ, ПОКАЗЫВАЕМ ЧАСЫ
+      if (!showing_timer && id(max7219_ha_time).has_state()) {
+        text = id(max7219_ha_time).state;
+      }
+
+      if (text.empty()) {
+        return;
+      }
+
+      // Формат M:SS -> 0M:SS
+      if (showing_timer &&
+          text.size() == 4 &&
+          text[1] == ':') {
+        text = "0" + text;
+      }
+
+      // Проверяем двоеточие и цифры
+      size_t colon = text.find(':');
+
+      if (colon == std::string::npos ||
+          text.size() - colon - 1 != 2) {
+        return;
+      }
+
+      for (size_t i = 0; i < text.size(); i++) {
+        if (i == colon) continue;
+        if (text[i] < '0' || text[i] > '9') {
+          return;
+        }
+      }
+
+      // 3. КРУПНЫЙ ШРИФТ 4x7
+      const uint8_t font4[10][7] = {
+        {15,9,9,9,9,9,15},     // 0
+        {2,6,2,2,2,2,7},      // 1
+        {15,1,1,15,8,8,15},   // 2
+        {15,1,1,7,1,1,15},    // 3
+        {9,9,9,15,1,1,1},     // 4
+        {15,8,8,15,1,1,15},   // 5
+        {15,8,8,15,9,9,15},   // 6
+        {15,1,1,2,2,4,4},     // 7
+        {15,9,9,15,9,9,15},   // 8
+        {15,9,9,15,1,1,15}   // 9
+      };
+
+      // 4. КОМПАКТНЫЙ ШРИФТ 3x7
+      const uint8_t font3[10][7] = {
+        {7,5,5,5,5,5,7},      // 0
+        {2,6,2,2,2,2,7},      // 1
+        {7,1,1,7,4,4,7},      // 2
+        {7,1,1,3,1,1,7},      // 3
+        {5,5,5,7,1,1,1},      // 4
+        {7,4,4,7,1,1,7},      // 5
+        {7,4,4,7,5,5,7},      // 6
+        {7,1,1,2,2,2,2},      // 7
+        {7,5,5,7,5,5,7},      // 8
+        {7,5,5,7,1,1,7}      // 9
+      };
+
+      auto draw_digit4 = [&](int x, char ch) {
+        int n = ch - '0';
+
+        for (int y = 0; y < 7; y++) {
+          for (int col = 0; col < 4; col++) {
+            if (font4[n][y] & (1 << (3-col))) {
+              it.draw_pixel_at(
+                x + col, y + 1, Color::WHITE
+              );
+            }
+          }
+        }
+      };
+
+      auto draw_digit3 = [&](int x, char ch) {
+        int n = ch - '0';
+
+        for (int y = 0; y < 7; y++) {
+          for (int col = 0; col < 3; col++) {
+            if (font3[n][y] & (1 << (2-col))) {
+              it.draw_pixel_at(
+                x + col, y + 1, Color::WHITE
+              );
+            }
+          }
+        }
+      };
+
+      // 5. ВЫБИРАЕМ РАЗМЕР ЦИФР
+      if (text.size() == 5 && colon == 2) {
+        // HH:MM или MM:SS (до 99 минут)
+        // Полная ширина 24 пикселя
+
+        draw_digit4(0, text[0]);
+        draw_digit4(6, text[1]);
+        draw_digit4(14, text[3]);
+        draw_digit4(20, text[4]);
+
+        it.draw_pixel_at(11, 3, Color::WHITE);
+        it.draw_pixel_at(11, 6, Color::WHITE);
+        it.draw_pixel_at(12, 3, Color::WHITE);
+        it.draw_pixel_at(12, 6, Color::WHITE);
+
+      } else if (text.size() == 6 && colon == 3) {
+        // MMM:SS (100-999 минут)
+        // Компактный шрифт 3x7
+
+        draw_digit3(0, text[0]);
+        draw_digit3(4, text[1]);
+        draw_digit3(8, text[2]);
+
+        // Двоеточие
+        it.draw_pixel_at(12, 3, Color::WHITE);
+        it.draw_pixel_at(12, 6, Color::WHITE);
+
+        draw_digit3(14, text[4]);
+        draw_digit3(18, text[5]);
+
+      } else if (text.size() == 7 && colon == 4) {
+        // MMMM:SS (1000-9999 минут)
+        // Узкие цифры 3x7 без промежутков
+
+        draw_digit3(0, text[0]);
+        draw_digit3(3, text[1]);
+        draw_digit3(6, text[2]);
+        draw_digit3(9, text[3]);
+
+        it.draw_pixel_at(13, 3, Color::WHITE);
+        it.draw_pixel_at(13, 6, Color::WHITE);
+
+        draw_digit3(15, text[5]);
+        draw_digit3(19, text[6]);
+      }
+
+      // 6. ИНДИКАТОР БУДИЛЬНИКА
+      // Точка в левом верхнем углу
+      // Только в режиме часов
+      if (!showing_timer && id(dialog_alarm_active)) {
+        it.draw_pixel_at(0, 0, Color::WHITE);
+      }

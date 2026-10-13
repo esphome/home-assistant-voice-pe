@@ -204,6 +204,12 @@ globals:
   - id: dialog_timer_active
     type: bool
     initial_value: 'false'
+  - id: dialog_timer_paused
+    type: bool
+    initial_value: 'false'
+  - id: dialog_timer_received_at
+    type: uint32_t
+    initial_value: '0'
   - id: dialog_timer_remaining
     type: uint32_t
     initial_value: '0'
@@ -330,6 +336,8 @@ text_sensor:
                 if (total == 0 || remaining == 0) continue;
                 id(dialog_timer_remaining) = std::min(remaining, total);
                 id(dialog_timer_total) = total;
+                id(dialog_timer_paused) = timer["paused"] | false;
+                id(dialog_timer_received_at) = millis();
                 id(dialog_timer_active) = true;
                 break;
               }

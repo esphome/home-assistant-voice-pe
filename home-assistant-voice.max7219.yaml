@@ -1,0 +1,4 @@
+# Voice PE with a directly connected MAX7219 display.
+packages:
+  voice_pe: !include home-assistant-voice.yaml
+  max7219_clock: !include modules/max7219-clock.yaml
