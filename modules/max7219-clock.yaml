@@ -11,6 +11,33 @@ esphome:
       then:
         - lambda: |-
             id(max7219_matrix).intensity(static_cast<int>(id(max7219_brightness).state));
+        - script.execute: max7219_test
+
+globals:
+  - id: max7219_test_active
+    type: bool
+    initial_value: 'false'
+
+script:
+  - id: max7219_test
+    mode: restart
+    then:
+      - lambda: |-
+          id(max7219_test_active) = true;
+          id(max7219_matrix).intensity(3);
+      - component.update: max7219_matrix
+      - delay: 2s
+      - lambda: |-
+          id(max7219_test_active) = false;
+          id(max7219_matrix).intensity(static_cast<int>(id(max7219_brightness).state));
+      - component.update: max7219_matrix
+
+button:
+  - platform: template
+    name: "Проверка матрицы"
+    icon: mdi:led-on
+    on_press:
+      - script.execute: max7219_test
 
 number:
   - platform: template
@@ -52,6 +79,14 @@ display:
     update_interval: 250ms
     lambda: |-
       it.clear();
+      if (id(max7219_test_active)) {
+        for (int y = 0; y < it.get_height(); ++y) {
+          for (int x = 0; x < it.get_width(); ++x) {
+            it.draw_pixel_at(x, y, Color::WHITE);
+          }
+        }
+        return;
+      }
 
       std::string text = "";
       bool showing_timer = false;
@@ -88,11 +123,21 @@ display:
       }
 
       // 2. ЕСЛИ ТАЙМЕРА НЕТ, ПОКАЗЫВАЕМ ЧАСЫ
-      if (!showing_timer && id(max7219_ha_time).has_state()) {
+      if (!showing_timer && id(max7219_ha_time).has_state() &&
+          id(max7219_ha_time).state != "unknown" &&
+          id(max7219_ha_time).state != "unavailable") {
         text = id(max7219_ha_time).state;
       }
 
       if (text.empty()) {
+        // No HA time or timer yet: show --:-- rather than a blank screen.
+        for (int x : {0, 6, 14, 20}) {
+          for (int col = 0; col < 4; ++col) {
+            it.draw_pixel_at(x + col, 4, Color::WHITE);
+          }
+        }
+        it.draw_pixel_at(11, 3, Color::WHITE);
+        it.draw_pixel_at(11, 6, Color::WHITE);
         return;
       }
 
