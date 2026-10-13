@@ -13,7 +13,7 @@ three MAX7219 matrices. The base `home-assistant-voice.yaml` stays available
 for devices without the display. Voice, wake word, LED ring and sound cues
 remain in the combined configuration.
 
-Default wiring: DIN → IO40, CLK → IO41, CS → IO42, panel VCC → 5 V,
+Default wiring: DIN → IO41, CLK → IO40, CS → IO42, panel VCC → 5 V,
 and a common GND. Confirm the actual wiring before installing; use appropriate
 3.3 V to 5 V signal conversion for reliable MAX7219 operation.
 

@@ -1,7 +1,7 @@
 # Optional display package for a MAX7219 directly wired to Voice PE.
 substitutions:
-  max7219_din_pin: GPIO40
-  max7219_clk_pin: GPIO41
+  max7219_din_pin: GPIO41
+  max7219_clk_pin: GPIO40
   max7219_cs_pin: GPIO42
   max7219_num_chips: "3"
 
