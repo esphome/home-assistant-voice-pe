@@ -26,7 +26,8 @@ std::vector<uint8_t> max7219_overlay_columns;
 uint32_t max7219_overlay_started=0,max7219_overlay_duration=0;
 bool max7219_overlay_icon=false;
 auto max7219_text_columns = ''' + font + r''';
-void show(std::string message, std::string icon, int duration) {
+// Use long to expose mixed-type deduction bugs that int32_t triggers on Xtensa.
+void show(std::string message, std::string icon, long duration) {
 ''' + action + r'''
 }
 int main(){

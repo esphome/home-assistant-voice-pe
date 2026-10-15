@@ -61,7 +61,7 @@ api:
             id(max7219_overlay_columns) = std::move(columns);
             id(max7219_overlay_icon) = !symbol.empty();
             id(max7219_overlay_started) = millis();
-            id(max7219_overlay_duration) = static_cast<uint32_t>(std::min(duration, 3600)) * 1000;
+            id(max7219_overlay_duration) = static_cast<uint32_t>(std::min<int32_t>(duration, 3600)) * 1000;
         - component.update: max7219_matrix
 
 globals:
