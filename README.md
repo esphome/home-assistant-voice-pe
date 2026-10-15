@@ -62,3 +62,44 @@ Timers below 100 minutes use MM:SS. Longer timers use HH:MM with an upper-right
 dot (partial minutes round up, maximum displayed value 99:59). In clock mode,
 the upper-left dot indicates an enabled alarm. Without time, the display shows
 `--:--`. The three-matrix version remains available.
+
+### Temporary text and icons from Home Assistant
+
+After updating the display firmware and reconnecting ESPHome in Home Assistant,
+use the device's `matrix_show` action in an automation. The action name includes
+the node name; select it in Developer Tools → Actions if yours differs.
+
+```yaml
+action: esphome.home_assistant_voice_0ab77d_matrix_show
+data:
+  message: "Привет"
+  icon: ""
+  duration: 10
+```
+
+For an icon, pass an empty message:
+
+```yaml
+action: esphome.home_assistant_voice_0ab77d_matrix_show
+data:
+  message: ""
+  icon: smile
+  duration: 5
+```
+
+All three fields are required. `duration` is seconds, limited to 3600; zero or a
+negative value clears the overlay immediately. Empty message and icon also clear
+it. A new call replaces the current overlay and restarts its duration. The display
+returns to the current timer or clock afterwards; timers keep running while hidden.
+Short messages are centered; long messages scroll. The built-in 3x5 font supports
+Latin and Cyrillic letters (displayed uppercase), digits and basic punctuation,
+up to 64 characters. Unsupported characters appear as question marks.
+
+Supported icons: `smile`, `sad`, `heart`, `check`, `cross`, `bell`, or their emoji
+aliases `🙂`, `🙁`, `❤️`, `✅`, `❌`, `🔔`. If both fields are provided, the icon
+takes priority. Unknown icons leave the current display unchanged.
+
+The existing **Mute** switch controls microphone mute: `switch.turn_on` disables
+the microphone and `switch.turn_off` enables it, provided the physical mute switch
+is off. Select the existing device entity in the automation UI; no extra microphone
+switch or change to its behavior is needed for display actions.

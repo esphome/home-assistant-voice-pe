@@ -19,8 +19,12 @@ class CompactClockTests(unittest.TestCase):
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 #define id(x) x
 namespace Color { constexpr int WHITE = 1; }
+std::vector<uint8_t> max7219_overlay_columns;
+uint32_t max7219_overlay_started = 0, max7219_overlay_duration = 0;
+bool max7219_overlay_icon = false;
 uint32_t tick = 1000;
 uint32_t millis() { return tick; }
 bool max7219_test_active = false, dialog_timer_active = false;
@@ -88,6 +92,20 @@ int main() {
     assert(m.pixels[y * 16 + 3] == 0);
   }
   assert(m.pixels[2 * 16 + 4] == 1);
+  auto default_view = m.pixels;
+  max7219_overlay_columns = {31, 17, 31};
+  max7219_overlay_icon = false;
+  max7219_overlay_started = tick;
+  max7219_overlay_duration = 5000;
+  draw(m); assert(m.pixels != default_view);
+  tick += 4999; draw(m); assert(max7219_overlay_duration == 5000);
+  tick += 1; draw(m); assert(max7219_overlay_duration == 0);
+  assert(m.pixels == default_view);
+  max7219_overlay_columns = std::vector<uint8_t>(80, 255);
+  max7219_overlay_started = tick;
+  max7219_overlay_duration = 6000;
+  for (int n = 0; n < 30; ++n) { tick += 160; draw(m); }
+  max7219_overlay_duration = 0;
   max7219_test_active = true;
   draw(m); for (int pixel : m.pixels) assert(pixel == 1);
 }

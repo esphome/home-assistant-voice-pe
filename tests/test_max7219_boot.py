@@ -24,8 +24,9 @@ class Max7219BootTests(unittest.TestCase):
             )
             result = subprocess.run(
                 [sys.executable, "-m", "esphome", "config", str(config)],
-                capture_output=True, text=True, env=env, check=True,
+                capture_output=True, text=True, env=env,
             )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         merged = yaml.load(result.stdout, Loader=yaml.BaseLoader)
         boots = merged["esphome"]["on_boot"]
         voice = next(boot for boot in boots if float(boot["priority"]) == 375)
