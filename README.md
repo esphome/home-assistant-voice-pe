@@ -50,3 +50,15 @@ shows `sensor.time`, with a corner dot for an enabled alarm. Enable the
 Time & Date integration's time sensor in Home Assistant if it is absent.
 The alarm payload does not include its scheduled time, so only alarm status
 can be shown. Display brightness is adjustable in Home Assistant.
+
+### Two matrices (16x8)
+
+Use `home-assistant-voice.max7219-2panel.yaml` instead of
+`home-assistant-voice.max7219.yaml` in the package's `files` list. It sets the
+matrix count to two and selects the compact 3x5 font automatically. Wiring is
+unchanged. The display has a single, one-pixel-wide colon.
+
+Timers below 100 minutes use MM:SS. Longer timers use HH:MM with an upper-right
+dot (partial minutes round up, maximum displayed value 99:59). In clock mode,
+the upper-left dot indicates an enabled alarm. Without time, the display shows
+`--:--`. The three-matrix version remains available.

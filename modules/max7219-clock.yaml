@@ -88,6 +88,66 @@ display:
         return;
       }
 
+      // Compact 16x8 layout: four 3x5 digits and ONE two-dot colon.
+      if (it.get_width() == 16) {
+        int left = 0, right = 0;
+        bool valid = false, timer_mode = false, hours_mode = false;
+        if (id(dialog_timer_active)) {
+          int64_t remaining = id(dialog_timer_remaining);
+          if (!id(dialog_timer_paused)) {
+            remaining -= (millis() - id(dialog_timer_received_at)) / 1000;
+          }
+          if (remaining > 0) {
+            valid = timer_mode = true;
+            if (remaining < 6000) {
+              left = remaining / 60;
+              right = remaining % 60;
+            } else {
+              hours_mode = true;
+              // Longer timers use HH:MM; round up partial minutes.
+              int64_t minutes = (remaining + 59) / 60;
+              left = minutes / 60;
+              right = minutes % 60;
+              if (left > 99) { left = 99; right = 59; }
+            }
+          }
+        }
+        if (!timer_mode && id(max7219_ha_time).has_state()) {
+          const auto &clock = id(max7219_ha_time).state;
+          if (clock.size() == 5 && clock[2] == ':' &&
+              clock[0] >= '0' && clock[0] <= '9' &&
+              clock[1] >= '0' && clock[1] <= '9' &&
+              clock[3] >= '0' && clock[3] <= '9' &&
+              clock[4] >= '0' && clock[4] <= '9') {
+            left = (clock[0] - '0') * 10 + clock[1] - '0';
+            right = (clock[3] - '0') * 10 + clock[4] - '0';
+            valid = left < 24 && right < 60;
+          }
+        }
+        const uint8_t digits[10][5] = {
+          {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7},
+          {5,5,7,1,1}, {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1},
+          {7,5,7,5,7}, {7,5,7,1,7}
+        };
+        const int positions[] = {0, 4, 9, 13};
+        const int values[] = {left / 10, left % 10, right / 10, right % 10};
+        for (int n = 0; n < 4; ++n) {
+          for (int y = 0; y < 5; ++y) {
+            const uint8_t row = valid ? digits[values[n]][y] : (y == 2 ? 7 : 0);
+            for (int col = 0; col < 3; ++col) {
+              if (row & (1 << (2 - col))) {
+                it.draw_pixel_at(positions[n] + col, y + 1, Color::WHITE);
+              }
+            }
+          }
+        }
+        it.draw_pixel_at(7, 2, Color::WHITE);
+        it.draw_pixel_at(7, 4, Color::WHITE);
+        if (!timer_mode && id(dialog_alarm_active)) it.draw_pixel_at(0, 0, Color::WHITE);
+        if (hours_mode) it.draw_pixel_at(15, 0, Color::WHITE);
+        return;
+      }
+
       std::string text = "";
       bool showing_timer = false;
 
@@ -231,8 +291,6 @@ display:
 
         it.draw_pixel_at(11, 3, Color::WHITE);
         it.draw_pixel_at(11, 6, Color::WHITE);
-        it.draw_pixel_at(12, 3, Color::WHITE);
-        it.draw_pixel_at(12, 6, Color::WHITE);
 
       } else if (text.size() == 6 && colon == 3) {
         // MMM:SS (100-999 минут)
