@@ -70,6 +70,16 @@ int main() {
   draw(m); assert(m.pixels[16 + 1] == 1);
   max7219_ha_time.state = "unavailable";
   draw(m); assert(m.pixels[4 * 16 + 1] == 1);
+  dialog_alarm_active = false;
+  max7219_ha_time.state = "11:11";
+  draw(m);
+  for (int x : {1, 5, 9, 13}) {
+    for (int y = 2; y < 7; ++y) {
+      assert(m.pixels[y * 16 + x] == 0);
+      assert(m.pixels[y * 16 + x + 1] == 1);
+      assert(m.pixels[y * 16 + x + 2] == 0);
+    }
+  }
   max7219_test_active = true;
   draw(m); for (int pixel : m.pixels) assert(pixel == 1);
 }
