@@ -76,11 +76,18 @@ int main() {
   for (int x : {0, 4, 9, 13}) {
     for (int y = 2; y < 7; ++y) {
       for (int col = 0; col < 3; ++col) {
-        assert(m.pixels[y * 16 + x + col] == (col == (x == 4 ? 2 : 1)));
+        assert(m.pixels[y * 16 + x + col] == (col == (x <= 4 ? 2 : 1)));
       }
       assert(m.pixels[y * 16 + 7] == 0);
     }
   }
+  max7219_ha_time.state = "14:00";
+  draw(m);
+  for (int y = 2; y < 7; ++y) {
+    assert(m.pixels[y * 16 + 2] == 1);
+    assert(m.pixels[y * 16 + 3] == 0);
+  }
+  assert(m.pixels[2 * 16 + 4] == 1);
   max7219_test_active = true;
   draw(m); for (int pixel : m.pixels) assert(pixel == 1);
 }

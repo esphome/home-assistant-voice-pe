@@ -136,7 +136,7 @@ display:
             const uint8_t row = valid ? digits[values[n]][y] : (y == 2 ? 7 : 0);
             for (int col = 0; col < 3; ++col) {
               if (row & (1 << (2 - col))) {
-                const int digit_offset = (n == 1 && values[n] == 1) ? 1 : 0;
+                const int digit_offset = (n <= 1 && values[n] == 1) ? 1 : 0;
                 it.draw_pixel_at(positions[n] + col + digit_offset, y + 2, Color::WHITE);
               }
             }
