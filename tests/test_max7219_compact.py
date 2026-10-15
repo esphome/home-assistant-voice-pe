@@ -75,9 +75,10 @@ int main() {
   draw(m);
   for (int x : {0, 4, 9, 13}) {
     for (int y = 2; y < 7; ++y) {
-      assert(m.pixels[y * 16 + x] == 0);
-      assert(m.pixels[y * 16 + x + 1] == 1);
-      assert(m.pixels[y * 16 + x + 2] == 0);
+      for (int col = 0; col < 3; ++col) {
+        assert(m.pixels[y * 16 + x + col] == (col == (x == 4 ? 2 : 1)));
+      }
+      assert(m.pixels[y * 16 + 7] == 0);
     }
   }
   max7219_test_active = true;
