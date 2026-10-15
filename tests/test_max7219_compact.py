@@ -49,7 +49,7 @@ int main() {
   auto clock = m.pixels;
   for (int y = 0; y < 8; ++y) {
     assert(m.pixels[y * 16 + 8] == (y == 3 || y == 5));
-    assert(m.pixels[y * 16] == 0);
+    assert(m.pixels[y * 16 + 7] == 0);
   }
   dialog_timer_active = true;
   dialog_timer_remaining = 23 * 60 + 59;
@@ -67,13 +67,13 @@ int main() {
   dialog_timer_remaining = 0;
   draw(m); assert(m.pixels == clock);
   dialog_timer_active = false; dialog_alarm_active = true;
-  draw(m); assert(m.pixels[16 + 1] == 1);
+  draw(m); assert(m.pixels[16] == 1);
   max7219_ha_time.state = "unavailable";
-  draw(m); assert(m.pixels[4 * 16 + 1] == 1);
+  draw(m); assert(m.pixels[4 * 16] == 1);
   dialog_alarm_active = false;
   max7219_ha_time.state = "11:11";
   draw(m);
-  for (int x : {1, 5, 9, 13}) {
+  for (int x : {0, 4, 9, 13}) {
     for (int y = 2; y < 7; ++y) {
       assert(m.pixels[y * 16 + x] == 0);
       assert(m.pixels[y * 16 + x + 1] == 1);
