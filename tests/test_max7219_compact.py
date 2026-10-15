@@ -48,7 +48,7 @@ int main() {
   draw(m);
   auto clock = m.pixels;
   for (int y = 0; y < 8; ++y) {
-    assert(m.pixels[y * 16 + 8] == (y == 2 || y == 4));
+    assert(m.pixels[y * 16 + 8] == (y == 3 || y == 5));
     assert(m.pixels[y * 16] == 0);
   }
   dialog_timer_active = true;
@@ -61,15 +61,15 @@ int main() {
   dialog_timer_paused = false;
   dialog_timer_received_at = tick;
   dialog_timer_remaining = 6000;
-  draw(m); assert(m.pixels[15] == 1);
+  draw(m); assert(m.pixels[16 + 15] == 1);
   dialog_timer_remaining = 999999;
   draw(m); // Long timers must stay in bounds and within the font table.
   dialog_timer_remaining = 0;
   draw(m); assert(m.pixels == clock);
   dialog_timer_active = false; dialog_alarm_active = true;
-  draw(m); assert(m.pixels[1] == 1);
+  draw(m); assert(m.pixels[16 + 1] == 1);
   max7219_ha_time.state = "unavailable";
-  draw(m); assert(m.pixels[3 * 16 + 1] == 1);
+  draw(m); assert(m.pixels[4 * 16 + 1] == 1);
   max7219_test_active = true;
   draw(m); for (int pixel : m.pixels) assert(pixel == 1);
 }

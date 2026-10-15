@@ -136,15 +136,15 @@ display:
             const uint8_t row = valid ? digits[values[n]][y] : (y == 2 ? 7 : 0);
             for (int col = 0; col < 3; ++col) {
               if (row & (1 << (2 - col))) {
-                it.draw_pixel_at(positions[n] + col, y + 1, Color::WHITE);
+                it.draw_pixel_at(positions[n] + col, y + 2, Color::WHITE);
               }
             }
           }
         }
-        it.draw_pixel_at(8, 2, Color::WHITE);
-        it.draw_pixel_at(8, 4, Color::WHITE);
-        if (!timer_mode && id(dialog_alarm_active)) it.draw_pixel_at(1, 0, Color::WHITE);
-        if (hours_mode) it.draw_pixel_at(15, 0, Color::WHITE);
+        it.draw_pixel_at(8, 3, Color::WHITE);
+        it.draw_pixel_at(8, 5, Color::WHITE);
+        if (!timer_mode && id(dialog_alarm_active)) it.draw_pixel_at(1, 1, Color::WHITE);
+        if (hours_mode) it.draw_pixel_at(15, 1, Color::WHITE);
         return;
       }
 
