@@ -30,7 +30,8 @@ api:
       then:
         - lambda: |-
             const std::string content(message.c_str());
-            const std::string symbol(icon.c_str());
+            std::string symbol(icon.c_str());
+            if (symbol == "none" || symbol == "None") symbol.clear();
             if (duration <= 0 || (content.empty() && symbol.empty())) {
               id(max7219_overlay_duration) = 0;
               id(max7219_overlay_columns).clear();
@@ -286,25 +287,17 @@ display:
       // Compact 16x8 layout: four 3x5 digits and ONE two-dot colon.
       if (it.get_width() == 16) {
         int left = 0, right = 0;
-        bool valid = false, timer_mode = false, hours_mode = false;
+        bool valid = false, timer_mode = false, long_timer = false;
         if (id(dialog_timer_active)) {
           int64_t remaining = id(dialog_timer_remaining);
           if (!id(dialog_timer_paused)) {
             remaining -= (millis() - id(dialog_timer_received_at)) / 1000;
           }
-          if (remaining > 0) {
+          long_timer = remaining >= 3600;
+          if (remaining > 0 && remaining < 3600) {
             valid = timer_mode = true;
-            if (remaining < 6000) {
-              left = remaining / 60;
-              right = remaining % 60;
-            } else {
-              hours_mode = true;
-              // Longer timers use HH:MM; round up partial minutes.
-              int64_t minutes = (remaining + 59) / 60;
-              left = minutes / 60;
-              right = minutes % 60;
-              if (left > 99) { left = 99; right = 59; }
-            }
+            left = remaining / 60;
+            right = remaining % 60;
           }
         }
         if (!timer_mode && id(max7219_ha_time).has_state()) {
@@ -339,13 +332,13 @@ display:
         }
         it.draw_pixel_at(8, 3, Color::WHITE);
         it.draw_pixel_at(8, 5, Color::WHITE);
-        if (!timer_mode && id(dialog_alarm_active)) it.draw_pixel_at(0, 1, Color::WHITE);
-        if (hours_mode) it.draw_pixel_at(15, 1, Color::WHITE);
+        if (!timer_mode && (id(dialog_alarm_active) || long_timer)) it.draw_pixel_at(0, 1, Color::WHITE);
         return;
       }
 
       std::string text = "";
       bool showing_timer = false;
+      bool long_timer = false;
 
       // 1. ВЫЧИСЛЕНИЕ ОБРАТНОГО ОТСЧЁТА
       if (id(dialog_timer_active)) {
@@ -358,7 +351,8 @@ display:
           remaining -= elapsed;
         }
 
-        if (remaining > 0) {
+        long_timer = remaining >= 3600;
+        if (remaining > 0 && remaining < 3600) {
           showing_timer = true;
 
           int minutes = remaining / 60;
@@ -394,6 +388,7 @@ display:
         }
         it.draw_pixel_at(11, 3, Color::WHITE);
         it.draw_pixel_at(11, 6, Color::WHITE);
+        if (id(dialog_alarm_active) || long_timer) it.draw_pixel_at(0, 0, Color::WHITE);
         return;
       }
 
@@ -522,6 +517,6 @@ display:
       // 6. ИНДИКАТОР БУДИЛЬНИКА
       // Точка в левом верхнем углу
       // Только в режиме часов
-      if (!showing_timer && id(dialog_alarm_active)) {
+      if (!showing_timer && (id(dialog_alarm_active) || long_timer)) {
         it.draw_pixel_at(0, 0, Color::WHITE);
       }

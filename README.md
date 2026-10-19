@@ -58,9 +58,9 @@ Use `home-assistant-voice.max7219-2panel.yaml` instead of
 matrix count to two and selects the compact 3x5 font automatically. Wiring is
 unchanged. The display has a single, one-pixel-wide colon.
 
-Timers below 100 minutes use MM:SS. Longer timers use HH:MM with an upper-right
-dot (partial minutes round up, maximum displayed value 99:59). In clock mode,
-the upper-left dot indicates an enabled alarm. Without time, the display shows
+Timers with at least one hour remaining leave the clock visible with the same
+indicator dot as an enabled alarm. At 59:59 the display switches to MM:SS.
+The dot therefore indicates an enabled alarm or a timer with at least an hour left. Without time, the display shows
 `--:--`. The three-matrix version remains available.
 
 ### Temporary text and icons from Home Assistant
@@ -103,3 +103,21 @@ The existing **Mute** switch controls microphone mute: `switch.turn_on` disables
 the microphone and `switch.turn_off` enables it, provided the physical mute switch
 is off. Select the existing device entity in the automation UI; no extra microphone
 switch or change to its behavior is needed for display actions.
+
+### Optional fields and icon dropdown in Home Assistant
+
+The native ESPHome action requires every declared field and cannot define a dropdown.
+Update Custom-Dialog-UI and use **Dialog Custom UI: Показать на матрице** instead:
+
+```yaml
+action: dialog_custom_ui.matrix_show
+data:
+  device_id: f78b84553b463617269c25293950bb55
+  message: "Привет"
+  duration: 10
+```
+
+Select the ESPHome device once in the action editor. `message` and `icon` are
+optional, icons have a dropdown, and duration defaults to 5 seconds. Omitting both
+content fields clears the overlay. The integration forwards empty strings for
+unused fields to the existing ESPHome action.

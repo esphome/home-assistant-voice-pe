@@ -35,6 +35,7 @@ int main(){
   assert(max7219_overlay_columns.size()==23 && !max7219_overlay_icon);
   assert(max7219_overlay_duration==5000 && max7219_overlay_started==1000);
   auto text=max7219_overlay_columns;
+  show("Привет", "none", 5); assert(max7219_overlay_columns==text && !max7219_overlay_icon);
   tick=2000; show("", "smile", 10);
   assert(max7219_overlay_icon && max7219_overlay_columns.size()==8);
   assert(max7219_overlay_duration==10000 && max7219_overlay_started==2000);

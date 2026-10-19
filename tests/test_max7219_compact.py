@@ -64,10 +64,14 @@ int main() {
   tick += 5000; draw(m); assert(m.pixels == paused);
   dialog_timer_paused = false;
   dialog_timer_received_at = tick;
-  dialog_timer_remaining = 6000;
-  draw(m); assert(m.pixels[16 + 15] == 1);
-  dialog_timer_remaining = 999999;
-  draw(m); // Long timers must stay in bounds and within the font table.
+  dialog_timer_remaining = 7200;
+  draw(m); assert(m.pixels[16] == 1); // Clock plus enabled-timer dot.
+  auto long_timer_view = m.pixels;
+  m.pixels[16] = 0; assert(m.pixels == clock);
+  dialog_timer_remaining = 3600;
+  draw(m); assert(m.pixels == long_timer_view);
+  dialog_timer_remaining = 3599;
+  draw(m); assert(m.pixels[16] == 0 && m.pixels != clock);
   dialog_timer_remaining = 0;
   draw(m); assert(m.pixels == clock);
   dialog_timer_active = false; dialog_alarm_active = true;
