@@ -9,7 +9,7 @@ import yaml
 class MicrophoneMuteTests(unittest.TestCase):
     def test_hardware_release_cannot_bypass_software_mute(self):
         root = Path(__file__).resolve().parents[1]
-        cfg = yaml.load((root / "home-assistant-voice.yaml").read_text(), Loader=yaml.BaseLoader)
+        cfg = yaml.load((root / "home-assistant-voice.base.yaml").read_text(), Loader=yaml.BaseLoader)
         switch = next(item for item in cfg['switch'] if item.get('id') == 'master_mute_switch')
         hardware = next(item for item in cfg['binary_sensor'] if item.get('id') == 'hardware_mute_switch')
         sync = next(item for item in cfg['script'] if item.get('id') == 'apply_microphone_mute')

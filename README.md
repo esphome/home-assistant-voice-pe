@@ -40,7 +40,7 @@ packages:
     url: https://github.com/mikhailhimei/home-assistant-voice-pe
     ref: dev
     files:
-      - home-assistant-voice.max7219-2panel.yaml
+      - home-assistant-voice.yaml
     refresh: always
 
 esphome:
@@ -59,9 +59,13 @@ wifi:
 
 | Устройство | Файл в `packages → voice_pe → files` |
 | --- | --- |
-| Voice PE + две матрицы, 16×8 | `home-assistant-voice.max7219-2panel.yaml` |
-| Voice PE + три матрицы, 24×8 | `home-assistant-voice.max7219.yaml` |
-| Voice PE без дисплея | `home-assistant-voice.yaml` |
+| Voice PE + две матрицы, 16×8 (основной вариант) | `home-assistant-voice.yaml` |
+| Voice PE + три матрицы, 24×8 | `home-assistant-voice.yaml` + `max7219_num_chips: "3"` |
+| Voice PE без дисплея | `home-assistant-voice.base.yaml` |
+
+Старые файлы `home-assistant-voice.max7219-2panel.yaml` и
+`home-assistant-voice.max7219.yaml` удалены. В существующем YAML замените их
+на `home-assistant-voice.yaml`.
 
 Выбирайте **один** из этих файлов. Не добавляйте базовую прошивку повторно:
 варианты с часами уже включают её и сохраняют запуск усилителя динамика.

@@ -11,7 +11,7 @@ packages:
     wifi:
       on_disconnect:
         - ble.enable:
-  home-assistant-voice: !include home-assistant-voice.yaml
+  home-assistant-voice: !include home-assistant-voice.base.yaml
 
 esphome:
   project:

@@ -19,7 +19,7 @@ class Max7219BootTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "validation.yaml"
             config.write_text(
-                f"packages:\n  combined: !include {root}/home-assistant-voice.max7219.yaml\n"
+                f"packages:\n  combined: !include {root}/home-assistant-voice.yaml\n"
                 "wifi:\n  ssid: validation-only\n  password: validation-only\n"
             )
             result = subprocess.run(
@@ -28,6 +28,9 @@ class Max7219BootTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         merged = yaml.load(result.stdout, Loader=yaml.BaseLoader)
+        self.assertEqual(len(merged['display']), 1)
+        self.assertEqual(int(merged['display'][0]['num_chips']), 2)
+        self.assertEqual(sum(item.get('id') == 'master_mute_switch' for item in merged['switch']), 1)
         boots = merged["esphome"]["on_boot"]
         voice = next(boot for boot in boots if float(boot["priority"]) == 375)
         clock = next(boot for boot in boots if float(boot["priority"]) == -100)

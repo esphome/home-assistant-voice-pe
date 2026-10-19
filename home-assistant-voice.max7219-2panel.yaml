@@ -1,6 +1,0 @@
-# Voice PE with two directly connected MAX7219 8x8 matrices.
-substitutions:
-  max7219_num_chips: "2"
-
-packages:
-  voice_pe_clock: !include home-assistant-voice.max7219.yaml
