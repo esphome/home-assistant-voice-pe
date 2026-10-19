@@ -36,7 +36,7 @@ class Max7219BootTests(unittest.TestCase):
             for action in voice["then"]
         ))
         self.assertTrue(any(
-            action.get("script.execute", {}).get("id") == "max7219_test"
+            action.get("if", {}).get("condition", {}).get("switch.is_on") == {"id": "max7219_enabled"}
             for action in clock["then"]
         ))
 

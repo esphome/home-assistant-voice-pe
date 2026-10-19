@@ -21,6 +21,7 @@ class CompactClockTests(unittest.TestCase):
 #include <string>
 #include <vector>
 #define id(x) x
+struct { bool state = true; } max7219_enabled;
 namespace Color { constexpr int WHITE = 1; }
 std::vector<uint8_t> max7219_overlay_columns;
 uint32_t max7219_overlay_started = 0, max7219_overlay_duration = 0;
@@ -111,6 +112,10 @@ int main() {
   for (int n = 0; n < 30; ++n) { tick += 160; draw(m); }
   max7219_overlay_duration = 0;
   max7219_test_active = true;
+  draw(m); for (int pixel : m.pixels) assert(pixel == 1);
+  max7219_enabled.state = false;
+  draw(m); for (int pixel : m.pixels) assert(pixel == 0);
+  max7219_enabled.state = true;
   draw(m); for (int pixel : m.pixels) assert(pixel == 1);
 }
 '''

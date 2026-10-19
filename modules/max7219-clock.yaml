@@ -11,7 +11,30 @@ esphome:
       then:
         - lambda: |-
             id(max7219_matrix).intensity(static_cast<int>(id(max7219_brightness).state));
-        - script.execute: max7219_test
+        - if:
+            condition:
+              switch.is_on: max7219_enabled
+            then:
+              - script.execute: max7219_test
+
+switch:
+  - platform: template
+    id: max7219_enabled
+    name: "Экран часов"
+    icon: mdi:monitor
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - lambda: |-
+          id(max7219_matrix).intensity(static_cast<int>(id(max7219_brightness).state));
+          id(max7219_matrix).turn_on_off(true);
+      - component.update: max7219_matrix
+    turn_off_action:
+      - script.stop: max7219_test
+      - lambda: |-
+          id(max7219_test_active) = false;
+          id(max7219_matrix).turn_on_off(false);
+      - component.update: max7219_matrix
 
 api:
   actions:
@@ -251,6 +274,7 @@ display:
     update_interval: 250ms
     lambda: |-
       it.clear();
+      if (!id(max7219_enabled).state) return;
       if (id(max7219_test_active)) {
         for (int y = 0; y < it.get_height(); ++y) {
           for (int x = 0; x < it.get_width(); ++x) {
