@@ -31,6 +31,10 @@ class Max7219BootTests(unittest.TestCase):
         self.assertEqual(len(merged['display']), 1)
         self.assertEqual(int(merged['display'][0]['num_chips']), 2)
         self.assertEqual(sum(item.get('id') == 'master_mute_switch' for item in merged['switch']), 1)
+        screen = next(item for item in merged['switch'] if item.get('id') == 'max7219_enabled')
+        self.assertEqual(screen['name'], 'Clock display')
+        self.assertEqual(screen['internal'], 'false')
+        self.assertEqual(screen['disabled_by_default'], 'false')
         boots = merged["esphome"]["on_boot"]
         voice = next(boot for boot in boots if float(boot["priority"]) == 375)
         clock = next(boot for boot in boots if float(boot["priority"]) == -100)

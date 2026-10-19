@@ -20,7 +20,9 @@ esphome:
 switch:
   - platform: template
     id: max7219_enabled
-    name: "Экран часов"
+    name: "Clock display"
+    internal: false
+    disabled_by_default: false
     icon: mdi:monitor
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
