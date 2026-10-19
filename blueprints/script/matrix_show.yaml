@@ -6,15 +6,31 @@ blueprint:
     полей показывается иконка. Требуется прошивка Voice PE с start_delay.
   domain: script
   input:
+    target_device_id:
+      name: Колонка
+      description: Выберите конкретную колонку ESPHome. Создайте отдельный сценарий для каждой колонки.
+      selector:
+        device:
+          integration: esphome
     matrix_action:
       name: Действие матрицы
-      description: Например esphome.home_assistant_voice_0ab77d_matrix_show
+      description: Действие выбранной выше колонки, например esphome.home_assistant_voice_0ab77d_matrix_show
       default: esphome.home_assistant_voice_0ab77d_matrix_show
       selector:
         text:
 mode: parallel
 max: 10
+variables:
+  matrix_device_id: !input target_device_id
 fields:
+  device_id:
+    name: Колонка
+    description: Должна совпадать с колонкой, выбранной при создании этого сценария.
+    required: false
+    default: !input target_device_id
+    selector:
+      device:
+        integration: esphome
   message:
     name: Текст
     required: false
@@ -68,6 +84,12 @@ fields:
         mode: box
         unit_of_measurement: s
 sequence:
+  - if:
+      - condition: template
+        value_template: "{{ device_id | default(matrix_device_id, true) != matrix_device_id }}"
+    then:
+      - stop: Этот сценарий привязан к другой колонке. Выберите сценарий нужной колонки.
+        error: true
   - action: !input matrix_action
     data:
       message: "{{ message | default('', true) }}"
