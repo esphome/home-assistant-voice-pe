@@ -525,11 +525,7 @@ binary_sensor:
                                                 - switch.is_off: master_mute_switch
                                                 - not: voice_assistant.is_running
                                             then:
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: "center_button_press_sound"
-                                              - delay: 300ms
+                                              # on_listening plays the shared listen.mp3 cue once ready.
                                               - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
