@@ -11,7 +11,8 @@ class MatrixActionTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         cfg = yaml.load((root / "modules/max7219-clock.yaml").read_text(), Loader=yaml.BaseLoader)
         font = next(g for g in cfg["globals"] if g["id"] == "max7219_text_columns")["initial_value"]
-        action = cfg["api"]["actions"][0]["then"][0]["lambda"]
+        action = next(step["lambda"] for step in cfg["api"]["actions"][0]["then"] if "lambda" in step)
+        delay = cfg["api"]["actions"][0]["then"][0]["delay"]
         source = r'''
 #include <algorithm>
 #include <cassert>
@@ -30,7 +31,12 @@ auto max7219_text_columns = ''' + font + r''';
 void show(std::string message, std::string icon, long duration) {
 ''' + action + r'''
 }
+uint32_t delay_ms(long start_delay) {
+''' + delay + r'''
+}
 int main(){
+  assert(delay_ms(-1)==0 && delay_ms(0)==0);
+  assert(delay_ms(2)==2000 && delay_ms(999999)==3600000);
   show("Привет", "", 5);
   assert(max7219_overlay_columns.size()==23 && !max7219_overlay_icon);
   assert(max7219_overlay_duration==5000 && max7219_overlay_started==1000);

@@ -1,0 +1,76 @@
+blueprint:
+  name: Voice PE — текст или иконка на матрице
+  description: >-
+    Показать текст или иконку, затем вернуть часы. Текст и иконка необязательны;
+    если оба пусты или длительность равна 0, вернуть часы. При заполнении обоих
+    полей показывается иконка. Требуется прошивка Voice PE с start_delay.
+  domain: script
+  input:
+    matrix_action:
+      name: Действие матрицы
+      description: Например esphome.home_assistant_voice_0ab77d_matrix_show
+      default: esphome.home_assistant_voice_0ab77d_matrix_show
+      selector:
+        text:
+mode: parallel
+max: 10
+fields:
+  message:
+    name: Текст
+    required: false
+    default: ""
+    selector:
+      text:
+  icon:
+    name: Иконка
+    required: false
+    default: none
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - label: Без иконки
+            value: none
+          - label: Улыбка
+            value: smile
+          - label: Грусть
+            value: sad
+          - label: Сердце
+            value: heart
+          - label: Галочка
+            value: check
+          - label: Крестик
+            value: cross
+          - label: Колокольчик
+            value: bell
+  duration:
+    name: Время отображения
+    description: Секунды после задержки; 0 — вернуть часы.
+    required: false
+    default: 5
+    selector:
+      number:
+        min: 0
+        max: 3600
+        step: 1
+        mode: box
+        unit_of_measurement: s
+  start_delay:
+    name: Задержка старта
+    description: Секунды до начала показа; 0 — сразу.
+    required: false
+    default: 0
+    selector:
+      number:
+        min: 0
+        max: 3600
+        step: 1
+        mode: box
+        unit_of_measurement: s
+sequence:
+  - action: !input matrix_action
+    data:
+      message: "{{ message | default('', true) }}"
+      icon: "{{ icon | default('none', true) }}"
+      duration: "{{ duration | default(5) | int }}"
+      start_delay: "{{ start_delay | default(0) | int }}"

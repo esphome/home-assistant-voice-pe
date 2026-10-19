@@ -52,7 +52,12 @@ api:
         duration:
           type: int
           description: "Длительность в секундах (1–3600); 0 — вернуть часы"
+        start_delay:
+          type: int
+          description: "Задержка старта в секундах (0–3600); 0 — сразу"
       then:
+        - delay: !lambda |-
+            return static_cast<uint32_t>(std::max<int32_t>(0, std::min<int32_t>(start_delay, 3600))) * 1000;
         - lambda: |-
             const std::string content(message.c_str());
             std::string symbol(icon.c_str());
