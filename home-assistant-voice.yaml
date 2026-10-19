@@ -59,6 +59,9 @@ esphome:
             then:
               - lambda: id(init_in_progress) = false;
               - script.execute: control_leds
+    - priority: -90
+      then:
+        - script.execute: apply_microphone_mute
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -134,6 +137,10 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  - id: software_microphone_muted
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
   - id: dialog_payload_to_json
     type: std::function<std::string(const std::string &)>
     restore_value: no
@@ -357,32 +364,21 @@ interval:
             - script.execute: control_leds
 
 switch:
-  # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
+  # Effective mute state exposed to Home Assistant; the hardware switch always wins.
   - platform: template
     id: master_mute_switch
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: DISABLED
     icon: "mdi:microphone-off"
     name: Mute
     entity_category: config
     lambda: |-
-      // Muted either if the hardware mute switch is on or the microphone's software mute switch is enabled
-      if (id(hardware_mute_switch).state || id(i2s_mics).get_mute_state()) {
-        return true;
-      } else {
-        return false;
-      }
+      return id(software_microphone_muted) || id(hardware_mute_switch).state;
     turn_on_action:
-      - if:
-          condition:
-            binary_sensor.is_off: hardware_mute_switch
-          then:
-            - microphone.mute:
+      - lambda: id(software_microphone_muted) = true;
+      - script.execute: apply_microphone_mute
     turn_off_action:
-      - if:
-          condition:
-            binary_sensor.is_off: hardware_mute_switch
-          then:
-            - microphone.unmute:
+      - lambda: id(software_microphone_muted) = false;
+      - script.execute: apply_microphone_mute
     on_turn_on:
       - script.execute: control_leds
     on_turn_off:
@@ -690,10 +686,11 @@ binary_sensor:
     internal: true
     pin: GPIO3
     on_press:
-      # Play mute on sound only if software mute isn't enabled
+      - script.execute: apply_microphone_mute
+      # Play the hardware cue only if software mute was not already enabled
       - if:
           condition:
-            - switch.is_off: master_mute_switch
+            - lambda: return !id(software_microphone_muted);
           then:
             - script.execute:
                 id: play_sound
@@ -704,7 +701,7 @@ binary_sensor:
           id: play_sound
           priority: false
           sound_file: "mute_switch_off_sound"
-      - microphone.unmute:
+      - script.execute: apply_microphone_mute
   # Audio Jack Plugged sensor
   - platform: gpio
     id: jack_plugged
@@ -1230,6 +1227,33 @@ event:
       - easter_egg_press
 
 script:
+  # Hardware mute always wins; software mute survives hardware toggles and reboot.
+  - id: apply_microphone_mute
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(software_microphone_muted) || id(hardware_mute_switch).state;
+          then:
+            - microphone.mute: i2s_mics
+            - voice_assistant.stop:
+                id: va
+            - micro_wake_word.stop:
+                id: mww
+          else:
+            - microphone.unmute: i2s_mics
+            - if:
+                condition:
+                  voice_assistant.connected:
+                    id: va
+                then:
+                  - micro_wake_word.start:
+                      id: mww
+      - lambda: |-
+          id(master_mute_switch).publish_state(
+              id(software_microphone_muted) || id(hardware_mute_switch).state);
+      - script.execute: control_leds
+
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
   # For the sake of simplicity and re-usability, the script calls child scripts defined below.
   # This script will be called every time one of these conditions is changing.
@@ -2029,11 +2053,13 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    - script.execute: apply_microphone_mute
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
     - voice_assistant.stop:
+    - micro_wake_word.stop:
+        id: mww
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
   on_error:
