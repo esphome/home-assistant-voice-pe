@@ -1,21 +1,34 @@
-# Home Assistant Voice: Preview Edition
+# Home Assistant Voice PE с часами MAX7219
 
-This is the ESPHome source code of the [Home Assistant Voice: Preview Edition](https://www.home-assistant.io/voice-pe/).
+Прошивка для Home Assistant Voice: Preview Edition с напрямую подключённой
+матрицей MAX7219. Отдельная ESP32 для часов не нужна. Голосовой помощник,
+микрофон, динамик и световое кольцо работают в той же прошивке.
 
-See [the documentation](https://voice-pe.home-assistant.io/) for set up and troubleshooting.
+Оригинальные материалы: [Voice PE](https://www.home-assistant.io/voice-pe/),
+[документация устройства](https://voice-pe.home-assistant.io/),
+[заводской установщик](https://esphome.github.io/home-assistant-voice-pe/).
 
-If you need to re-install the firmware, [use this installer](https://esphome.github.io/home-assistant-voice-pe/).
+## Подключение
 
-## MAX7219 directly connected to Voice PE
+Подключайте провода к стороне **IN** панели, а не OUT.
 
-Use `home-assistant-voice.max7219.yaml` to build one firmware for Voice PE and
-three MAX7219 matrices. The base `home-assistant-voice.yaml` stays available
-for devices without the display. Voice, wake word, LED ring and sound cues
-remain in the combined configuration.
+| Вход MAX7219 | Контакт Voice PE |
+| --- | --- |
+| DIN | IO41 |
+| CLK | IO40 |
+| CS / LOAD | IO42 |
+| VCC | Питание 5 В |
+| GND | Общая земля GND |
 
-Default wiring: DIN → IO41, CLK → IO40, CS → IO42, panel VCC → 5 V,
-and a common GND. Confirm the actual wiring before installing; use appropriate
-3.3 V to 5 V signal conversion for reliable MAX7219 operation.
+Для надёжного согласования сигналов 3,3 В и MAX7219 с питанием 5 В используйте
+74AHCT125 или подходящий аналог. Питание подбирайте с учётом потребления панели
+и Voice PE. Проверяйте проводку при отключённом питании.
+
+## Конфигурация ESPHome: две матрицы 8×8
+
+В ESPHome Device Builder откройте YAML вашей **Voice PE** и используйте этот
+пакет. Сохраните собственные параметры API, шифрования и другие локальные
+настройки, если они уже заданы. В примере замените имя устройства на своё.
 
 ```yaml
 substitutions:
@@ -27,7 +40,7 @@ packages:
     url: https://github.com/mikhailhimei/home-assistant-voice-pe
     ref: dev
     files:
-      - home-assistant-voice.max7219.yaml
+      - home-assistant-voice.max7219-2panel.yaml
     refresh: always
 
 esphome:
@@ -40,34 +53,76 @@ wifi:
   password: !secret wifi_password
 ```
 
-Keep any existing API encryption or other local settings. Pin assignments
-and matrix count can be overridden with `max7219_din_pin`, `max7219_clk_pin`,
-`max7219_cs_pin`, and `max7219_num_chips` substitutions.
+В локальном `secrets.yaml` должны быть `wifi_ssid` и `wifi_password`.
+Сохраните конфигурацию и установите прошивку через **Install → Wirelessly**.
+`refresh: always` позволяет получать свежие изменения ветки `dev` при сборке.
 
-The display reuses the timer and alarm data already received by Voice PE.
-It shows the latest timer's countdown, freezes it during pause, and otherwise
-shows `sensor.time`, with a corner dot for an enabled alarm. Enable the
-Time & Date integration's time sensor in Home Assistant if it is absent.
-The alarm payload does not include its scheduled time, so only alarm status
-can be shown. Display brightness is adjustable in Home Assistant.
+| Устройство | Файл в `packages → voice_pe → files` |
+| --- | --- |
+| Voice PE + две матрицы, 16×8 | `home-assistant-voice.max7219-2panel.yaml` |
+| Voice PE + три матрицы, 24×8 | `home-assistant-voice.max7219.yaml` |
+| Voice PE без дисплея | `home-assistant-voice.yaml` |
 
-### Two matrices (16x8)
+Выбирайте **один** из этих файлов. Не добавляйте базовую прошивку повторно:
+варианты с часами уже включают её и сохраняют запуск усилителя динамика.
+Назначение пинов можно переопределить в `substitutions`:
 
-Use `home-assistant-voice.max7219-2panel.yaml` instead of
-`home-assistant-voice.max7219.yaml` in the package's `files` list. It sets the
-matrix count to two and selects the compact 3x5 font automatically. Wiring is
-unchanged. The display has a single, one-pixel-wide colon.
+```yaml
+  max7219_din_pin: GPIO41
+  max7219_clk_pin: GPIO40
+  max7219_cs_pin: GPIO42
+```
 
-Timers with at least one hour remaining leave the clock visible with the same
-indicator dot as an enabled alarm. At 59:59 the display switches to MM:SS.
-The dot therefore indicates an enabled alarm or a timer with at least an hour left. Without time, the display shows
-`--:--`. The three-matrix version remains available.
+## Время, таймеры и будильники
 
-### Temporary text and icons from Home Assistant
+1. Добавьте Voice PE в интеграцию **ESPHome** в Home Assistant.
+2. В интеграции **Время и дата / Time & Date** включите датчик `sensor.time`.
+3. Для таймеров и будильников обновите
+   [Custom-Dialog-UI](https://github.com/mikhailhimei/Custom-Dialog-UI)
+   и перезапустите Home Assistant.
+4. Проверьте наличие `sensor.dialog_custom_ui_timers` и
+   `sensor.dialog_custom_ui_alarm`, у обоих должен быть атрибут `payload`.
 
-After updating the display firmware and reconnecting ESPHome in Home Assistant,
-use the device's `matrix_show` action in an automation. The action name includes
-the node name; select it in Developer Tools → Actions if yours differs.
+`payload` содержит список записей. Прошивка сама преобразует передаваемое
+Home Assistant Python-представление списка в JSON; `payload_json` не нужен.
+Таймер выбирается интеграцией как последний созданный оставшийся таймер каждого
+устройства, а прошивка находит свою запись по `device_id` или `media`, независимо
+от порядка списка.
+
+В репозитории по умолчанию указана колонка автора. Для другой колонки добавьте
+в существующий блок `substitutions` её идентификатор устройства Home Assistant
+и сущность медиаплеера:
+
+```yaml
+  dialog_timer_device_id: "ID_УСТРОЙСТВА_В_HOME_ASSISTANT"
+  dialog_timer_media_entity: "media_player.ВАША_КОЛОНКА"
+```
+
+При других именах датчиков также задайте `dialog_timer_entity` и
+`dialog_alarm_entity`.
+
+Поведение дисплея:
+
+- Без таймера отображается время `HH:MM`.
+- При остатке таймера **60:00 и больше** остаются часы с точкой будильника.
+- На **59:59** начинается обратный отсчёт `MM:SS`; пауза останавливает его.
+- В режиме часов точка также показывает включённый будильник этой колонки.
+- Без полученного времени и короткого таймера отображается `--:--`.
+
+Время срабатывания будильника не выводится: текущий `payload` передаёт его
+статус, но не время. В мини-версии используются цифры 3×5, прямая единица и одно
+двоеточие. Настройка **«Яркость часов»** доступна на странице устройства.
+
+После загрузки дисплей выполняет двухсекундный тест. Повторить его можно кнопкой
+**«Проверка матрицы»**. Если нет ни кнопки, ни настройки яркости, проверьте, что
+собран именно пакет с часами. Если тест не зажигает панель, проверяйте питание,
+сторону IN, общую землю, уровни сигналов и соответствие проводов заданным GPIO.
+
+## Текст и иконки из автоматизации
+
+После обновления прошивки действие появится в **Инструменты разработчика →
+Действия**. Его имя зависит от имени устройства; выберите действие `matrix_show`
+вашей колонки. Пример текста:
 
 ```yaml
 action: esphome.home_assistant_voice_0ab77d_matrix_show
@@ -77,7 +132,7 @@ data:
   duration: 10
 ```
 
-For an icon, pass an empty message:
+Пример иконки:
 
 ```yaml
 action: esphome.home_assistant_voice_0ab77d_matrix_show
@@ -87,37 +142,23 @@ data:
   duration: 5
 ```
 
-All three fields are required. `duration` is seconds, limited to 3600; zero or a
-negative value clears the overlay immediately. Empty message and icon also clear
-it. A new call replaces the current overlay and restarts its duration. The display
-returns to the current timer or clock afterwards; timers keep running while hidden.
-Short messages are centered; long messages scroll. The built-in 3x5 font supports
-Latin and Cyrillic letters (displayed uppercase), digits and basic punctuation,
-up to 64 characters. Unsupported characters appear as question marks.
+У нативного действия ESPHome **все три поля обязательны**: для неиспользуемого
+текста или иконки передавайте пустую строку. `icon: none` также означает отсутствие
+иконки. Иконки: `smile`, `sad`, `heart`, `check`, `cross`, `bell`; поддерживаются
+алиасы `🙂`, `🙁`, `❤️`, `✅`, `❌`, `🔔`.
 
-Supported icons: `smile`, `sad`, `heart`, `check`, `cross`, `bell`, or their emoji
-aliases `🙂`, `🙁`, `❤️`, `✅`, `❌`, `🔔`. If both fields are provided, the icon
-takes priority. Unknown icons leave the current display unchanged.
+`duration` — секунды, максимум 3600. Значение 0 прекращает показ сразу.
+Короткий текст центрируется, длинный прокручивается; поддерживаются латиница,
+кириллица, цифры и основная пунктуация, до 64 символов. При заполнении обоих
+полей приоритет у иконки. Следующий вызов заменяет предыдущий показ.
+После завершения экран возвращается к актуальному таймеру или часам.
 
-The existing **Mute** switch controls microphone mute: `switch.turn_on` disables
-the microphone and `switch.turn_off` enables it, provided the physical mute switch
-is off. Select the existing device entity in the automation UI; no extra microphone
-switch or change to its behavior is needed for display actions.
+Действие `dialog_custom_ui.matrix_show` с необязательными полями и списком иконок
+подготовлено отдельно, но пока не опубликовано в `main` Custom-Dialog-UI.
+До его публикации используйте показанное выше нативное действие ESPHome.
 
-### Optional fields and icon dropdown in Home Assistant
+## Микрофон
 
-The native ESPHome action requires every declared field and cannot define a dropdown.
-Update Custom-Dialog-UI and use **Dialog Custom UI: Показать на матрице** instead:
-
-```yaml
-action: dialog_custom_ui.matrix_show
-data:
-  device_id: f78b84553b463617269c25293950bb55
-  message: "Привет"
-  duration: 10
-```
-
-Select the ESPHome device once in the action editor. `message` and `icon` are
-optional, icons have a dropdown, and duration defaults to 5 seconds. Omitting both
-content fields clears the overlay. The integration forwards empty strings for
-unused fields to the existing ESPHome action.
+Переключатель **Mute** включён — микрофон выключен. В автоматизации
+`switch.turn_on` включает приглушение, `switch.turn_off` снимает его.
+Физический выключатель микрофона имеет приоритет.
