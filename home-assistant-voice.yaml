@@ -149,6 +149,12 @@ globals:
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
+  # Optional Nanobot LED override. Zero hands control back to the stock voice
+  # assistant state machine; values one through six are documented in README.md.
+  - id: nanobot_led_state
+    type: int
+    restore_value: no
+    initial_value: '0'
   # Global variable tracking if the dial was recently touched.
   - id: dial_touched
     type: bool
@@ -718,6 +724,71 @@ light:
               }
             }
       - addressable_lambda:
+          name: "Nanobot Status"
+          update_interval: 50ms
+          lambda: |-
+            const int state = id(nanobot_led_state);
+            const uint32_t frame = millis() / 50;
+            Color color = Color::BLACK;
+            bool full_ring = false;
+            bool visible = true;
+            int8_t direction = 1;
+            uint8_t width = 3;
+
+            switch (state) {
+              case 1:  // thinking: amber, clockwise
+                color = Color(255, 150, 0);
+                break;
+              case 2:  // acknowledgement: blue pulse
+                color = Color(0, 110, 255);
+                full_ring = true;
+                visible = ((frame / 4) % 2) == 0;
+                break;
+              case 3:  // replying: cyan, anticlockwise
+                color = Color(0, 210, 255);
+                direction = -1;
+                break;
+              case 4:  // follow-up: violet breathing ring
+                color = Color(155, 80, 255);
+                full_ring = true;
+                visible = ((frame / 8) % 2) == 0;
+                break;
+              case 5:  // done: short green confirmation
+                color = Color(0, 255, 80);
+                full_ring = true;
+                break;
+              case 6:  // error: red flash
+                color = Color(255, 0, 0);
+                full_ring = true;
+                visible = ((frame / 3) % 2) == 0;
+                break;
+              default:
+                visible = false;
+                break;
+            }
+
+            for (uint8_t i = 0; i < 12; i++) {
+              it[i] = Color::BLACK;
+            }
+            if (!visible) {
+              return;
+            }
+            if (full_ring) {
+              for (uint8_t i = 0; i < 12; i++) {
+                it[i] = color;
+              }
+              return;
+            }
+
+            const uint8_t head = direction > 0
+                ? frame % 12
+                : (12 - (frame % 12)) % 12;
+            for (uint8_t offset = 0; offset < width; offset++) {
+              const uint8_t index = (head + 12 - direction * offset) % 12;
+              it[index] = color * static_cast<uint8_t>(255 - offset * 70);
+              it[(index + 6) % 12] = color * static_cast<uint8_t>(255 - offset * 70);
+            }
+      - addressable_lambda:
           name: "Muted or Silent"
           update_interval: 16ms
           lambda: |-
@@ -1092,6 +1163,14 @@ script:
             id(control_leds_dial_touched).execute();
           } else if (id(timer_ringing).state) {
             id(control_leds_timer_ringing).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
+            id(control_leds_voice_assistant_error_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
+            id(control_leds_voice_assistant_not_ready_phase).execute();
+          } else if (id(master_mute_switch).state) {
+            id(control_leds_muted_or_silent).execute();
+          } else if (id(nanobot_led_state) != 0) {
+            id(control_leds_nanobot_state).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
             id(control_leds_voice_assistant_waiting_for_command_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
@@ -1100,19 +1179,86 @@ script:
             id(control_leds_voice_assistant_thinking_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
             id(control_leds_voice_assistant_replying_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
-            id(control_leds_voice_assistant_error_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
-            id(control_leds_voice_assistant_not_ready_phase).execute();
           } else if (id(is_timer_active)) {
             id(control_leds_timer_ticking).execute();
-          } else if (id(master_mute_switch).state) {
-            id(control_leds_muted_or_silent).execute();
           } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
             id(control_leds_voice_assistant_idle_phase).execute();
           }
+
+  # Script executed while a Nanobot-specific visual state is active.
+  - id: control_leds_nanobot_state
+    then:
+      - light.turn_on:
+          brightness: 55%
+          id: voice_assistant_leds
+          effect: "Nanobot Status"
+
+  # Set a Nanobot LED override and arm a state-specific fail-safe timeout.
+  - id: set_nanobot_led_state
+    mode: restart
+    parameters:
+      state: int
+    then:
+      - script.stop: nanobot_led_ack_timeout
+      - script.stop: nanobot_led_done_timeout
+      - script.stop: nanobot_led_error_timeout
+      - script.stop: nanobot_led_override_timeout
+      - lambda: id(nanobot_led_state) = state;
+      - script.execute: control_leds
+      - if:
+          condition:
+            lambda: return state == 2;
+          then:
+            - script.execute: nanobot_led_ack_timeout
+          else:
+            - if:
+                condition:
+                  lambda: return state == 5;
+                then:
+                  - script.execute: nanobot_led_done_timeout
+                else:
+                  - if:
+                      condition:
+                        lambda: return state == 6;
+                      then:
+                        - script.execute: nanobot_led_error_timeout
+                      else:
+                        - if:
+                            condition:
+                              lambda: return state != 0;
+                            then:
+                              - script.execute: nanobot_led_override_timeout
+
+  # Clear an override without cancelling the timeout script that called it.
+  - id: clear_nanobot_led_state
+    then:
+      - lambda: id(nanobot_led_state) = 0;
+      - lambda: id(nanobot_led_state_select).publish_state("off");
+      - script.execute: control_leds
+
+  # Short-lived states return to the native Assist phase automatically.
+  - id: nanobot_led_ack_timeout
+    mode: restart
+    then:
+      - delay: 1500ms
+      - script.execute: clear_nanobot_led_state
+  - id: nanobot_led_done_timeout
+    mode: restart
+    then:
+      - delay: 1s
+      - script.execute: clear_nanobot_led_state
+  - id: nanobot_led_error_timeout
+    mode: restart
+    then:
+      - delay: 3s
+      - script.execute: clear_nanobot_led_state
+  - id: nanobot_led_override_timeout
+    mode: restart
+    then:
+      - delay: 90s
+      - script.execute: clear_nanobot_led_state
 
   # Script executed if voice_kit startup failed
   # Static red "X"
@@ -1781,6 +1927,34 @@ micro_wake_word:
                                 wake_word: !lambda return wake_word;
 
 select:
+  - platform: template
+    name: "Nanobot LED state"
+    id: nanobot_led_state_select
+    icon: "mdi:robot-outline"
+    entity_category: config
+    optimistic: true
+    restore_value: false
+    initial_option: "off"
+    options:
+      - "off"
+      - "thinking"
+      - "ack"
+      - "replying"
+      - "follow_up"
+      - "done"
+      - "error"
+    set_action:
+      - script.execute:
+          id: set_nanobot_led_state
+          state: !lambda |-
+            if (x == "thinking") return 1;
+            if (x == "ack") return 2;
+            if (x == "replying") return 3;
+            if (x == "follow_up") return 4;
+            if (x == "done") return 5;
+            if (x == "error") return 6;
+            return 0;
+
   - platform: template
     name: "Wake word sensitivity"
     id: wake_word_sensitivity
