@@ -6,8 +6,9 @@ on:
       - dev
   pull_request:
   workflow_dispatch:
-  release:
-    types: [published]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -22,95 +23,3 @@ jobs:
         home-assistant-voice.factory.yaml
         home-assistant-voice.8mb.yaml
       esphome-version: 2026.9.0
-      release-summary: ${{ github.event_name == 'release' && github.event.release.body || '' }}
-      release-url: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
-      release-version: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
-
-  comment:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.owner.login == 'esphome'
-    name: Comment on PR
-    runs-on: ubuntu-latest
-    needs:
-      - build-firmware
-    steps:
-      - name: Comment on PR
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |-
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId,
-            })
-            const artifact = artifacts['data']['artifacts'].find(a => a.name === 'home-assistant-voice')
-            const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifact['id']}`
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `Firmware built successfully! :tada:
-
-            [Download][download] and extract the firmware to install with https://web.esphome.io
-
-            Make sure to choose \`home-assistant-voice-esp32s3.factory.bin\`.
-
-            [download]: ${url}`
-            })
-
-  upload-to-r2:
-    if: github.event_name == 'release'
-    name: Upload to R2
-    needs:
-      - build-firmware
-    uses: esphome/workflows/.github/workflows/upload-to-r2.yml@025a1e6255610c498ed590403b7e510b69e474df  # 2026.4.1
-    with:
-      directory: ${{ github.event.repository.name }}
-    secrets: inherit
-
-  summary:
-    if: github.event_name == 'release'
-    name: Generate Summary
-    runs-on: ubuntu-latest
-    needs:
-      - upload-to-r2
-    steps:
-      - name: Generate
-        run: |-
-          echo "## Firmware built successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[Install here](https://esphome.github.io/${{ github.event.repository.name }}/?version=${{ github.event.release.tag_name }}) and test **before** approving deployment to beta or production." >> $GITHUB_STEP_SUMMARY
-
-  upload-to-release:
-    name: Upload to Release
-    if: github.event_name == 'release'
-    uses: esphome/workflows/.github/workflows/upload-to-gh-release.yml@025a1e6255610c498ed590403b7e510b69e474df  # 2026.4.1
-    needs:
-      - build-firmware
-    with:
-      version: ${{ github.event.release.tag_name }}
-
-  promote-beta:
-    name: Promote to Beta
-    if: github.event_name == 'release'
-    uses: esphome/workflows/.github/workflows/promote-r2.yml@025a1e6255610c498ed590403b7e510b69e474df  # 2026.4.1
-    needs:
-      - upload-to-r2
-    with:
-      version: ${{ github.event.release.tag_name }}
-      directory: ${{ github.event.repository.name }}
-      channel: beta
-      manifest-filename: manifest-beta.json
-    secrets: inherit
-
-  promote-prod:
-    name: Promote to Production
-    if: github.event_name == 'release' && github.event.release.prerelease == false
-    uses: esphome/workflows/.github/workflows/promote-r2.yml@025a1e6255610c498ed590403b7e510b69e474df  # 2026.4.1
-    needs:
-      - upload-to-r2
-    with:
-      version: ${{ github.event.release.tag_name }}
-      directory: ${{ github.event.repository.name }}
-      channel: production
-      manifest-filename: manifest.json
-    secrets: inherit
