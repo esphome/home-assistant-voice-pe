@@ -1149,6 +1149,8 @@ light:
   - platform: partition
     id: led_ring
     name: LED Ring
+    on_state:
+      - script.execute: refresh_led_ring
     entity_category: config
     icon: "mdi:circle-outline"
     default_transition_length: 0ms
@@ -1277,6 +1279,14 @@ script:
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
   # For the sake of simplicity and re-usability, the script calls child scripts defined below.
   # This script will be called every time one of these conditions is changing.
+  # Reapply after the exposed partition has written its own pixels. Coalesce HA
+  # slider updates without interrupting the active voice/monitor indication.
+  - id: refresh_led_ring
+    mode: restart
+    then:
+      - delay: 16ms
+      - script.execute: control_leds
+
   - id: control_leds
     then:
       - lambda: |
@@ -1287,8 +1297,8 @@ script:
           if (id(baby_monitor_active)) {
             auto call = id(voice_assistant_leds).turn_on();
             call.set_effect("None");
-            call.set_brightness(0.3f);
-            if (id(baby_monitor_listener_active)) call.set_rgb(0.0f, 0.5f, 1.0f);
+            call.set_brightness(max(id(led_ring).remote_values.get_brightness(), 0.05f));
+            if (id(baby_monitor_listener_active)) call.set_rgb(1.0f, 0.15f, 0.55f);
             else call.set_rgb(1.0f, 0.45f, 0.0f);
             call.perform();
             return;
@@ -1396,7 +1406,7 @@ script:
           effect: "Twinkle"
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
-  # Solid ring at 30% when Dialog Custom UI has enabled alarms; otherwise off.
+  # Alarm indication takes priority; otherwise mirror the HA light settings.
   - id: control_leds_voice_assistant_idle_phase
     then:
       - if:
@@ -1411,7 +1421,11 @@ script:
                 blue: !lambda return id(led_ring).current_values.get_blue();
                 effect: "None"
           else:
-            - light.turn_off: voice_assistant_leds
+            - lambda: |-
+                auto call = id(voice_assistant_leds).make_call();
+                call.from_light_color_values(id(led_ring).remote_values);
+                call.set_effect("None");
+                call.perform();
 
   # Script executed when the voice assistant is waiting for a command (After the wake word)
   # Slow clockwise spin of the LED ring.
