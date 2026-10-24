@@ -29,6 +29,7 @@ esphome:
         - lambda: |-
             id(baby_monitor_abort) = []() {
               if (id(baby_monitor_switch).state) id(baby_monitor_switch).turn_off();
+              if (id(baby_listener_switch).state) id(baby_listener_switch).turn_off();
             };
 
 switch:
@@ -43,6 +44,11 @@ switch:
           condition:
             lambda: return !id(software_microphone_muted) && !id(hardware_mute_switch).state && id(api_id).is_connected();
           then:
+            - if:
+                condition:
+                  switch.is_on: baby_listener_switch
+                then:
+                  - switch.turn_off: baby_listener_switch
             - lambda: id(baby_monitor_active) = true;
             - voice_assistant.stop:
                 id: va
@@ -56,11 +62,138 @@ switch:
       - script.stop: baby_monitor_start
       - lambda: |-
           id(monitor_uplink).disable();
-          id(baby_monitor_active) = false;
+          id(baby_monitor_active) = id(baby_monitor_listener_active);
       - script.execute: apply_microphone_mute
       - script.execute: control_leds
 
+  - platform: template
+    id: baby_listener_switch
+    name: "Радионяня: слушатель"
+    icon: mdi:speaker-wireless
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - if:
+          condition:
+            lambda: return !id(baby_listener_url).empty() && !id(software_microphone_muted) && !id(hardware_mute_switch).state && id(api_id).is_connected();
+          then:
+            - if:
+                condition:
+                  switch.is_on: baby_monitor_switch
+                then:
+                  - switch.turn_off: baby_monitor_switch
+            - lambda: |-
+                id(baby_monitor_active) = true;
+                id(baby_monitor_listener_active) = true;
+                id(baby_listener_resume_music) = id(external_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
+            - voice_assistant.stop:
+                id: va
+            - micro_wake_word.stop:
+                id: mww
+            - media_player.pause: external_media_player
+            - script.execute: control_leds
+            - script.execute: baby_listener_start
+          else:
+            - switch.turn_off: baby_listener_switch
+    turn_off_action:
+      - if:
+          condition:
+            lambda: return id(baby_monitor_listener_active);
+          then:
+            - script.stop: baby_listener_start
+            - script.stop: baby_listener_watch
+            - media_player.stop:
+                id: external_media_player
+                announcement: true
+            - lambda: |-
+                id(baby_monitor_active) = id(baby_monitor_switch).state;
+                id(baby_monitor_listener_active) = false;
+                id(baby_listener_url).clear();
+            - if:
+                condition:
+                  lambda: return id(baby_listener_resume_music);
+                then:
+                  - media_player.play: external_media_player
+            - lambda: id(baby_listener_resume_music) = false;
+            - script.execute: apply_microphone_mute
+            - script.execute: control_leds
+
+globals:
+  - id: baby_listener_url
+    type: std::string
+    initial_value: '""'
+  - id: baby_listener_resume_music
+    type: bool
+    initial_value: 'false'
+
+media_source:
+  - platform: baby_monitor
+    id: http_monitor_source
+    buffer_size: 8192
+
+media_player:
+  - id: !extend external_media_player
+    announcement_pipeline:
+      sources:
+        - http_monitor_source
+
+api:
+  actions:
+    - action: monitor_source
+      variables:
+        enabled: bool
+      then:
+        - lambda: |-
+            if (enabled) id(baby_monitor_switch).turn_on();
+            else if (id(baby_monitor_switch).state) id(baby_monitor_switch).turn_off();
+    - action: monitor_listen
+      variables:
+        url: string
+      then:
+        - lambda: |-
+            id(baby_monitor_abort)();
+            const std::string address(url.c_str());
+            if (address.rfind("http://", 0) != 0 && address.rfind("https://", 0) != 0) return;
+            id(baby_listener_url) = address;
+            id(baby_listener_switch).turn_on();
+    - action: monitor_stop
+      then:
+        - lambda: id(baby_monitor_abort)();
+
 script:
+  - id: baby_listener_start
+    mode: restart
+    then:
+      - delay: 250ms
+      - if:
+          condition:
+            lambda: return id(baby_monitor_listener_active);
+          then:
+            - media_player.play_media:
+                id: external_media_player
+                media_url: !lambda return "monitor+" + id(baby_listener_url);
+                announcement: true
+            - script.execute: baby_listener_watch
+  - id: baby_listener_watch
+    mode: restart
+    then:
+      - wait_until:
+          condition:
+            media_player.is_announcing: external_media_player
+          timeout: 15s
+      - if:
+          condition:
+            media_player.is_announcing: external_media_player
+          then:
+            - wait_until:
+                condition:
+                  not:
+                    media_player.is_announcing: external_media_player
+      - if:
+          condition:
+            switch.is_on: baby_listener_switch
+          then:
+            - switch.turn_off: baby_listener_switch
   - id: baby_monitor_start
     mode: restart
     then:
@@ -84,4 +217,4 @@ interval:
           condition:
             lambda: return id(baby_monitor_active) && (!id(api_id).is_connected() || id(software_microphone_muted) || id(hardware_mute_switch).state);
           then:
-            - switch.turn_off: baby_monitor_switch
+            - lambda: id(baby_monitor_abort)();

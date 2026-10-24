@@ -142,6 +142,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: baby_monitor_listener_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: baby_monitor_abort
     type: std::function<void()>
     initial_value: '[]() {}'
@@ -496,46 +500,52 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
+                lambda: return id(baby_monitor_active);
               then:
+                - lambda: id(baby_monitor_abort)();
+              else:
                 - if:
                     condition:
-                      switch.is_on: timer_ringing
+                      lambda: return !id(init_in_progress) && !id(color_changed) && !id(group_volume_changed) && !id(disable_buttons).state;
                     then:
-                      - switch.turn_off: timer_ringing
-                    else:
                       - if:
                           condition:
-                            voice_assistant.is_running:
+                            switch.is_on: timer_ringing
                           then:
-                            - voice_assistant.stop:
+                            - switch.turn_off: timer_ringing
                           else:
                             - if:
                                 condition:
-                                  media_player.is_announcing:
-                                    id: external_media_player
+                                  voice_assistant.is_running:
                                 then:
-                                  media_player.stop:
-                                    announcement: true
-                                    id: external_media_player
+                                  - voice_assistant.stop:
                                 else:
                                   - if:
                                       condition:
-                                        media_player.is_playing:
+                                        media_player.is_announcing:
                                           id: external_media_player
                                       then:
-                                        - media_player.pause:
-                                            id: external_media_player
+                                        media_player.stop:
+                                          announcement: true
+                                          id: external_media_player
                                       else:
                                         - if:
                                             condition:
-                                              and:
-                                                - lambda: return !id(baby_monitor_active);
-                                                - switch.is_off: master_mute_switch
-                                                - not: voice_assistant.is_running
+                                              media_player.is_playing:
+                                                id: external_media_player
                                             then:
-                                              # on_listening plays the shared listen.mp3 cue once ready.
-                                              - voice_assistant.start:
+                                              - media_player.pause:
+                                                  id: external_media_player
+                                            else:
+                                              - if:
+                                                  condition:
+                                                    and:
+                                                      - lambda: return !id(baby_monitor_active);
+                                                      - switch.is_off: master_mute_switch
+                                                      - not: voice_assistant.is_running
+                                                  then:
+                                                    # on_listening plays the shared listen.mp3 cue once ready.
+                                                    - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1278,7 +1288,8 @@ script:
             auto call = id(voice_assistant_leds).turn_on();
             call.set_effect("None");
             call.set_brightness(0.3f);
-            call.set_rgb(1.0f, 0.45f, 0.0f);
+            if (id(baby_monitor_listener_active)) call.set_rgb(0.0f, 0.5f, 1.0f);
+            else call.set_rgb(1.0f, 0.45f, 0.0f);
             call.perform();
             return;
           }

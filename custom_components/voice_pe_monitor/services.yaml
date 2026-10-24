@@ -1,0 +1,42 @@
+start_source:
+  name: Запустить источник звука
+  description: Включить микрофон выбранной колонки и дождаться подключения к HA.
+  fields:
+    device_id:
+      name: Колонка-источник
+      required: true
+      selector:
+        device:
+          integration: esphome
+start_listener:
+  name: Запустить слушатель
+  description: Воспроизводить звук источника на другой колонке. Источник нужно запустить заранее.
+  fields:
+    source_device_id:
+      name: Колонка-источник
+      required: true
+      selector:
+        device:
+          integration: esphome
+    device_id:
+      name: Колонка-слушатель
+      required: true
+      selector:
+        device:
+          integration: esphome
+    ha_url:
+      name: Локальный URL Home Assistant
+      description: Необязательно. Например http://192.168.31.83:8123; должен быть доступен колонке. По умолчанию внутренний URL HA.
+      required: false
+      selector:
+        text:
+stop:
+  name: Остановить радионяню
+  description: Остановить обе колонки пары и вернуть обычный режим. Без пары остановить выбранную колонку.
+  fields:
+    device_id:
+      name: Любая колонка пары
+      required: true
+      selector:
+        device:
+          integration: esphome

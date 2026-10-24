@@ -37,3 +37,7 @@ class BabyMonitor : public Component {
   size_t size_{0};
 };
 }
+
+#ifdef USE_BABY_MONITOR_AUDIO_SOURCE
+#include "monitor_audio_source.h"
+#endif

@@ -12,6 +12,7 @@ class Receiver:
         self.node_id = node_id
         self._key = key
         self.connected = False
+        self.online = asyncio.Event()
         self.listeners = set()
         self.server = None
         self._writer = None
@@ -31,6 +32,10 @@ class Receiver:
 
     def _status(self, connected):
         self.connected = connected
+        if connected:
+            self.online.set()
+        else:
+            self.online.clear()
         self._publish({"type": "status", "connected": connected})
 
     async def handle(self, reader, writer):

@@ -10,6 +10,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .receiver import RATE, Receiver
+from .services import register_services
 
 DOMAIN = "voice_pe_monitor"
 
@@ -17,6 +18,7 @@ DOMAIN = "voice_pe_monitor"
 async def async_setup(hass, config):
     hass.data.setdefault(DOMAIN, {})
     websocket_api.async_register_command(hass, ws_listen)
+    register_services(hass)
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
@@ -38,6 +40,7 @@ async def async_setup_entry(hass, entry):
     hass.data[DOMAIN][entry.data["node_id"]] = receiver
 
     async def stop(event):
+        await hass.data["voice_pe_monitor_sessions"].stop()
         await receiver.stop()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop))
@@ -46,6 +49,10 @@ async def async_setup_entry(hass, entry):
 
 async def async_unload_entry(hass, entry):
     receiver = hass.data[DOMAIN].pop(entry.data["node_id"])
+    sessions = hass.data["voice_pe_monitor_sessions"]
+    for token, item in tuple(sessions.sessions.items()):
+        if item["receiver"] is receiver:
+            await sessions.close(token)
     await receiver.stop()
     return True
 

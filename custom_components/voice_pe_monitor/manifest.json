@@ -1,7 +1,7 @@
 {
   "domain": "voice_pe_monitor",
   "name": "Voice PE Monitor (experimental)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "config_flow": true,
   "documentation": "https://github.com/mikhailhimei/home-assistant-voice-pe/blob/experimental/baby-monitor/docs/baby-monitor.md",
   "codeowners": ["@mikhailhimei"],
