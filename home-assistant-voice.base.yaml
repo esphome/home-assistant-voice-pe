@@ -137,6 +137,14 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  # Optional monitor package uses these hooks; normal firmware keeps them inactive.
+  - id: baby_monitor_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: baby_monitor_abort
+    type: std::function<void()>
+    initial_value: '[]() {}'
   - id: software_microphone_muted
     type: bool
     restore_value: yes
@@ -522,6 +530,7 @@ binary_sensor:
                                         - if:
                                             condition:
                                               and:
+                                                - lambda: return !id(baby_monitor_active);
                                                 - switch.is_off: master_mute_switch
                                                 - not: voice_assistant.is_running
                                             then:
@@ -1231,6 +1240,7 @@ script:
           condition:
             lambda: return id(software_microphone_muted) || id(hardware_mute_switch).state;
           then:
+            - lambda: id(baby_monitor_abort)();
             - microphone.mute: i2s_mics
             - voice_assistant.stop:
                 id: va
@@ -1243,8 +1253,12 @@ script:
                   voice_assistant.connected:
                     id: va
                 then:
-                  - micro_wake_word.start:
-                      id: mww
+                  - if:
+                      condition:
+                        lambda: return !id(baby_monitor_active);
+                      then:
+                        - micro_wake_word.start:
+                            id: mww
       - lambda: |-
           id(master_mute_switch).publish_state(
               id(software_microphone_muted) || id(hardware_mute_switch).state);
@@ -1258,6 +1272,14 @@ script:
       - lambda: |
           if (id(voice_kit_component).is_failed()) {
             id(control_leds_voice_kit_startup_failed).execute();
+            return;
+          }
+          if (id(baby_monitor_active)) {
+            auto call = id(voice_assistant_leds).turn_on();
+            call.set_effect("None");
+            call.set_brightness(0.3f);
+            call.set_rgb(1.0f, 0.45f, 0.0f);
+            call.perform();
             return;
           }
           id(check_if_timers_active).execute();
@@ -1972,7 +1994,9 @@ micro_wake_word:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          and:
+            - switch.is_off: master_mute_switch
+            - lambda: return !id(baby_monitor_active);
         then:
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
@@ -2082,6 +2106,12 @@ voice_assistant:
               sound_file: "error_cloud_expired"
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
+    - if:
+        condition:
+          lambda: return id(baby_monitor_active);
+        then:
+          - voice_assistant.stop:
+              id: va
     - script.stop: play_completed_sound
     - lambda: |-
         id(command_processed) = false;
