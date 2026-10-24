@@ -17,7 +17,6 @@ baby_monitor:
   host: ${baby_monitor_host}
   port: ${baby_monitor_port}
   node_id: ${name}
-  upload_key: !secret baby_monitor_upload_key
   microphone:
     microphone: i2s_mics
     channels: [0]
@@ -142,6 +141,12 @@ api:
     - lambda: |-
         id(monitor_uplink).learn_server(client_info.c_str(), client_address.c_str());
   actions:
+    - action: monitor_configure
+      variables:
+        key: string
+      then:
+        - lambda: |-
+            id(monitor_uplink).provision(std::string(key.c_str()));
     - action: monitor_source
       variables:
         enabled: bool

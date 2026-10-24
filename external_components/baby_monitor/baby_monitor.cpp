@@ -9,6 +9,20 @@ static const char *const TAG = "baby_monitor";
 void BabyMonitor::setup() {
   mic_->add_data_callback([this](const std::vector<uint8_t> &data) { enqueue_(data); });
 }
+bool BabyMonitor::provision(const std::string &key) {
+  if (key.size() < 32 || key.size() > 128 ||
+      key.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) {
+    ESP_LOGW(TAG, "Invalid monitor provisioning data");
+    return false;
+  }
+  const std::string hello = node_ + " " + key + "\n";
+  if (provisioned_ && hello_ == hello) return true;
+  if (enabled_) close_();
+  hello_ = hello;
+  provisioned_ = true;
+  last_attempt_ = millis() - 5000;
+  return true;
+}
 void BabyMonitor::learn_server(const std::string &client_info, const std::string &client_address) {
   if (!automatic_host_ || client_info.rfind("Home Assistant ", 0) != 0) return;
   if (client_address.empty() || client_address.find(':') != std::string::npos) {
@@ -49,7 +63,7 @@ void BabyMonitor::enqueue_(const std::vector<uint8_t> &data) {
   size_ += count;
 }
 void BabyMonitor::loop() {
-  if (!enabled_ || host_.empty()) return;
+  if (!enabled_ || host_.empty() || !provisioned_) return;
   if (overflow_.exchange(false)) { close_(); return; }
   const uint32_t now = millis();
   if (!socket_) {

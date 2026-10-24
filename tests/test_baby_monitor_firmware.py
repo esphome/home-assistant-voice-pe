@@ -109,6 +109,16 @@ int main(){
  automatic.learn_server("Home Assistant 2026.10", "192.0.2.5");assert(!automatic.is_streaming());automatic.loop();
  assert(automatic.host()=="192.0.2.5" && automatic.is_streaming() && auto_mic.starts==2);
  automatic.disable();
+ microphone::MicrophoneSource provisioned_mic;
+ TestMonitor provisioned;
+ provisioned.set_microphone(&provisioned_mic);provisioned.configure("127.0.0.1",8124,"voice","");provisioned.setup();
+ provisioned.enable();provisioned.loop();assert(!provisioned.is_streaming() && provisioned_mic.starts==0);
+ assert(!provisioned.provision(""));assert(!provisioned.provision("short"));
+ assert(!provisioned.provision(std::string(32,' ')));provisioned.loop();assert(provisioned_mic.starts==0);
+ assert(provisioned.provision(std::string(40,'n')));provisioned.loop();assert(provisioned.is_streaming() && provisioned_mic.starts==1);
+ assert(provisioned.provision(std::string(40,'n')));assert(provisioned.is_streaming()); // Repeated provisioning does not restart capture.
+ assert(provisioned.provision(std::string(40,'z')));assert(!provisioned.is_streaming());provisioned.loop();assert(provisioned_mic.starts==2);
+ provisioned.disable();assert(provisioned.provision(std::string(40,'n')));provisioned.loop();assert(!provisioned.is_streaming());
 }
 """)
             component = ROOT / "external_components/baby_monitor"

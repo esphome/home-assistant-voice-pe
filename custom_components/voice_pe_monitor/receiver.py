@@ -19,6 +19,10 @@ class Receiver:
         self._clients = set()
         self._tasks = set()
 
+    def provisioning_data(self):
+        """Internal API payload, never returned by the browser websocket commands."""
+        return {"key": self._key}
+
     async def start(self, host, port):
         self.server = await asyncio.start_server(self.handle, host, port, limit=256)
 

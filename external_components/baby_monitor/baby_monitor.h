@@ -14,8 +14,11 @@ class BabyMonitor : public Component {
   void configure(std::string host, uint16_t port, std::string node, std::string key) {
     automatic_host_ = host == "auto";
     host_ = automatic_host_ ? "" : std::move(host);
-    port_ = port; hello_ = node + " " + key + "\n";
+    port_ = port; node_ = std::move(node);
+    provisioned_ = !key.empty();
+    hello_ = provisioned_ ? node_ + " " + key + "\n" : "";
   }
+  bool provision(const std::string &key);
   void learn_server(const std::string &client_info, const std::string &client_address);
   void setup() override;
   void loop() override;
@@ -28,9 +31,9 @@ class BabyMonitor : public Component {
   void enqueue_(const std::vector<uint8_t> &data);
   microphone::MicrophoneSource *mic_{nullptr};
   std::unique_ptr<socket::Socket> socket_;
-  std::string host_, hello_;
+  std::string host_, hello_, node_;
   uint16_t port_{};
-  bool enabled_{false}, connecting_{false}, automatic_host_{false};
+  bool enabled_{false}, connecting_{false}, automatic_host_{false}, provisioned_{false};
   std::atomic<bool> ready_{false}, overflow_{false};
   uint32_t last_attempt_{0}, opened_at_{0};
   size_t hello_sent_{0}, ack_size_{0};

@@ -28,9 +28,6 @@ class MonitorBootTests(unittest.TestCase):
                 flags=re.DOTALL,
             )
             (temp / "monitor.yaml").write_text(module)
-            (temp / "secrets.yaml").write_text(
-                "baby_monitor_upload_key: validation_key_01234567890123456789\n"
-            )
             config = temp / "config.yaml"
             config.write_text(
                 f"substitutions:\n  name: home-assistant-voice-0ab77d\npackages:\n  voice: !include {ROOT}/home-assistant-voice.yaml\n  monitor: !include {temp}/monitor.yaml\nwifi:\n  ssid: validation-only\n  password: validation-only\n"
@@ -57,6 +54,7 @@ class MonitorBootTests(unittest.TestCase):
             )
             self.assertEqual(len(merged["display"]), 1)
             self.assertEqual(merged["baby_monitor"]["host"], "auto")
+            self.assertNotIn("upload_key", merged["baby_monitor"])
             self.assertIn("learn_server", str(merged["api"]["on_client_connected"]))
             off_actions = switch["turn_off_action"]["then"]
             self.assertEqual(off_actions[0]["script.stop"]["id"], "baby_monitor_start")

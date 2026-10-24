@@ -9,6 +9,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.exceptions import ConfigEntryNotReady
 
+from .provisioning import provision_source
 from .receiver import RATE, Receiver
 from .services import register_services
 
@@ -38,6 +39,7 @@ async def async_setup_entry(hass, entry):
     except OSError as err:
         raise ConfigEntryNotReady("Cannot bind audio ingest port") from err
     hass.data[DOMAIN][entry.data["node_id"]] = receiver
+    await provision_source(hass, entry.data["node_id"])
 
     async def stop(event):
         await hass.data["voice_pe_monitor_sessions"].stop()

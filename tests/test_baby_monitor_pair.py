@@ -89,8 +89,13 @@ class PairPlaybackTests(unittest.IsolatedAsyncioTestCase):
         self.stops = []
         self.both_stopped = asyncio.Event()
         self.pcm = b"\x01\x02" * 640
+        self.received_keys = []
+
+        async def configure(call):
+            self.received_keys.append(call.data["key"])
 
         async def source(call):
+            assert self.received_keys and self.received_keys[-1] == "k" * 40
             port = self.receiver.server.sockets[0].getsockname()[1]
             reader, self.writer = await asyncio.open_connection("127.0.0.1", port)
             self.writer.write(b"voice " + b"k" * 40 + b"\n")
@@ -128,6 +133,7 @@ class PairPlaybackTests(unittest.IsolatedAsyncioTestCase):
             if set(self.stops) == {"voice", "listener"}:
                 self.both_stopped.set()
 
+        hass.services.async_register("esphome", "voice_monitor_configure", configure)
         hass.services.async_register("esphome", "voice_monitor_source", source)
         hass.services.async_register("esphome", "voice_monitor_stop", stop_source)
         hass.services.async_register("esphome", "listener_monitor_listen", listen)
@@ -227,3 +233,40 @@ class PairPlaybackTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertCountEqual(self.stops, ["voice", "listener"])
         self.assertFalse(self.hass.data["voice_pe_monitor_sessions"].sessions)
+
+    async def test_form_has_no_key_and_generates_one_server_side(self):
+        from custom_components.voice_pe_monitor.config_flow import MonitorConfigFlow
+
+        flow = MonitorConfigFlow()
+        flow.hass = self.hass
+        flow.context = {"source": "user"}
+        flow.flow_id = "test-flow"
+        flow.handler = "voice_pe_monitor"
+        form = await flow.async_step_user()
+        assert "upload_key" not in {str(key) for key in form["data_schema"].schema}
+        result = await flow.async_step_user({"node_id": "another-source", "port": 8125})
+        self.assertEqual(result["type"], "create_entry")
+        self.assertGreaterEqual(len(result["data"]["upload_key"]), 32)
+
+    async def test_api_registration_and_switch_on_provision_without_scripts(self):
+        await asyncio.sleep(0.01)  # Drain the service-registered callback from setup.
+        self.assertIn("k" * 40, self.received_keys)
+        self.received_keys.clear()
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        device = dr.async_get(self.hass).async_get(self.devices[0])
+        entry = self.hass.config_entries.async_get_entry(
+            next(iter(device.config_entries))
+        )
+        entity = er.async_get(self.hass).async_get_or_create(
+            "switch",
+            "esphome",
+            "voice-monitor-mode",
+            device_id=self.devices[0],
+            config_entry=entry,
+            original_name="Радионяня",
+        )
+        self.hass.states.async_set(entity.entity_id, "on")
+        await asyncio.sleep(0.01)
+        self.assertEqual(self.received_keys, ["k" * 40])

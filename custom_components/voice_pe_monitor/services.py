@@ -3,7 +3,7 @@
 import asyncio
 
 import voluptuous as vol
-from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.const import EVENT_SERVICE_REGISTERED, EVENT_STATE_CHANGED
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -11,6 +11,7 @@ from homeassistant.helpers.network import get_url
 from homeassistant.util import slugify
 
 from .playback import MonitorStreamView, PlaybackSessions
+from .provisioning import provision_source
 
 DOMAIN = "voice_pe_monitor"
 
@@ -44,21 +45,36 @@ def register_services(hass):
     hass.http.register_view(MonitorStreamView())
 
     async def mode_changed(event):
-        old = event.data.get("old_state")
-        new = event.data.get("new_state")
-        if old is None or new is None or old.state != "on" or new.state != "off":
+        old, new = event.data.get("old_state"), event.data.get("new_state")
+        if new is None:
             return
         entity = er.async_get(hass).async_get(event.data["entity_id"])
+        if not entity or entity.domain != "switch" or not entity.device_id:
+            return
+        original_name = entity.original_name or ""
+        if new.state == "on" and original_name.endswith("Радионяня"):
+            try:
+                node, _ = resolve(entity.device_id, "source")
+                await provision_source(hass, node)
+            except HomeAssistantError:
+                pass
         if (
-            entity
-            and entity.domain == "switch"
-            and entity.original_name in ("Радионяня", "Радионяня: слушатель")
-            and entity.device_id
+            old
+            and old.state == "on"
+            and new.state == "off"
+            and original_name.endswith(("Радионяня", "Радионяня: слушатель"))
         ):
             await sessions.close_device(entity.device_id)
 
-    # Optimistic ESPHome switch updates also cover a button press before HTTP starts.
-    # Registry original_name stays stable when the user renames an entity in HA.
+    async def service_registered(event):
+        if event.data.get("domain") != "esphome":
+            return
+        for node in tuple(hass.data.get(DOMAIN, {})):
+            if event.data.get("service") == slugify(f"{node}_monitor_configure"):
+                await provision_source(hass, node)
+
+    # Provision on API reconnect, manual switch-on and explicit script start.
+    hass.bus.async_listen(EVENT_SERVICE_REGISTERED, service_registered)
     hass.bus.async_listen(EVENT_STATE_CHANGED, mode_changed)
 
     async def start_source(call):
@@ -71,13 +87,14 @@ def register_services(hass):
             raise HomeAssistantError(
                 "Add this source in Voice PE Monitor integration first"
             )
+        await provision_source(hass, name)
         await native(device, "source", {"enabled": True})
         try:
             await asyncio.wait_for(receiver.online.wait(), 10)
         except TimeoutError as err:
             await stop_native(device)
             raise HomeAssistantError(
-                "Source did not connect: check Mute, key, address and port"
+                "Source did not connect: check Mute, firmware, address and port"
             ) from err
 
     async def start_listener(call):
