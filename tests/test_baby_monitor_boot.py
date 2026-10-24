@@ -56,6 +56,8 @@ class MonitorBootTests(unittest.TestCase):
                 merged["baby_monitor"]["microphone"]["bits_per_sample"], "16"
             )
             self.assertEqual(len(merged["display"]), 1)
+            self.assertEqual(merged["baby_monitor"]["host"], "auto")
+            self.assertIn("learn_server", str(merged["api"]["on_client_connected"]))
             off_actions = switch["turn_off_action"]["then"]
             self.assertEqual(off_actions[0]["script.stop"]["id"], "baby_monitor_start")
             scripts = {item["id"]: item for item in merged["script"]}

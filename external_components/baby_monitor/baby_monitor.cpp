@@ -9,6 +9,18 @@ static const char *const TAG = "baby_monitor";
 void BabyMonitor::setup() {
   mic_->add_data_callback([this](const std::vector<uint8_t> &data) { enqueue_(data); });
 }
+void BabyMonitor::learn_server(const std::string &client_info, const std::string &client_address) {
+  if (!automatic_host_ || client_info.rfind("Home Assistant ", 0) != 0) return;
+  if (client_address.empty() || client_address.find(':') != std::string::npos) {
+    ESP_LOGW(TAG, "Automatic receiver requires an IPv4 HA API peer; set baby_monitor_host to HA IPv4");
+    return;
+  }
+  if (host_ == client_address) return;
+  if (enabled_) close_();
+  host_ = client_address;
+  last_attempt_ = millis() - 5000;
+  ESP_LOGI(TAG, "Monitor receiver learned from HA API: %s", host_.c_str());
+}
 void BabyMonitor::enable() {
   if (enabled_) return;
   enabled_ = true;
@@ -37,7 +49,7 @@ void BabyMonitor::enqueue_(const std::vector<uint8_t> &data) {
   size_ += count;
 }
 void BabyMonitor::loop() {
-  if (!enabled_) return;
+  if (!enabled_ || host_.empty()) return;
   if (overflow_.exchange(false)) { close_(); return; }
   const uint32_t now = millis();
   if (!socket_) {

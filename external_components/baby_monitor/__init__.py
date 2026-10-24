@@ -16,7 +16,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(BabyMonitor),
             cv.Required(CONF_MICROPHONE): microphone.microphone_source_schema(),
-            cv.Required("host"): cv.ipv4address,
+            cv.Optional("host", default="auto"): cv.Any(cv.one_of("auto"), cv.ipv4address),
             cv.Optional("port", default=8124): cv.port,
             cv.Required("node_id"): vol.Match(r"^[a-zA-Z0-9_-]{1,64}$"),
             cv.Required("upload_key"): cv.All(

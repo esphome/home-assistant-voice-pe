@@ -1,6 +1,6 @@
 # Opt-in: include alongside home-assistant-voice.yaml. Never records at boot.
 substitutions:
-  baby_monitor_host: "192.168.31.83"
+  baby_monitor_host: "auto"
   baby_monitor_port: "8124"
 
 external_components:
@@ -138,6 +138,9 @@ media_player:
         - http_monitor_source
 
 api:
+  on_client_connected:
+    - lambda: |-
+        id(monitor_uplink).learn_server(client_info.c_str(), client_address.c_str());
   actions:
     - action: monitor_source
       variables:

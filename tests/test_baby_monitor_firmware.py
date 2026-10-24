@@ -20,7 +20,7 @@ namespace esphome { class Component {public: virtual void setup(){} virtual void
 #include <cstdint>
 namespace esphome { inline uint32_t tick=0; inline uint32_t millis(){return tick;} }
 """,
-                "esphome/core/log.h": "#pragma once\n#define ESP_LOGI(...) ((void)0)\n",
+                "esphome/core/log.h": "#pragma once\n#define ESP_LOGI(...) ((void)0)\n#define ESP_LOGW(...) ((void)0)\n",
                 "esphome/components/microphone/microphone_source.h": """#pragma once
 #include <functional>
 #include <vector>
@@ -70,10 +70,15 @@ namespace esphome::socket {
 #include "baby_monitor.h"
 #include <cassert>
 using namespace esphome;
+class TestMonitor : public baby_monitor::BabyMonitor {
+ public: const std::string &host() const { return host_; }
+};
 int main(){
  microphone::MicrophoneSource mic;
- baby_monitor::BabyMonitor monitor;
+ TestMonitor monitor;
  monitor.set_microphone(&mic);monitor.configure("127.0.0.1",8124,"voice",std::string(40,'k'));monitor.setup();
+ monitor.learn_server("Home Assistant 2026.10", "192.0.2.1");
+ assert(monitor.host()=="127.0.0.1"); // Explicit overrides always win.
  monitor.loop();assert(!monitor.is_streaming() && mic.starts==0);
  monitor.enable();monitor.loop();assert(monitor.is_streaming() && mic.starts==1);
  socket::sent.clear();socket::limit=3;
@@ -92,6 +97,18 @@ int main(){
  socket::broken=true;mic.callback(pcm);monitor.loop();assert(!monitor.is_streaming());
  socket::broken=false;tick+=5001;monitor.loop();assert(monitor.is_streaming());
  monitor.disable();tick+=5001;monitor.loop();assert(!monitor.is_streaming());
+ microphone::MicrophoneSource auto_mic;
+ TestMonitor automatic;
+ automatic.set_microphone(&auto_mic);automatic.configure("auto",8124,"voice",std::string(40,'k'));automatic.setup();
+ automatic.enable();automatic.loop();assert(!automatic.is_streaming() && auto_mic.starts==0);
+ automatic.learn_server("ESPHome Logs", "192.0.2.2");automatic.loop();assert(automatic.host().empty());
+ automatic.learn_server("Home Assistant 2026.10", "2001:db8::1");automatic.loop();assert(automatic.host().empty());
+ automatic.learn_server("Home Assistant 2026.10", "192.0.2.3");automatic.loop();
+ assert(automatic.host()=="192.0.2.3" && automatic.is_streaming() && auto_mic.starts==1);
+ automatic.learn_server("ESPHome Logs", "192.0.2.4");assert(automatic.host()=="192.0.2.3");
+ automatic.learn_server("Home Assistant 2026.10", "192.0.2.5");assert(!automatic.is_streaming());automatic.loop();
+ assert(automatic.host()=="192.0.2.5" && automatic.is_streaming() && auto_mic.starts==2);
+ automatic.disable();
 }
 """)
             component = ROOT / "external_components/baby_monitor"
