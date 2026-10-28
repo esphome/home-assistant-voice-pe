@@ -246,6 +246,7 @@ switch:
       # Disable stop wake word
       - micro_wake_word.disable_model: stop
       - script.execute: disable_repeat
+      - script.execute: apply_wake_word_sensitivity
       # Stop any current announcement (ie: stop the timer ring mid playback)
       - if:
           condition:
@@ -263,6 +264,7 @@ switch:
       # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
+      - script.execute: apply_wake_word_sensitivity
       # Duck audio
       - mixer_speaker.apply_ducking:
           id: media_mixing_input
@@ -1498,6 +1500,38 @@ script:
           }
           id(is_timer_active) = output;
 
+  # Lower cutoffs when Home Assistant verifies the wake word, except while a timer rings
+  - id: apply_wake_word_sensitivity
+    then:
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
+      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
+      - lambda: |-
+          const StringRef sensitivity = id(wake_word_sensitivity).current_option();
+          if (id(va).is_wake_word_audio_active() && !id(timer_ringing).state) {
+            uint8_t cutoff = 102;                         // 0.40
+            if (sensitivity == "Slightly sensitive") {
+              cutoff = 128;                               // 0.50
+            } else if (sensitivity == "Very sensitive") {
+              cutoff = 77;                                // 0.30
+            }
+            id(okay_nabu).set_probability_cutoff(cutoff);
+            id(hey_jarvis).set_probability_cutoff(cutoff);
+            id(hey_mycroft).set_probability_cutoff(cutoff);
+          } else if (sensitivity == "Slightly sensitive") {
+            id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
+            id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
+            id(hey_mycroft).set_probability_cutoff(253);  // 0.99 -> 0.567 FAPH on DipCo
+          } else if (sensitivity == "Moderately sensitive") {
+            id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
+            id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
+            id(hey_mycroft).set_probability_cutoff(242);  // 0.95 -> 1.502 FAPH on DipCo (Manifest's default)
+          } else if (sensitivity == "Very sensitive") {
+            id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
+            id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
+            id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
+          }
+
   # Script used activate the stop word if the TTS step is long.
   # Why is this wrapped on a script?
   #   Becasue we want to stop the sequence if the TTS step is faster than that.
@@ -1770,7 +1804,15 @@ micro_wake_word:
                           else:
                             - if:
                                 condition:
-                                  switch.is_on: wake_sound
+                                  lambda: return id(va).is_wake_word_audio_active();
+                                then:
+                                  - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+                                  - script.execute: control_leds
+                            - if:
+                                condition:
+                                  and:
+                                    - switch.is_on: wake_sound
+                                    - lambda: return !id(va).is_wake_word_audio_active();
                                 then:
                                   - script.execute:
                                       id: play_sound
@@ -1793,24 +1835,7 @@ select:
       - Moderately sensitive
       - Very sensitive
     on_value:
-      # Sets specific wake word probabilities computed for each particular model
-      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
-      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
-      lambda: |-
-        if (x == "Slightly sensitive") {
-          id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
-          id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
-          id(hey_mycroft).set_probability_cutoff(253);  // 0.99 -> 0.567 FAPH on DipCo
-        } else if (x == "Moderately sensitive") {
-          id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
-          id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
-          id(hey_mycroft).set_probability_cutoff(242);  // 0.95 -> 1.502 FAPH on DipCo (Manifest's default)
-        } else if (x == "Very sensitive") {
-          id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
-          id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
-          id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
-        }
+      - script.execute: apply_wake_word_sensitivity
 
 voice_assistant:
   id: va
@@ -1821,12 +1846,16 @@ voice_assistant:
       channels: 1
   media_player: external_media_player
   micro_wake_word: mww
+  wake_word_audio:
+    buffer_duration: 1500ms
+    timeout: 2s
   use_wake_word: false
   noise_suppression_level: 0
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
+    - script.execute: apply_wake_word_sensitivity
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
@@ -1855,12 +1884,35 @@ voice_assistant:
               id: play_sound
               priority: true
               sound_file: "error_cloud_expired"
+    - if:
+        condition:
+          - lambda: return code == "wake-word-verification-timeout";
+        then:
+          - delay: 1s
+          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+          - script.execute: control_leds
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s         # The duration of the transition (default is no transition)
+    - if:
+        condition:
+          lambda: return !id(va).is_wake_word_audio_active();
+        then:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
+              duration: 0.0s         # The duration of the transition (default is no transition)
+  on_wake_word_detected:
+    - if:
+        condition:
+          lambda: return id(va).is_wake_word_audio_active();
+        then:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 20
+              duration: 0.0s
+  on_wake_word_rejected:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
