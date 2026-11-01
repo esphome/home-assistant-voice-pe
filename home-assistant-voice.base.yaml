@@ -121,6 +121,17 @@ api:
   on_client_disconnected:
     - script.execute: control_leds
   actions:
+    - action: reminder_announce
+      variables:
+        url: string
+      then:
+        - if:
+            condition:
+              lambda: return !url.empty();
+            then:
+              - script.execute:
+                  id: play_reminder
+                  url: !lambda return url;
     - action: alert_start
       variables:
         url: string
@@ -1970,6 +1981,41 @@ script:
               .set_announcement(true)
               .perform();
           }
+
+  # Reminders own their cue and playback ordering; HA only supplies the speech URL.
+  - id: play_reminder
+    mode: queued
+    max_runs: 8
+    parameters:
+      url: string
+    then:
+      # Do not cut off an alarm, an Assist response or another announcement.
+      - wait_until:
+          condition:
+            and:
+              - switch.is_off: timer_ringing
+              - not:
+                  voice_assistant.is_running:
+                    id: va
+              - not:
+                  media_player.is_announcing: external_media_player
+      - media_player.enqueue:
+          id: external_media_player
+          announcement: true
+          media_url: audio-file://center_button_double_press_sound
+      - media_player.enqueue:
+          id: external_media_player
+          announcement: true
+          media_url: !lambda return url;
+      # Wait for the queued commands to start before accepting another reminder.
+      - wait_until:
+          condition:
+            media_player.is_announcing: external_media_player
+          timeout: 3s
+      - wait_until:
+          condition:
+            not:
+              media_player.is_announcing: external_media_player
 
   # Script used to fetch the first active timer (Stored in global first_active_timer)
   - id: fetch_first_active_timer
