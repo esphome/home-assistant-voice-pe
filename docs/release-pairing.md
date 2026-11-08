@@ -6,7 +6,7 @@ Die Open-Mic-Funktion besteht aus Firmware und Bridge. Beide Komponenten werden 
 
 | Komponente | Default-Branch | Release |
 |---|---|---|
-| Voice-PE-Firmware | `dev` | [`0.2.0`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.0) |
+| Voice-PE-Firmware | `dev` | [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1) |
 | HA Voice Bridge | `main` | [`v1.4.1`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.1) |
 
 ## Verbindliche Regel
@@ -41,7 +41,7 @@ Vor Veröffentlichung muss im Bridge-Repository die neueste kompatible Firmware 
 
 ```bash
 gh release list --repo aschauera/home-assistant-voice-pe --limit 20
-gh release view 0.2.0 \
+gh release view 0.2.1 \
   --repo aschauera/home-assistant-voice-pe \
   --json tagName,isPrerelease,targetCommitish,url
 ```

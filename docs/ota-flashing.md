@@ -7,7 +7,7 @@ verändert die im Home-Assistant-ESPHome-Device-Builder gespeicherte YAML nicht.
 ## Sicherheits- und Kompatibilitätsgrenzen
 
 - Nur das Versionspaar verwenden:
-  - Voice-PE-Firmware `0.2.0` aus diesem Repository;
+  - Voice-PE-Firmware `0.2.1` aus diesem Repository;
   - HA Voice Bridge `v1.4.1` aus dem Default-Branch `main` von
     `aschauera/NanoBotSkills`.
 - Für OTA immer `home-assistant-voice-esp32s3.ota.bin` verwenden.
@@ -44,7 +44,7 @@ ermittelt werden. Nicht raten und nicht dauerhaft in das Repository schreiben.
 `VOICE_PE_IP` vor dem Ausführen durch die tatsächliche IP-Adresse ersetzen:
 
 ```bash
-export FIRMWARE_RELEASE="0.2.0"
+export FIRMWARE_RELEASE="0.2.1"
 export FIRMWARE_REPO="/home/nanobot/home-assistant-voice-pe"
 export FIRMWARE_DIR="$HOME/Downloads/voice-pe-$FIRMWARE_RELEASE"
 export VOICE_PE_IP="192.168.4.REPLACE_ME"
@@ -84,7 +84,7 @@ grep "  home-assistant-voice-$FIRMWARE_RELEASE.zip$" SHA256SUMS.txt \
 Erwartete Ausgabe:
 
 ```text
-home-assistant-voice-0.2.0.zip: OK
+home-assistant-voice-0.2.1.zip: OK
 ```
 
 Archiv entpacken:
