@@ -6,7 +6,7 @@ The upstream project remains available at
 [`esphome/home-assistant-voice-pe`](https://github.com/esphome/home-assistant-voice-pe).
 
 > [!IMPORTANT]
-> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`. Die kompatible HA Voice Bridge ist [`v1.4.1`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.1) aus `aschauera/NanoBotSkills:main`. Firmware- und Bridge-Releases müssen einander in ihren Release-Notes direkt verlinken.
+> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`; die aktuelle Firmware-Version ist [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1). Die kompatible HA Voice Bridge ist [`v1.4.1`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.1) aus `aschauera/NanoBotSkills:main`. Firmware- und Bridge-Releases müssen einander in ihren Release-Notes direkt verlinken.
 
 ## Offener Dialogmodus
 
@@ -88,7 +88,7 @@ Kurzablauf für das Standard-Voice-PE; `VOICE_PE_IP` durch die echte Adresse
 ersetzen und das Produktionsgerät nur nach ausdrücklicher Freigabe flashen:
 
 ```bash
-export FIRMWARE_RELEASE="0.2.0"
+export FIRMWARE_RELEASE="0.2.1"
 export FIRMWARE_REPO="/home/nanobot/home-assistant-voice-pe"
 export FIRMWARE_DIR="$HOME/Downloads/voice-pe-$FIRMWARE_RELEASE"
 export VOICE_PE_IP="192.168.4.REPLACE_ME"
