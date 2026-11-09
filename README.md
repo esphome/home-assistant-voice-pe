@@ -6,7 +6,7 @@ The upstream project remains available at
 [`esphome/home-assistant-voice-pe`](https://github.com/esphome/home-assistant-voice-pe).
 
 > [!IMPORTANT]
-> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`; der letzte Firmware-Release ist [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1). Der Entwicklungsstand für die nächste Version ist `0.2.2-dev` und noch nicht als Release oder Hardware-Paar validiert. Die derzeitige HA Voice Bridge ist [`v1.4.1`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.1) aus `aschauera/NanoBotSkills:main`; ihre Kompatibilität mit `0.2.2-dev` ist ein Kandidat, kein freigegebenes stabiles Paar.
+> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`; der letzte historische Firmware-Release ist [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1). Der Entwicklungsstand für das nächste gekoppelte Paar ist `1.4.2-dev`; vorgesehen sind Firmware `1.4.2` mit Tag `v1.4.2` und HA Voice Bridge `1.4.2` mit demselben Tag `v1.4.2`. Künftig verwenden Firmware und Bridge immer dieselbe SemVer und denselben `v`-Tag. Das Paar ist noch nicht veröffentlicht oder gemeinsam validiert. Historische Releases bleiben unverändert.
 
 ## Offener Dialogmodus
 

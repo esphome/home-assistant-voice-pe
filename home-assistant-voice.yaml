@@ -1299,7 +1299,6 @@ script:
       - text_sensor.template.publish:
           id: dialog_state
           state: "ending"
-      - script.stop: dialog_session_timeout
       - script.stop: dialog_end_after_response
       - script.stop: activate_stop_word_once
       - voice_assistant.stop:
@@ -1333,7 +1332,6 @@ script:
           id(dialog_exit_requested) = false;
           id(dialog_turn_count) = 0;
       - script.stop: dialog_idle_timeout
-      - script.stop: dialog_session_timeout
       - script.stop: dialog_session_timeout
       - script.stop: dialog_end_after_response
       - script.stop: activate_stop_word_once
@@ -1373,7 +1371,6 @@ script:
   - id: dialog_end_after_response
     mode: restart
     then:
-      - script.stop: dialog_idle_timeout
       - wait_until:
           condition:
             media_player.is_announcing:

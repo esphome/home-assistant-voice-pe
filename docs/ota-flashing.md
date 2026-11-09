@@ -6,13 +6,17 @@ verändert die im Home-Assistant-ESPHome-Device-Builder gespeicherte YAML nicht.
 
 ## Sicherheits- und Kompatibilitätsgrenzen
 
-- Der Entwicklungsstand `0.2.2-dev` ist kein Release und wurde nicht als
-  Firmware-/Bridge-Paar oder auf Hardware validiert. Diese Anleitung installiert
-  ausschließlich das veröffentlichte stabile Firmware-Artefakt `0.2.1`.
+- Der Entwicklungsstand `1.4.2-dev` ist kein Release und wurde nicht als
+  Firmware-/Bridge-Paar oder auf Hardware validiert. Das nächste Paar ist
+  Firmware `1.4.2` / Tag `v1.4.2` und HA Voice Bridge `1.4.2` / Tag `v1.4.2`;
+  diese Anleitung installiert weiterhin ausschließlich das historische
+  Firmware-Artefakt `0.2.1`.
 - Nur das Versionspaar verwenden:
   - Voice-PE-Firmware `0.2.1` aus diesem Repository;
-  - HA Voice Bridge `v1.4.1` aus dem Default-Branch `main` von
+  - historisch kompatible HA Voice Bridge `v1.4.1` aus dem Default-Branch `main` von
     `aschauera/NanoBotSkills`.
+- Für künftige Paare müssen Firmware und Bridge dieselbe SemVer und denselben
+  `v`-Tag verwenden. Historische Paare werden nicht umbenannt.
 - Für OTA immer `home-assistant-voice-esp32s3.ota.bin` verwenden.
 - `home-assistant-voice-esp32s3.factory.bin` ist für USB-Erstinstallation oder
   Recovery und darf nicht als OTA-Abbild verwendet werden.

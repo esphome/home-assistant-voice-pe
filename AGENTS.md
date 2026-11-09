@@ -17,13 +17,19 @@ Wichtige Regeln:
 - Jede neue Firmware-Version muss in den Release-Notes die kompatible HA Voice
   Bridge direkt verlinken. Umgekehrt muss jedes neue Bridge-Release die letzte
   kompatible Firmware-Version direkt verlinken.
+- Firmware und HA Voice Bridge verwenden künftig stets dieselbe SemVer und
+  denselben `v`-Tag als fest gekoppeltes Paar: Firmware-Projektversion `1.4.2`
+  und Git-Tag `v1.4.2` gehören zur Bridge-Version `1.4.2` mit Tag `v1.4.2`.
+  Historische Paare wie Firmware `0.2.1` mit Bridge `v1.4.1` bleiben unverändert.
+- Der nächste Firmware-Entwicklungsstand ist `1.4.2-dev`; das finale Release
+  `1.4.2` und der Tag `v1.4.2` dürfen erst im späteren Release-PR erstellt werden.
 - Gibt es noch kein gemeinsam validiertes stabiles Paar, beide Seiten nur als
   Draft oder Pre-Release kennzeichnen.
 - Das Produktionsgerät in der Küche niemals ohne erfolgreichen Build,
   Artefaktprüfung, Rollback-Pfad und ausdrückliche Freigabe flashen.
 - Für Netzwerk-OTA ausschließlich `home-assistant-voice-esp32s3.ota.bin`
   verwenden; `factory.bin` ist USB-Installation beziehungsweise Recovery.
-- Vor dem Flash muss die gekoppelte HA Voice Bridge `v1.4.1` aus dem
-  Default-Branch `main` von `aschauera/NanoBotSkills` vollständig laufen.
+- Vor dem Flash muss die HA Voice Bridge des gleichen gekoppelten Versionspaars
+  aus dem Default-Branch `main` von `aschauera/NanoBotSkills` vollständig laufen.
 - Änderungen in logisch getrennten Commits halten; Tests und Dokumentation vor
   einem PR aktualisieren.
