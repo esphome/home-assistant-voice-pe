@@ -66,6 +66,13 @@ class CustomFirmwareContractTest(unittest.TestCase):
         )[0]
         self.assertNotIn("set_nanobot_led_state", remote_ack)
 
+    def test_nanobot_processing_state_uses_slow_amber_status_effect(self) -> None:
+        controller = CONFIG.split(
+            "  - id: control_leds_nanobot_state\n", 1
+        )[1].split("\n  - id: ", 1)[0]
+        self.assertIn('effect: "Nanobot Status"', controller)
+        self.assertNotIn("Thinking Progress", controller)
+
     def test_wifi_audio_and_development_version_contract(self) -> None:
         self.assertIn("power_save_mode: none", CONFIG)
         self.assertIn("name: Wi-Fi RSSI", CONFIG)

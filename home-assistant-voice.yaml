@@ -1462,8 +1462,7 @@ script:
       - light.turn_on:
           brightness: 55%
           id: voice_assistant_leds
-          effect: !lambda |-
-            return id(nanobot_led_state) == 1 ? "Thinking Progress" : "Nanobot Status";
+          effect: "Nanobot Status"
 
   # Set a Nanobot LED override and arm a state-specific fail-safe timeout.
   - id: set_nanobot_led_state
