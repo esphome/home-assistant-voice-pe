@@ -19,12 +19,44 @@ class CustomFirmwareContractTest(unittest.TestCase):
         for expected in (
             "id: dialog_session_active",
             "id: dialog_session_timeout",
-            "delay: 2min",
+            "id: dialog_idle_timeout",
+            "delay: 10min",
+            "delay: 20s",
             "id(dialog_turn_count) >= 20",
             "voice_assistant.start_continuous:",
             "Ignoring wake word during active dialog (barge-in disabled)",
         ):
             self.assertIn(expected, CONFIG)
+
+    def test_idle_timeout_is_rearmed_and_stopped_for_speech_and_exits(self) -> None:
+        self.assertEqual(CONFIG.count("- script.execute: dialog_idle_timeout"), 2)
+        self.assertGreaterEqual(CONFIG.count("- script.stop: dialog_idle_timeout"), 4)
+        self.assertIn("script.stop: dialog_session_timeout", CONFIG)
+
+    def test_dialog_led_feedback_is_simplified(self) -> None:
+        for expected in (
+            "case 1:  // processing: slow amber breathing",
+            "case 2:  // remote acknowledgement keeps the processing animation",
+            "case 3: {  // replying: faster amber breathing",
+            "case 4: {  // wake-free follow-up: violet breathing ring",
+            "case 5:  // session opened: short green confirmation",
+            "case 6:  // error: red flash",
+            "case 7:  // normal session end: one orange blink",
+            "state: 7",
+        ):
+            self.assertIn(expected, CONFIG)
+        remote_ack = CONFIG.split("- id: play_dialog_remote_ack", 1)[1].split(
+            "- id: control_leds", 1
+        )[0]
+        self.assertNotIn("set_nanobot_led_state", remote_ack)
+
+    def test_wifi_audio_and_development_version_contract(self) -> None:
+        self.assertIn("power_save_mode: none", CONFIG)
+        self.assertIn("name: Wi-Fi RSSI", CONFIG)
+        self.assertIn("entity_category: diagnostic", CONFIG)
+        self.assertIn("buffer_duration: 300ms", CONFIG)
+        for name in ("home-assistant-voice.factory.yaml", "home-assistant-voice.8mb.yaml"):
+            self.assertIn("version: 0.2.2-dev", (ROOT / name).read_text(encoding="utf-8"))
 
     def test_dialog_led_and_diagnostic_states_are_documented(self) -> None:
         for state in (

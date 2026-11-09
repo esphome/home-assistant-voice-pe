@@ -16,7 +16,7 @@ packages:
 esphome:
   project:
     name: aschauera.Nanobot Voice PE
-    version: 0.2.1
+    version: 0.2.2-dev
 
 # Deliberately use only the ESPHome OTA transport inherited from the base file.
 # The official HTTP updater would overwrite this custom firmware.

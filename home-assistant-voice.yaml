@@ -86,6 +86,7 @@ esp32:
 wifi:
   id: wifi_id
   fast_connect: ${hidden_ssid}
+  power_save_mode: none
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
@@ -833,29 +834,33 @@ light:
             uint8_t intensity = 255;
 
             switch (state) {
-              case 1:  // processing: amber, clockwise
+              case 1:  // processing: slow amber breathing
+              case 2:  // remote acknowledgement keeps the processing animation
                 color = Color(255, 150, 0);
-                break;
-              case 2: {  // remote agent acknowledged: short blue pulse
-                color = Color(0, 110, 255);
                 full_ring = true;
-                const uint8_t phase = frame % 12;
-                intensity = 255 - phase * 18;
+                {
+                  const uint8_t phase = frame % 80;
+                  const uint8_t triangle = phase <= 40 ? phase : 80 - phase;
+                  intensity = 64 + triangle * 4;
+                }
+                break;
+              case 3: {  // replying: faster amber breathing
+                color = Color(255, 150, 0);
+                full_ring = true;
+                const uint8_t phase = frame % 20;
+                const uint8_t triangle = phase <= 10 ? phase : 20 - phase;
+                intensity = 80 + triangle * 7;
                 break;
               }
-              case 3:  // replying: cyan, anticlockwise
-                color = Color(0, 210, 255);
-                direction = -1;
-                break;
               case 4: {  // wake-free follow-up: violet breathing ring
                 color = Color(155, 80, 255);
                 full_ring = true;
-                const uint8_t phase = frame % 40;
-                const uint8_t triangle = phase <= 20 ? phase : 40 - phase;
-                intensity = 64 + triangle * 8;
+                const uint8_t phase = frame % 80;
+                const uint8_t triangle = phase <= 40 ? phase : 80 - phase;
+                intensity = 48 + triangle * 3;
                 break;
               }
-              case 5:  // session opened/closed: short green confirmation
+              case 5:  // session opened: short green confirmation
                 color = Color(0, 255, 80);
                 full_ring = true;
                 break;
@@ -863,6 +868,10 @@ light:
                 color = Color(255, 0, 0);
                 full_ring = true;
                 visible = ((frame / 3) % 2) == 0;
+                break;
+              case 7:  // normal session end: one orange blink
+                color = Color(255, 64, 0);
+                full_ring = true;
                 break;
               default:
                 visible = false;
@@ -1173,6 +1182,11 @@ text_sensor:
     update_interval: never
 
 sensor:
+  - platform: wifi_signal
+    name: Wi-Fi RSSI
+    entity_category: diagnostic
+    update_interval: 60s
+
   # The dial. Used to control volume and Hue of the LED ring.
   - platform: rotary_encoder
     id: dial
@@ -1259,6 +1273,7 @@ script:
                 id(dialog_session_active) = true;
                 id(dialog_exit_requested) = false;
                 id(dialog_turn_count) = 0;
+            - script.stop: dialog_idle_timeout
             - text_sensor.template.publish:
                 id: dialog_state
                 state: "activating"
@@ -1275,6 +1290,8 @@ script:
   - id: end_dialog_session
     mode: restart
     then:
+      - script.stop: dialog_idle_timeout
+      - script.stop: dialog_session_timeout
       - lambda: |-
           id(dialog_session_active) = false;
           id(dialog_exit_requested) = false;
@@ -1301,8 +1318,8 @@ script:
             - micro_wake_word.disable_model: stop
       - script.execute:
           id: set_nanobot_led_state
-          state: 5
-      - delay: 1s
+          state: 7
+      - delay: 300ms
       - text_sensor.template.publish:
           id: dialog_state
           state: "sleeping"
@@ -1315,6 +1332,8 @@ script:
           id(dialog_session_active) = false;
           id(dialog_exit_requested) = false;
           id(dialog_turn_count) = 0;
+      - script.stop: dialog_idle_timeout
+      - script.stop: dialog_session_timeout
       - script.stop: dialog_session_timeout
       - script.stop: dialog_end_after_response
       - script.stop: activate_stop_word_once
@@ -1335,13 +1354,26 @@ script:
   - id: dialog_session_timeout
     mode: restart
     then:
-      - delay: 2min
+      - delay: 10min
       - script.execute: end_dialog_session
+
+  # Limit silence only while a new question is expected. VAD cancels it at
+  # speech start; the next listening phase arms it again.
+  - id: dialog_idle_timeout
+    mode: restart
+    then:
+      - delay: 20s
+      - if:
+          condition:
+            lambda: return id(dialog_session_active);
+          then:
+            - script.execute: end_dialog_session
 
   # Let the twentieth response finish, then close instead of starting turn 21.
   - id: dialog_end_after_response
     mode: restart
     then:
+      - script.stop: dialog_idle_timeout
       - wait_until:
           condition:
             media_player.is_announcing:
@@ -1368,9 +1400,6 @@ script:
       - text_sensor.template.publish:
           id: dialog_state
           state: "remote_ack"
-      - script.execute:
-          id: set_nanobot_led_state
-          state: 2
       - script.execute:
           id: play_sound
           priority: false
@@ -1965,7 +1994,7 @@ speaker:
     dac_type: external
     channel: stereo
     timeout: never
-    buffer_duration: 100ms
+    buffer_duration: 300ms
     audio_dac: aic3204_dac
 
   # Virtual speakers to combine the announcement and media streams together into one output
@@ -2367,6 +2396,7 @@ voice_assistant:
           - text_sensor.template.publish:
               id: dialog_state
               state: "follow_up"
+          - script.execute: dialog_idle_timeout
           - script.execute:
               id: set_nanobot_led_state
               state: 4
@@ -2379,6 +2409,7 @@ voice_assistant:
           - text_sensor.template.publish:
               id: dialog_state
               state: "waiting"
+          - script.execute: dialog_idle_timeout
           - script.execute:
               id: set_nanobot_led_state
               state: 4
@@ -2393,7 +2424,10 @@ voice_assistant:
           - text_sensor.template.publish:
               id: dialog_state
               state: "listening"
-          - script.execute: clear_nanobot_led_state
+          - script.stop: dialog_idle_timeout
+          - script.execute:
+              id: set_nanobot_led_state
+              state: 4
         else:
           - script.execute: control_leds
   on_stt_vad_end:
