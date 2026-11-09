@@ -79,9 +79,9 @@ class CustomFirmwareContractTest(unittest.TestCase):
         self.assertIn("entity_category: diagnostic", CONFIG)
         self.assertIn("buffer_duration: 300ms", CONFIG)
         for name in ("home-assistant-voice.factory.yaml", "home-assistant-voice.8mb.yaml"):
-            self.assertIn("version: 1.4.2-dev", (ROOT / name).read_text(encoding="utf-8"))
+            self.assertIn("version: 1.4.2", (ROOT / name).read_text(encoding="utf-8"))
         for name in ("AGENTS.md", "README.md", "docs/release-pairing.md", "docs/ota-flashing.md"):
-            self.assertIn("1.4.2-dev", (ROOT / name).read_text(encoding="utf-8"))
+            self.assertIn("1.4.2", (ROOT / name).read_text(encoding="utf-8"))
             self.assertIn("v1.4.2", (ROOT / name).read_text(encoding="utf-8"))
 
     def test_dialog_led_and_diagnostic_states_are_documented(self) -> None:

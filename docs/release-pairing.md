@@ -12,14 +12,17 @@ Die Open-Mic-Funktion besteht aus Firmware und Bridge. Beide Komponenten werden 
 Dieses bereits veröffentlichte Paar stammt aus der früheren Versionskonvention und
 bleibt unverändert. Die identische Versionsregel gilt ab dem nächsten Paar.
 
-## Entwicklungsstand
+## Aktuelles gekoppeltes Pre-Release
 
-Der Firmware-Entwicklungsstand ist `1.4.2-dev`. Das nächste Paar ist Firmware
-`1.4.2` mit Tag `v1.4.2` und HA Voice Bridge `1.4.2` mit Tag `v1.4.2`.
-Dieser Stand ist noch nicht gemeinsam validiert; kein Release oder Tag wird mit
-dieser Änderung erstellt. Vor der Veröffentlichung müssen beide Komponenten
-gemeinsam getestet und die Release-Notes beider Seiten direkt miteinander
-verlinkt werden.
+| Komponente | Default-Branch | Release |
+|---|---|---|
+| Voice-PE-Firmware | `dev` | [`v1.4.2`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/v1.4.2) |
+| HA Voice Bridge | `main` | [`v1.4.2`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.2) |
+
+Beide Komponenten verwenden Version `1.4.2` und denselben Tag `v1.4.2`.
+Da der neue LED-, Timeout-, Audio- und Fast-Path-Stack noch nicht gemeinsam auf
+der produktiven Kitchen Voice PE hardwarevalidiert wurde, bleiben beide
+Veröffentlichungen zunächst Pre-Releases.
 
 ## Verbindliche Regel
 

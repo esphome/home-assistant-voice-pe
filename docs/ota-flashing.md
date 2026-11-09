@@ -6,14 +6,13 @@ verändert die im Home-Assistant-ESPHome-Device-Builder gespeicherte YAML nicht.
 
 ## Sicherheits- und Kompatibilitätsgrenzen
 
-- Der Entwicklungsstand `1.4.2-dev` ist kein Release und wurde nicht als
-  Firmware-/Bridge-Paar oder auf Hardware validiert. Das nächste Paar ist
-  Firmware `1.4.2` / Tag `v1.4.2` und HA Voice Bridge `1.4.2` / Tag `v1.4.2`;
-  diese Anleitung installiert weiterhin ausschließlich das historische
-  Firmware-Artefakt `0.2.1`.
-- Nur das Versionspaar verwenden:
-  - Voice-PE-Firmware `0.2.1` aus diesem Repository;
-  - historisch kompatible HA Voice Bridge `v1.4.1` aus dem Default-Branch `main` von
+- `v1.4.2` ist ein gekoppeltes Pre-Release und noch nicht gemeinsam auf der
+  produktiven Kitchen Voice PE hardwarevalidiert. Installation nur nach
+  erfolgreicher Artefaktprüfung, dokumentiertem Rollback-Pfad und ausdrücklicher
+  Flash-Freigabe.
+- Nur das identische Versionspaar verwenden:
+  - Voice-PE-Firmware `1.4.2` mit Tag `v1.4.2` aus diesem Repository;
+  - HA Voice Bridge `1.4.2` mit Tag `v1.4.2` aus dem Default-Branch `main` von
     `aschauera/NanoBotSkills`.
 - Für künftige Paare müssen Firmware und Bridge dieselbe SemVer und denselben
   `v`-Tag verwenden. Historische Paare werden nicht umbenannt.
@@ -51,7 +50,7 @@ ermittelt werden. Nicht raten und nicht dauerhaft in das Repository schreiben.
 `VOICE_PE_IP` vor dem Ausführen durch die tatsächliche IP-Adresse ersetzen:
 
 ```bash
-export FIRMWARE_RELEASE="0.2.1"
+export FIRMWARE_RELEASE="v1.4.2"
 export FIRMWARE_REPO="/home/nanobot/home-assistant-voice-pe"
 export FIRMWARE_DIR="$HOME/Downloads/voice-pe-$FIRMWARE_RELEASE"
 export VOICE_PE_IP="192.168.4.REPLACE_ME"
@@ -91,7 +90,7 @@ grep "  home-assistant-voice-$FIRMWARE_RELEASE.zip$" SHA256SUMS.txt \
 Erwartete Ausgabe:
 
 ```text
-home-assistant-voice-0.2.1.zip: OK
+home-assistant-voice-v1.4.2.zip: OK
 ```
 
 Archiv entpacken:
