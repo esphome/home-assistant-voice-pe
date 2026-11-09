@@ -6,21 +6,26 @@ The upstream project remains available at
 [`esphome/home-assistant-voice-pe`](https://github.com/esphome/home-assistant-voice-pe).
 
 > [!IMPORTANT]
-> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`; die aktuelle Firmware-Version ist [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1). Die kompatible HA Voice Bridge ist [`v1.4.1`](https://github.com/aschauera/NanoBotSkills/releases/tag/v1.4.1) aus `aschauera/NanoBotSkills:main`. Firmware- und Bridge-Releases müssen einander in ihren Release-Notes direkt verlinken.
+> Der Open-Mic-Modus ist ab Firmware `0.2.0` Bestandteil des Default-Branches `dev`; der letzte historische Firmware-Release ist [`0.2.1`](https://github.com/aschauera/home-assistant-voice-pe/releases/tag/0.2.1). Der Entwicklungsstand für das nächste gekoppelte Paar ist `1.4.2-dev`; vorgesehen sind Firmware `1.4.2` mit Tag `v1.4.2` und HA Voice Bridge `1.4.2` mit demselben Tag `v1.4.2`. Künftig verwenden Firmware und Bridge immer dieselbe SemVer und denselben `v`-Tag. Das Paar ist noch nicht veröffentlicht oder gemeinsam validiert. Historische Releases bleiben unverändert.
 
 ## Offener Dialogmodus
 
 Die Custom Firmware unterstützt einen begrenzten halbduplexen Dialog über die
 bestehende Home-Assistant-Assist-Pipeline. Ein Wake Word öffnet die Session;
 nach jeder Antwort wartet das Gerät ohne neues Wake Word auf den nächsten Turn.
-`Stop`, definierte Exit-Phrasen, Mute, die mittlere Taste, Fehler, zwei Minuten
-Laufzeit oder zwanzig Turns beenden sie.
+`Stop`, definierte Exit-Phrasen, Mute, die mittlere Taste, Fehler, zehn Minuten
+Gesamtlaufzeit oder zwanzig Antworten beenden sie. Während auf eine Frage
+gewartet wird, beenden zwanzig Sekunden ohne Sprachbeginn die Session. Der
+Leerlauf-Timeout startet nach jeder Antwort neu und wird mit dem ersten
+Sprachbeginn angehalten.
 
-Die LED-Anzeige macht jede Phase sichtbar: Grün öffnet oder beendet die Session,
-Violett wartet auf einen Folgeturn, die native blaue Animation hört zu, Amber
-verarbeitet (Fake-Fortschrittsring: füllt sich über 45 s, danach von vorn), ein kurzer blauer Puls bestätigt den Remote-Agenten, Cyan spricht
-und Rot signalisiert einen Fehler. Der Diagnosesensor `Dialog state` zeigt den
-Zustand zusätzlich in Home Assistant.
+Der LED-Ablauf bleibt über Dialogzustände hinweg ruhig: ein kurzer grüner Ring
+öffnet die Session; Warten und Zuhören teilen denselben violett atmenden Ring;
+Verarbeitung und ein Remote-ACK bleiben langsam amberfarben; die Antwort nutzt
+denselben Amber-Ton mit schnellerem Puls. Nach jeder Antwort wird wieder violett
+gewartet. Ein normales Ende zeigt genau einen kurzen orangefarbenen Impuls,
+Fehler blinken weiterhin rot. Der Diagnosesensor `Dialog state` behält die
+genauen textuellen Zustände für Bridge-Diagnosen bei.
 
 Eine eingebettete lokale Ansage „Einen Moment.“ kann über die ESPHome-Aktion
 `dialog_remote_ack` ausgelöst werden. Die Conversation-Agent-Integration muss
@@ -39,9 +44,9 @@ Selecting a state temporarily overrides the stock Assist animation:
 | Option | Visual feedback | Automatic reset |
 |---|---|---|
 | `off` | Return control to the stock firmware | immediate |
-| `thinking` | amber fake progress ring: fills over 45 s, restarts when full | 90 seconds |
-| `ack` | blue pulse, then back to the progress ring while still thinking | 1.5 seconds |
-| `replying` | cyan anticlockwise spinner | 90 seconds |
+| `thinking` | slow amber breathing ring | 90 seconds |
+| `ack` | same slow amber breathing ring; no separate blue indication | 1.5 seconds |
+| `replying` | faster amber breathing ring | 90 seconds |
 | `follow_up` | violet breathing ring | 90 seconds |
 | `done` | green confirmation | 1 second |
 | `error` | red flash | 3 seconds |

@@ -28,8 +28,16 @@ Eine Session endet bei einem der folgenden Ereignisse:
 - Hardware- oder Software-Mute,
 - Verlust der Home-Assistant-Verbindung,
 - Voice-Assistant-Fehler,
-- zwei Minuten Gesamtlaufzeit,
-- nach der zwanzigsten Antwort.
+- zwanzig Sekunden ohne Sprachbeginn, während das Gerät auf eine Frage wartet,
+- zehn Minuten Gesamtlaufzeit,
+- nach der vollständig gesprochenen zwanzigsten Antwort.
+
+Der 20-Sekunden-Leerlauf-Timer startet, sobald die Pipeline auf eine Frage
+wartet, und wird nach jeder Antwort neu gestartet. Beim ersten VAD-Sprachbeginn
+wird er sofort gestoppt; während Verarbeitung, Remote-ACK, TTS, Ende und Fehler
+läuft er nicht. Das Zehn-Minuten-Limit gilt für die gesamte Session und wird
+durch Folgeturns nicht verlängert. Der Leerlauf-Timer wird auf allen normalen
+und Fehler-Exit-Pfaden gestoppt.
 
 Der Sessionstatus wird nie über einen Neustart hinweg wiederhergestellt. Der
 lokale `Stop`-Detektor ist der deterministische Exit-Pfad. Die über STT
@@ -48,11 +56,11 @@ besteht.
 | Schlafmodus | `sleeping` | normale Idle-Anzeige | Neues Wake Word erforderlich |
 | Aktivierung | `activating` | kurzer grüner Ring | Dialogsession wurde geöffnet |
 | Warten | `waiting` / `follow_up` | violett atmender Ring | Wake-freier Folgeturn ist bereit |
-| Zuhören | `listening` | native schnelle Listening-Animation | Sprache wurde erkannt |
-| Verarbeitung | `processing` | amberfarbener Fake-Fortschrittsring (füllt sich über 45 s, danach von vorn) | STT, lokales Routing oder Agent laufen |
-| Remote-Bestätigung | `remote_ack` | kurzer blauer Puls | Remote-Agent hat übernommen |
-| Antwort | `replying` | cyanfarbener Spinner gegen den Uhrzeigersinn | TTS-Antwort wird vorbereitet oder gesprochen |
-| Beenden | `ending` | kurzer grüner Ring | Session wird geschlossen |
+| Zuhören | `listening` | derselbe violett atmende Ring wie beim Warten | Sprache wurde erkannt; kein separater Listening-Effekt |
+| Verarbeitung | `processing` | langsam amber atmender Ring | STT, lokales Routing oder Agent laufen |
+| Remote-Bestätigung | `remote_ack` | unverändert langsam amber | Remote-Agent hat übernommen; nur der Textzustand ändert sich |
+| Antwort | `replying` | derselbe Amber-Ton mit schnellerem Puls | TTS-Antwort wird vorbereitet oder gesprochen |
+| Beenden | `ending` | genau ein kurzer orangefarbener Impuls, danach Sleep | Session wird geschlossen |
 | Fehler | `error` | rotes Blinken | Session wurde sicher abgebrochen |
 
 Folgende Zustände behalten höhere Priorität als Dialoganzeigen:
@@ -65,7 +73,8 @@ Folgende Zustände behalten höhere Priorität als Dialoganzeigen:
 6. Hardware- oder Software-Mute.
 
 Nach einer Antwort wechselt die Anzeige nicht in dauerhaftes Idle, sondern
-zurück auf den violetten Folgeturn-Zustand, solange die Session aktiv ist.
+zurück auf den violetten Folgeturn-Zustand, solange die Session aktiv ist. Die
+letzte Antwort (Turn 20) wird vor dem normalen Ende vollständig gesprochen.
 
 ## Lokale Remote-Bestätigung
 
@@ -84,7 +93,8 @@ action: esphome.home_assistant_voice_0a6c07_dialog_remote_ack
 
 Die Aktion spielt nur dann etwas ab, wenn eine Dialogsession aktiv und das
 Gerät nicht stumm ist. Sie ist Fire-and-forget: Ein Fehler bei der Bestätigung
-darf die eigentliche Remote-Anfrage nie blockieren.
+darf die eigentliche Remote-Anfrage nie blockieren. Der Diagnosezustand wechselt
+zu `remote_ack`; die LED bleibt dabei auf der langsamen Amber-Verarbeitung.
 
 ### Routing-Vertrag
 

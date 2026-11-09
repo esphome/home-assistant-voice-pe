@@ -19,12 +19,70 @@ class CustomFirmwareContractTest(unittest.TestCase):
         for expected in (
             "id: dialog_session_active",
             "id: dialog_session_timeout",
-            "delay: 2min",
+            "id: dialog_idle_timeout",
+            "delay: 10min",
+            "delay: 20s",
             "id(dialog_turn_count) >= 20",
             "voice_assistant.start_continuous:",
             "Ignoring wake word during active dialog (barge-in disabled)",
         ):
             self.assertIn(expected, CONFIG)
+
+    def test_idle_timeout_is_rearmed_and_stopped_once_on_every_exit_path(self) -> None:
+        self.assertEqual(CONFIG.count("- script.execute: dialog_idle_timeout"), 2)
+        vad_start = CONFIG.split("  on_stt_vad_start:\n", 1)[1].split(
+            "  on_stt_vad_end:", 1
+        )[0]
+        self.assertTrue(vad_start.lstrip().startswith("- script.stop: dialog_idle_timeout"))
+        for script_id in ("end_dialog_session", "fail_dialog_session"):
+            script = CONFIG.split(f"  - id: {script_id}\n", 1)[1].split(
+                "\n  - id: ", 1
+            )[0]
+            self.assertEqual(script.count("- script.stop: dialog_idle_timeout"), 1)
+            self.assertEqual(script.count("- script.stop: dialog_session_timeout"), 1)
+        end_after_response = CONFIG.split(
+            "  - id: dialog_end_after_response\n", 1
+        )[1].split("\n  - id: ", 1)[0]
+        self.assertIn("- script.execute: end_dialog_session", end_after_response)
+        session_timeout = CONFIG.split(
+            "  - id: dialog_session_timeout\n", 1
+        )[1].split("\n  - id: ", 1)[0]
+        self.assertIn("- script.execute: end_dialog_session", session_timeout)
+
+    def test_dialog_led_feedback_is_simplified(self) -> None:
+        for expected in (
+            "case 1:  // processing: slow amber breathing",
+            "case 2:  // remote acknowledgement keeps the processing animation",
+            "case 3: {  // replying: faster amber breathing",
+            "case 4: {  // wake-free follow-up: violet breathing ring",
+            "case 5:  // session opened: short green confirmation",
+            "case 6:  // error: red flash",
+            "case 7:  // normal session end: one orange blink",
+            "state: 7",
+        ):
+            self.assertIn(expected, CONFIG)
+        remote_ack = CONFIG.split("- id: play_dialog_remote_ack", 1)[1].split(
+            "- id: control_leds", 1
+        )[0]
+        self.assertNotIn("set_nanobot_led_state", remote_ack)
+
+    def test_nanobot_processing_state_uses_slow_amber_status_effect(self) -> None:
+        controller = CONFIG.split(
+            "  - id: control_leds_nanobot_state\n", 1
+        )[1].split("\n  - id: ", 1)[0]
+        self.assertIn('effect: "Nanobot Status"', controller)
+        self.assertNotIn("Thinking Progress", controller)
+
+    def test_wifi_audio_and_development_version_contract(self) -> None:
+        self.assertIn("power_save_mode: none", CONFIG)
+        self.assertIn("name: Wi-Fi RSSI", CONFIG)
+        self.assertIn("entity_category: diagnostic", CONFIG)
+        self.assertIn("buffer_duration: 300ms", CONFIG)
+        for name in ("home-assistant-voice.factory.yaml", "home-assistant-voice.8mb.yaml"):
+            self.assertIn("version: 1.4.2-dev", (ROOT / name).read_text(encoding="utf-8"))
+        for name in ("AGENTS.md", "README.md", "docs/release-pairing.md", "docs/ota-flashing.md"):
+            self.assertIn("1.4.2-dev", (ROOT / name).read_text(encoding="utf-8"))
+            self.assertIn("v1.4.2", (ROOT / name).read_text(encoding="utf-8"))
 
     def test_dialog_led_and_diagnostic_states_are_documented(self) -> None:
         for state in (
