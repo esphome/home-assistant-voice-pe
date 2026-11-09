@@ -6,6 +6,9 @@ verändert die im Home-Assistant-ESPHome-Device-Builder gespeicherte YAML nicht.
 
 ## Sicherheits- und Kompatibilitätsgrenzen
 
+- Der Entwicklungsstand `0.2.2-dev` ist kein Release und wurde nicht als
+  Firmware-/Bridge-Paar oder auf Hardware validiert. Diese Anleitung installiert
+  ausschließlich das veröffentlichte stabile Firmware-Artefakt `0.2.1`.
 - Nur das Versionspaar verwenden:
   - Voice-PE-Firmware `0.2.1` aus diesem Repository;
   - HA Voice Bridge `v1.4.1` aus dem Default-Branch `main` von
@@ -199,15 +202,19 @@ Minuten warten und dann prüfen:
    - `Dialog session active`;
    - `Dialog state`;
    - ESPHome-Aktion mit dem Suffix `_dialog_remote_ack`.
-4. Die HA Voice Bridge meldet Version `1.4.0` für Integration, Manifest,
+4. Die HA Voice Bridge meldet Version `1.4.1` für Integration, Manifest,
    Channel-Datei und laufenden Channel.
 5. Hardwaretest in dieser Reihenfolge:
    - Wake Word;
-   - langsame Remote-Frage, genau ein lokales „Einen Moment.“;
+   - grüner Aktivierungsring, violettes Warten/Zuhören und langsame Amber-Verarbeitung;
+   - langsame Remote-Frage, genau ein lokales „Einen Moment.“ ohne LED-Wechsel;
    - vollständige finale Antwort;
+   - schnellerer Amber-Puls während der Antwort und violettes Warten danach;
    - Folgeturn ohne neues Wake Word;
+   - 20 Sekunden ohne Sprachbeginn beenden die wartende Session mit einem orangefarbenen Impuls;
    - lokaler HA-Befehl im Folgeturn;
-   - `Stop` beendet die Session.
+   - `Stop` beendet die Session mit einem orangefarbenen Impuls; Fehler blinken rot.
+   - WLAN-RSSI-Diagnosesensor prüfen.
 
 Wichtig: Die ESPHome-Weboberfläche behält ihre bisherige YAML. Ein späteres
 `Install -> Wirelessly` aus dieser Oberfläche kompiliert genau diese dort

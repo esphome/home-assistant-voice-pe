@@ -2416,6 +2416,7 @@ voice_assistant:
         else:
           - script.execute: control_leds
   on_stt_vad_start:
+    - script.stop: dialog_idle_timeout
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - if:
         condition:
@@ -2424,7 +2425,6 @@ voice_assistant:
           - text_sensor.template.publish:
               id: dialog_state
               state: "listening"
-          - script.stop: dialog_idle_timeout
           - script.execute:
               id: set_nanobot_led_state
               state: 4

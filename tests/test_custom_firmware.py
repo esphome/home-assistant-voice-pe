@@ -32,6 +32,10 @@ class CustomFirmwareContractTest(unittest.TestCase):
         self.assertEqual(CONFIG.count("- script.execute: dialog_idle_timeout"), 2)
         self.assertGreaterEqual(CONFIG.count("- script.stop: dialog_idle_timeout"), 4)
         self.assertIn("script.stop: dialog_session_timeout", CONFIG)
+        vad_start = CONFIG.split("  on_stt_vad_start:\n", 1)[1].split(
+            "  on_stt_vad_end:", 1
+        )[0]
+        self.assertTrue(vad_start.lstrip().startswith("- script.stop: dialog_idle_timeout"))
 
     def test_dialog_led_feedback_is_simplified(self) -> None:
         for expected in (
