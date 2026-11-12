@@ -1844,6 +1844,9 @@ voice_assistant:
       channels: 0
     - microphone: i2s_mics
       channels: 1
+      # This tap has no AGC and sits far below full scale; gain before the
+      # 16-bit truncation keeps the resolution wake word verification needs
+      gain_factor: 16
   media_player: external_media_player
   micro_wake_word: mww
   wake_word_audio:
