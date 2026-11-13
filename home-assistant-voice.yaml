@@ -1747,6 +1747,15 @@ external_components:
     components:
       - voice_kit
     refresh: 0s
+  # Wake word audio (esphome/esphome#21885) until an ESPHome release includes it
+  - source:
+      type: git
+      url: https://github.com/esphome/esphome
+      ref: 92723c905c72b39a60a56bfc3f110284f0a72e6c
+    components:
+      - api
+      - micro_wake_word
+      - voice_assistant
 
 audio_dac:
   - platform: aic3204
