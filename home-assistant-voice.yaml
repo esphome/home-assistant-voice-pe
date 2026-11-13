@@ -1797,6 +1797,7 @@ select:
       - "Okay Nabu"
       - "Hey Jarvis"
       - "Hey Mycroft"
+      - "Hey openHAB"
     on_value:
       - if:
           condition:
@@ -1809,6 +1810,7 @@ select:
       - micro_wake_word.disable_model: okay_nabu
       - micro_wake_word.disable_model: hey_jarvis
       - micro_wake_word.disable_model: hey_mycroft
+      - micro_wake_word.disable_model: hey_openhab
       - if:
           condition:
             lambda: 'return x == "Okay Nabu";'
@@ -1824,6 +1826,11 @@ select:
             lambda: 'return x == "Hey Mycroft";'
           then:
             - micro_wake_word.enable_model: hey_mycroft
+      - if:
+          condition:
+            lambda: 'return x == "Hey openHAB";'
+          then:
+            - micro_wake_word.enable_model: hey_openhab
       # Only restart detection if the API client is connected and the assistant isn't mid-pipeline
       - if:
           condition:
