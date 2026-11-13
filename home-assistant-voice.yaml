@@ -1798,6 +1798,14 @@ select:
       - "Hey Jarvis"
       - "Hey Mycroft"
     on_value:
+      - if:
+          condition:
+            micro_wake_word.is_running:
+          then:
+            - micro_wake_word.stop:
+            - wait_until:
+                not:
+                  micro_wake_word.is_running:
       - micro_wake_word.disable_model: okay_nabu
       - micro_wake_word.disable_model: hey_jarvis
       - micro_wake_word.disable_model: hey_mycroft
@@ -1816,6 +1824,15 @@ select:
             lambda: 'return x == "Hey Mycroft";'
           then:
             - micro_wake_word.enable_model: hey_mycroft
+      # Only restart detection if the API client is connected and the assistant isn't mid-pipeline
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - not:
+                  voice_assistant.is_running:
+          then:
+            - micro_wake_word.start:
   - platform: template
     name: "Wake word sensitivity"
     id: wake_word_sensitivity
