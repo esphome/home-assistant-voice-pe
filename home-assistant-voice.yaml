@@ -42,6 +42,10 @@ esphome:
   on_boot:
     priority: 375
     then:
+      # Apply the stored/default wake word selection on startup
+      - select.set:
+          id: active_wake_word
+          option: !lambda return id(active_wake_word).current_option().c_str();
       # Run the script to refresh the LED status
       - script.execute: control_leds
       - delay: 1s
@@ -1782,8 +1786,40 @@ micro_wake_word:
 
 select:
   - platform: template
+    name: "Active wake word"
+    id: active_wake_word
+    icon: "mdi:account-voice"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_option: "Okay Nabu"
+    options:
+      - "Okay Nabu"
+      - "Hey Jarvis"
+      - "Hey Mycroft"
+    on_value:
+      - micro_wake_word.disable_model: okay_nabu
+      - micro_wake_word.disable_model: hey_jarvis
+      - micro_wake_word.disable_model: hey_mycroft
+      - if:
+          condition:
+            lambda: 'return x == "Okay Nabu";'
+          then:
+            - micro_wake_word.enable_model: okay_nabu
+      - if:
+          condition:
+            lambda: 'return x == "Hey Jarvis";'
+          then:
+            - micro_wake_word.enable_model: hey_jarvis
+      - if:
+          condition:
+            lambda: 'return x == "Hey Mycroft";'
+          then:
+            - micro_wake_word.enable_model: hey_mycroft
+  - platform: template
     name: "Wake word sensitivity"
     id: wake_word_sensitivity
+    icon: "mdi:account-voice"
     optimistic: true
     initial_option: Slightly sensitive
     restore_value: true
