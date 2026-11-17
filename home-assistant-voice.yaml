@@ -187,6 +187,17 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable storing the wake word that interrupted a conversation or an announcement (barge-in).
+  # A new conversation is started with it as soon as the voice assistant is idle. Empty when there is none.
+  - id: barge_in_wake_word
+    type: std::string
+    restore_value: no
+  # Global variable storing when a wake word last started, restarted or interrupted a conversation (millis),
+  # to ignore repeated detections and stale barge-in requests
+  - id: wake_word_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -1560,6 +1571,33 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
+  # Script used to start the conversation requested by a barge-in, the same way the wake word starts one.
+  # When the barge-in interrupted a voice assistant run, stopping that run cleared the wake word detection,
+  # so Home Assistant does not verify the wake word for this new conversation.
+  - id: start_barge_in_conversation
+    then:
+      - if:
+          condition:
+            lambda: return id(va).is_wake_word_audio_active();
+          then:
+            - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+            - script.execute: control_leds
+      - if:
+          condition:
+            and:
+              - switch.is_on: wake_sound
+              - lambda: return !id(va).is_wake_word_audio_active();
+          then:
+            - script.execute:
+                id: play_sound
+                priority: true
+                sound_file: "wake_word_triggered_sound"
+            - delay: 300ms
+      - lambda: id(wake_word_ms) = millis();
+      - voice_assistant.start:
+          wake_word: !lambda return id(barge_in_wake_word);
+      - lambda: id(barge_in_wake_word).clear();
+
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1782,10 +1820,30 @@ micro_wake_word:
   vad:
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
+    # Also ignore detections within 2 s of a wake word that started, restarted or interrupted a conversation:
+    # Home Assistant rejects them as duplicate wake-ups, and stopping again would cancel the conversation
+    # that is starting.
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          and:
+            - switch.is_off: master_mute_switch
+            - lambda: 'return (millis() - id(wake_word_ms)) >= 2000;'
         then:
+          # Barge-in: the wake word said during a conversation or an announcement interrupts it (below)
+          # and then starts a new conversation. The stop wake word only interrupts.
+          - if:
+              condition:
+                and:
+                  - lambda: 'return wake_word != "Stop";'
+                  - switch.is_off: timer_ringing
+                  - or:
+                      - voice_assistant.is_running:
+                      - media_player.is_announcing:
+                          id: external_media_player
+              then:
+                - lambda: |-
+                    id(barge_in_wake_word) = wake_word;
+                    id(wake_word_ms) = millis();
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
               condition:
@@ -1828,8 +1886,19 @@ micro_wake_word:
                                       priority: true
                                       sound_file: "wake_word_triggered_sound"
                                   - delay: 300ms
+                            - lambda: id(wake_word_ms) = millis();
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
+          # A barge-in on an announcement played outside of a conversation has no voice assistant run
+          # to wind down first, so the new conversation starts right away. Otherwise on_end starts it.
+          - if:
+              condition:
+                and:
+                  - lambda: 'return !id(barge_in_wake_word).empty();'
+                  - not:
+                      voice_assistant.is_running:
+              then:
+                - script.execute: start_barge_in_conversation
 
 select:
   - platform: template
@@ -1872,6 +1941,7 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
+    - lambda: id(barge_in_wake_word).clear();
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
@@ -1926,6 +1996,8 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_listening:
+    # A conversation is listening, any pending barge-in request is moot
+    - lambda: id(barge_in_wake_word).clear();
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_start:
@@ -1959,20 +2031,29 @@ voice_assistant:
     - wait_until:
         not:
           voice_assistant.is_running:
-    # Stop ducking audio.
-    - mixer_speaker.apply_ducking:
-        id: media_mixing_input
-        decibel_reduction: 0
-        duration: 1.0s
-    # If the end happened because of an error, let the error phase on for a second
     - if:
         condition:
-          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+          # The wake word interrupted this run (barge-in): start the new conversation now that the
+          # voice assistant is idle again. Starting it earlier would be ignored. Stale requests are dropped.
+          lambda: 'return !id(barge_in_wake_word).empty() && (millis() - id(wake_word_ms)) < 10000;'
         then:
-          - delay: 1s
-    # Reset the voice assistant phase id and reset the LED animations.
-    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-    - script.execute: control_leds
+          - script.execute: start_barge_in_conversation
+        else:
+          - lambda: id(barge_in_wake_word).clear();
+          # Stop ducking audio.
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 0
+              duration: 1.0s
+          # If the end happened because of an error, let the error phase on for a second
+          - if:
+              condition:
+                lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+              then:
+                - delay: 1s
+          # Reset the voice assistant phase id and reset the LED animations.
+          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+          - script.execute: control_leds
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
