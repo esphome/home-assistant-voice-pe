@@ -149,6 +149,11 @@ globals:
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
+  # True while the sound before a voice assistant start plays, so it does not arm the stop word
+  - id: voice_assistant_starting
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global variable tracking if the dial was recently touched.
   - id: dial_touched
     type: bool
@@ -243,8 +248,8 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
     on_turn_off:
-      # Disable stop wake word
-      - micro_wake_word.disable_model: stop
+      # Disarm the stop wake word, unless something else can still be stopped
+      - script.execute: update_stop_word
       - script.execute: disable_repeat
       - script.execute: apply_wake_word_sensitivity
       # Stop any current announcement (ie: stop the timer ring mid playback)
@@ -270,8 +275,8 @@ switch:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
-      # Enable stop wake word
-      - micro_wake_word.enable_model: stop
+      # Arm the stop wake word
+      - script.execute: update_stop_word
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED
@@ -363,12 +368,15 @@ binary_sensor:
                                                 - switch.is_off: master_mute_switch
                                                 - not: voice_assistant.is_running
                                             then:
+                                              - lambda: id(voice_assistant_starting) = true;
                                               - script.execute:
                                                   id: play_sound
                                                   priority: true
                                                   sound_file: "center_button_press_sound"
                                               - delay: 300ms
                                               - voice_assistant.start:
+                                              - lambda: id(voice_assistant_starting) = false;
+                                              - script.execute: update_stop_word
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1532,33 +1540,29 @@ script:
             id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
           }
 
-  # Script used activate the stop word if the TTS step is long.
-  # Why is this wrapped on a script?
-  #   Becasue we want to stop the sequence if the TTS step is faster than that.
-  #   This allows us to prevent having the deactivation of the stop word before its own activation.
-  - id: activate_stop_word_once
+  # Arms the stop wake word whenever there is something it can stop: a ringing timer, a voice
+  # assistant run that is thinking or replying, or an announcement played outside of a run.
+  # It stays disarmed while the user speaks a command, so "stop the music" still reaches the
+  # assistant, and when nothing is going on.
+  - id: update_stop_word
     then:
-      - wait_until:
-          condition:
-            media_player.is_announcing:
-              id: external_media_player
-          timeout: 5s
-      - delay: 1s
-      # Enable stop wake word
       - if:
           condition:
-            switch.is_off: timer_ringing
+            or:
+              - switch.is_on: timer_ringing
+              - lambda: |-
+                  return id(voice_assistant_phase) == ${voice_assist_thinking_phase_id} ||
+                         id(voice_assistant_phase) == ${voice_assist_replying_phase_id};
+              - and:
+                  - media_player.is_announcing:
+                      id: external_media_player
+                  - not:
+                      voice_assistant.is_running:
+                  - lambda: return !id(voice_assistant_starting);
           then:
             - micro_wake_word.enable_model: stop
-            - wait_until:
-                not:
-                  media_player.is_announcing:
-                    id: external_media_player
-            - if:
-                condition:
-                  switch.is_off: timer_ringing
-                then:
-                  - micro_wake_word.disable_model: stop
+          else:
+            - micro_wake_word.disable_model: stop
 
 i2s_audio:
   - id: i2s_output
@@ -1714,20 +1718,22 @@ media_player:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
+      - script.execute: update_stop_word
     on_state:
-      if:
-        condition:
-          and:
-            - switch.is_off: timer_ringing
-            - not:
-                voice_assistant.is_running:
-            - not:
-                media_player.is_announcing: external_media_player
-        then:
-          - mixer_speaker.apply_ducking:
-              id: media_mixing_input
-              decibel_reduction: 0
-              duration: 1.0s
+      - if:
+          condition:
+            and:
+              - switch.is_off: timer_ringing
+              - not:
+                  voice_assistant.is_running:
+              - not:
+                  media_player.is_announcing: external_media_player
+          then:
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 0
+                duration: 1.0s
+      - script.execute: update_stop_word
 
 voice_kit:
   id: voice_kit_component
@@ -1803,14 +1809,18 @@ micro_wake_word:
                     else:
                       - if:
                           condition:
-                            media_player.is_announcing:
-                              id: external_media_player
+                            or:
+                              - media_player.is_announcing:
+                                  id: external_media_player
+                              # The stop wake word never starts the voice assistant
+                              - lambda: 'return wake_word == "Stop";'
                           then:
                             - media_player.stop:
                                 announcement: true
                                 id: external_media_player
                           # Start the voice assistant and play the wake sound, if enabled
                           else:
+                            - lambda: id(voice_assistant_starting) = true;
                             - if:
                                 condition:
                                   lambda: return id(va).is_wake_word_audio_active();
@@ -1830,6 +1840,8 @@ micro_wake_word:
                                   - delay: 300ms
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
+                            - lambda: id(voice_assistant_starting) = false;
+                            - script.execute: update_stop_word
 
 select:
   - platform: template
@@ -1913,6 +1925,8 @@ voice_assistant:
               id: media_mixing_input
               decibel_reduction: 20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
               duration: 0.0s         # The duration of the transition (default is no transition)
+    # The wake sound may still be playing: keep "stop" disarmed while the user speaks
+    - script.execute: update_stop_word
   on_wake_word_detected:
     - if:
         condition:
@@ -1928,12 +1942,15 @@ voice_assistant:
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
+    - script.execute: update_stop_word
   on_stt_vad_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+    # The command is spoken, "stop" can now cancel it
+    - script.execute: update_stop_word
   on_intent_progress:
     - if:
         condition:
@@ -1942,8 +1959,7 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
-          - script.execute: activate_stop_word_once
+          - script.execute: update_stop_word
   on_tts_start:
     - if:
         condition:
@@ -1952,8 +1968,7 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
-          # Start a script that would potentially enable the stop word if the response is longer than a second
-          - script.execute: activate_stop_word_once
+          - script.execute: update_stop_word
   # When the voice assistant ends ...
   on_end:
     - wait_until:
@@ -1973,6 +1988,7 @@ voice_assistant:
     # Reset the voice assistant phase id and reset the LED animations.
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    - script.execute: update_stop_word
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
