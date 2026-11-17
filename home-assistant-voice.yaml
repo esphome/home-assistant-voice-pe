@@ -192,8 +192,9 @@ globals:
   - id: barge_in_wake_word
     type: std::string
     restore_value: no
-  # Global variable storing when the last barge-in happened (millis), to ignore repeated detections and stale requests
-  - id: barge_in_ms
+  # Global variable storing when a wake word last started, restarted or interrupted a conversation (millis),
+  # to ignore repeated detections and stale barge-in requests
+  - id: wake_word_ms
     type: uint32_t
     restore_value: no
     initial_value: '0'
@@ -1592,6 +1593,7 @@ script:
                 priority: true
                 sound_file: "wake_word_triggered_sound"
             - delay: 300ms
+      - lambda: id(wake_word_ms) = millis();
       - voice_assistant.start:
           wake_word: !lambda return id(barge_in_wake_word);
       - lambda: id(barge_in_wake_word).clear();
@@ -1818,13 +1820,14 @@ micro_wake_word:
   vad:
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
-    # Also ignore repeated detections right after a barge-in: Home Assistant rejects them as duplicate wake-ups,
-    # and stopping again could cancel the conversation the barge-in is starting.
+    # Also ignore detections within 2 s of a wake word that started, restarted or interrupted a conversation:
+    # Home Assistant rejects them as duplicate wake-ups, and stopping again would cancel the conversation
+    # that is starting.
     - if:
         condition:
           and:
             - switch.is_off: master_mute_switch
-            - lambda: 'return (millis() - id(barge_in_ms)) >= 2000;'
+            - lambda: 'return (millis() - id(wake_word_ms)) >= 2000;'
         then:
           # Barge-in: the wake word said during a conversation or an announcement interrupts it (below)
           # and then starts a new conversation. The stop wake word only interrupts.
@@ -1840,7 +1843,7 @@ micro_wake_word:
               then:
                 - lambda: |-
                     id(barge_in_wake_word) = wake_word;
-                    id(barge_in_ms) = millis();
+                    id(wake_word_ms) = millis();
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
               condition:
@@ -1883,6 +1886,7 @@ micro_wake_word:
                                       priority: true
                                       sound_file: "wake_word_triggered_sound"
                                   - delay: 300ms
+                            - lambda: id(wake_word_ms) = millis();
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
           # A barge-in on an announcement played outside of a conversation has no voice assistant run
@@ -2031,7 +2035,7 @@ voice_assistant:
         condition:
           # The wake word interrupted this run (barge-in): start the new conversation now that the
           # voice assistant is idle again. Starting it earlier would be ignored. Stale requests are dropped.
-          lambda: 'return !id(barge_in_wake_word).empty() && (millis() - id(barge_in_ms)) < 10000;'
+          lambda: 'return !id(barge_in_wake_word).empty() && (millis() - id(wake_word_ms)) < 10000;'
         then:
           - script.execute: start_barge_in_conversation
         else:
