@@ -149,6 +149,11 @@ globals:
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
+  # True while the sound before a voice assistant start plays, so it does not arm the stop word
+  - id: voice_assistant_starting
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global variable tracking if the dial was recently touched.
   - id: dial_touched
     type: bool
@@ -363,12 +368,15 @@ binary_sensor:
                                                 - switch.is_off: master_mute_switch
                                                 - not: voice_assistant.is_running
                                             then:
+                                              - lambda: id(voice_assistant_starting) = true;
                                               - script.execute:
                                                   id: play_sound
                                                   priority: true
                                                   sound_file: "center_button_press_sound"
                                               - delay: 300ms
                                               - voice_assistant.start:
+                                              - lambda: id(voice_assistant_starting) = false;
+                                              - script.execute: update_stop_word
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1550,6 +1558,7 @@ script:
                       id: external_media_player
                   - not:
                       voice_assistant.is_running:
+                  - lambda: return !id(voice_assistant_starting);
           then:
             - micro_wake_word.enable_model: stop
           else:
@@ -1811,6 +1820,7 @@ micro_wake_word:
                                 id: external_media_player
                           # Start the voice assistant and play the wake sound, if enabled
                           else:
+                            - lambda: id(voice_assistant_starting) = true;
                             - if:
                                 condition:
                                   lambda: return id(va).is_wake_word_audio_active();
@@ -1830,6 +1840,8 @@ micro_wake_word:
                                   - delay: 300ms
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
+                            - lambda: id(voice_assistant_starting) = false;
+                            - script.execute: update_stop_word
 
 select:
   - platform: template
