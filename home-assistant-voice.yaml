@@ -195,7 +195,6 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: "mdi:microphone-off"
     name: Mute
-    entity_category: config
     lambda: |-
       // Muted either if the hardware mute switch is on or the microphone's software mute switch is enabled
       if (id(hardware_mute_switch).state || id(i2s_mics).get_mute_state()) {
